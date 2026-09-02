@@ -104,10 +104,10 @@ remains fail-closed and requires direct AWS review.
    registry and deploy-control-plane stacks in account `001634075617`, region
    `us-east-1`. The subjects include immutable repository IDs, Environment,
    caller `ref:refs/heads/codex/platform-release-automation`, and privileged
-   reusable-workflow commit `c513bb305baec25e7e70a18c7539af3b99b7bc4f`.
+   reusable-workflow commit `00fb3aef892d84754c8fb8d953171cb46fb05959`.
 3. Execute the reviewed AWS trust migration using the existing administrative
    path. Only then configure the GitHub repository custom subject template as
-   `repository_owner_id,repository_id,context,ref,job_workflow_ref`.
+   `repo,context,ref,job_workflow_ref`.
 4. Immediately run the OIDC probe only and verify the exact STS identity. Stop on
    any mismatch; remove any reviewed temporary compatibility before continuing.
 5. Capture the generated bucket, publisher role ARN and numeric SSM document
@@ -135,9 +135,9 @@ Docker prune, volume deletion, DB drop or Redis flush.
 
 Do not execute these steps as part of repository implementation. They are the later human-gated sequence.
 
-1. Review the branch CI and exact identity chain: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`, audited executable control-plane code `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, and AWS-privileged reusable workflow `c513bb305baec25e7e70a18c7539af3b99b7bc4f`.
+1. Review the branch CI and exact identity chain: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`, audited executable control-plane code `d9080a2068cae049ac1860c27007d09f79241c18`, and AWS-privileged reusable workflow `00fb3aef892d84754c8fb8d953171cb46fb05959`.
 2. Protect branch `codex/platform-release-automation` and GitHub Environment `staging` for only that branch.
-3. Prepare/review the AWS trust change sets for the new subject containing `repository_owner_id,repository_id,context,ref,job_workflow_ref`; keep `EnableS3GatewayEndpoint=false` until real route-table IDs exist.
+3. Prepare/review the AWS trust change sets for the new subject containing `repo,context,ref,job_workflow_ref`; keep `EnableS3GatewayEndpoint=false` until real route-table IDs exist.
 4. Execute the reviewed AWS trust migration through the existing administrative path.
 5. Configure the GitHub custom subject template, immediately run OIDC probe only, verify exact STS identity, and stop on any error. Remove any temporary compatibility.
 6. Verify that registration subjects cannot assume deploy and the probe cannot assume publisher/deploy. No PCA resource is included.
@@ -186,8 +186,8 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   builder and the CE publisher, preventing the repository-wide custom OIDC
   template from encountering a direct job without `job_workflow_ref`.
 - The immutable identity chain is explicit: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`,
-  executable control-plane code `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, and privileged reusable workflow
-  `c513bb305baec25e7e70a18c7539af3b99b7bc4f`. The latter checks out the former by exact SHA and asserts HEAD before
+  executable control-plane code `d9080a2068cae049ac1860c27007d09f79241c18`, and privileged reusable workflow
+  `00fb3aef892d84754c8fb8d953171cb46fb05959`. The latter checks out the former by exact SHA and asserts HEAD before
   credentials. AWS IAM pins the privileged workflow plus exact caller branch ref.
 - Deployment/adoption records use `controlPlaneCommit`; release `sourceCommit`
   and builder `platformCommit` retain their distinct meanings.
@@ -232,3 +232,21 @@ Never recreate all Paid/Cloud services globally. Do not combine Caddy source,
 filesystem paths and CA/leaf rotation unless the old certificate cannot be
 validated. If old trust cannot be preserved, stop and review an explicit
 old+new trust transition before any recreate.
+
+
+### GitHub 2026 immutable OIDC subject and bounded normalization evidence
+
+Trinyx uses the repository-level custom OIDC template
+`repo,context,ref,job_workflow_ref`. The immutable repository segment is
+`repo:TrinyxAI@319253481/Trinyx@1342032975`; owner/repository IDs must not be
+repeated as legacy top-level claim keys. AWS trust must be migrated first, then
+GitHub configured with `{"use_default":false,"include_claim_keys":["repo","context","ref","job_workflow_ref"]}`,
+then the exact-account OIDC probe run immediately.
+
+The read-only legacy normalization command emits a marker-last line protocol,
+never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
+under the SSM `StandardOutputContent` limit. Every report is bound to the
+baseline release and bundle digest, deployment ID, environment config revision
+and computed config digest, audited control-plane commit, Compose version and a
+SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
+returns `compatibility=stop`; no bulk recreation is inferred or authorized.

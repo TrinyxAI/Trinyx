@@ -10,7 +10,7 @@
     },
     "PlatformWorkflowRef": {
       "Type": "String",
-      "Default": "c513bb305baec25e7e70a18c7539af3b99b7bc4f",
+      "Default": "00fb3aef892d84754c8fb8d953171cb46fb05959",
       "AllowedPattern": "^[0-9a-f]{40}$",
       "Description": "Reviewed immutable privileged reusable-workflow commit SHA embedded in GitHub custom OIDC subjects."
     }
@@ -75,7 +75,7 @@
                 "StringEquals": {
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
                   "token.actions.githubusercontent.com:sub": {
-                    "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
+                    "Fn::Sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
                   }
                 }
               }
@@ -126,12 +126,12 @@
     "TrustedGitHubSubject": {
       "Description": "Exact immutable GitHub OIDC subject trusted by the bootstrap role.",
       "Value": {
-        "Fn::Sub": "repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
+        "Fn::Sub": "repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@${PlatformWorkflowRef}"
       }
     },
     "RequiredGitHubOidcSubjectTemplate": {
       "Description": "GitHub repository OIDC subject customization required before live STS: immutable repository IDs, staging Environment, exact caller branch ref and called workflow identity.",
-      "Value": "repository_owner_id,repository_id,context,ref,job_workflow_ref"
+      "Value": "repo,context,ref,job_workflow_ref"
     }
   }
 }

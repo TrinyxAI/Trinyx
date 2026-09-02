@@ -181,9 +181,9 @@ The adoption path never calls Compose `up`, never runs a one-shot, and compensat
 
 Before STS is used, configure the repository OIDC subject template with these ordered claim keys:
 
-`repository_owner_id, repository_id, context, job_workflow_ref`
+`repo, context, ref, job_workflow_ref`
 
-The IaC then trusts only immutable IDs `319253481` / `1342032975`, Environment `staging`, and exact reusable workflow paths at the reviewed `PlatformWorkflowRef`. The bootstrap probe, release registration, baseline adoption and qualification identities are distinct. Changing the workflow ref after merge is a reviewed CloudFormation/GitHub trust migration, never a compatibility wildcard.
+Because this repository was created after GitHub's 2026 immutable-subject rollout, the IaC trusts `repo:TrinyxAI@319253481/Trinyx@1342032975`, Environment `staging`, the exact caller ref, and exact reusable workflow paths at the reviewed `PlatformWorkflowRef`. The bootstrap probe, release registration, baseline adoption and qualification identities are distinct. Changing the workflow ref after merge is a reviewed CloudFormation/GitHub trust migration, never a compatibility wildcard.
 
 ### Pre-merge manual entry point
 
@@ -208,7 +208,7 @@ and incurs no AWS managed-CA monthly fee.
 
 - **SECURITY_CRITICAL — privileged code identity:** the reusable workflow YAML and
   its executable checkout are now separate immutable identities. AWS-privileged
-  workflows at `c513bb305baec25e7e70a18c7539af3b99b7bc4f` checkout `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, assert `git rev-parse HEAD` before
+  workflows at `00fb3aef892d84754c8fb8d953171cb46fb05959` checkout `d9080a2068cae049ac1860c27007d09f79241c18`, assert `git rev-parse HEAD` before
   credentials, and write that code SHA as `controlPlaneCommit`. IAM also requires
   the exact caller branch ref. A mutable caller checkout cannot supply privileged
   Python.
@@ -230,7 +230,7 @@ and incurs no AWS managed-CA monthly fee.
 
 - **RELIABILITY_CRITICAL — canonical OIDC template:** all three CloudFormation
   outputs now require exactly
-  `repository_owner_id,repository_id,context,ref,job_workflow_ref`; static and
+  `repo,context,ref,job_workflow_ref`; static and
   fixture policies reject any drift.
 - **DEFENSE_IN_DEPTH — exact STS account:** the bootstrap probe accepts only IAM
   account `001634075617`, verifies the returned `Account`, and matches the
@@ -243,3 +243,21 @@ and incurs no AWS managed-CA monthly fee.
 - **OPERATIONAL STOP:** normalization output is CI-implemented only. No container
   recreation, TLS transition, baseline adoption, AWS change set or staging plan
   has been live validated.
+
+
+### GitHub 2026 immutable OIDC subject and bounded normalization evidence
+
+Trinyx uses the repository-level custom OIDC template
+`repo,context,ref,job_workflow_ref`. The immutable repository segment is
+`repo:TrinyxAI@319253481/Trinyx@1342032975`; owner/repository IDs must not be
+repeated as legacy top-level claim keys. AWS trust must be migrated first, then
+GitHub configured with `{"use_default":false,"include_claim_keys":["repo","context","ref","job_workflow_ref"]}`,
+then the exact-account OIDC probe run immediately.
+
+The read-only legacy normalization command emits a marker-last line protocol,
+never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
+under the SSM `StandardOutputContent` limit. Every report is bound to the
+baseline release and bundle digest, deployment ID, environment config revision
+and computed config digest, audited control-plane commit, Compose version and a
+SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
+returns `compatibility=stop`; no bulk recreation is inferred or authorized.

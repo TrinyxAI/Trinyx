@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
 PINNED_CONTROL_PLANE_CODE_COMMIT = "d9080a2068cae049ac1860c27007d09f79241c18"
-PINNED_PRIVILEGED_WORKFLOW_COMMIT = "c513bb305baec25e7e70a18c7539af3b99b7bc4f"
+PINNED_PRIVILEGED_WORKFLOW_COMMIT = "00fb3aef892d84754c8fb8d953171cb46fb05959"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",
@@ -178,11 +178,19 @@ def check_iac() -> None:
             and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
             f"{name} OIDC workflow identity is not immutable",
         )
-    canonical_subject_template = "repository_owner_id,repository_id,context,ref,job_workflow_ref"
+    canonical_subject_template = "repo,context,ref,job_workflow_ref"
+    immutable_repo_subject = "repo:TrinyxAI@319253481/Trinyx@1342032975"
     for name, template in (("bootstrap", bootstrap), ("registry", registry)):
         require(
             template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"] == canonical_subject_template,
             f"{name} OIDC subject-template output drift",
+        )
+        encoded_template = json.dumps(template, sort_keys=True)
+        require(
+            immutable_repo_subject in encoded_template
+            and "repository_owner_id:" not in encoded_template
+            and "repository_id:" not in encoded_template,
+            f"{name} does not use the post-2026 immutable GitHub repo subject",
         )
     encoded = json.dumps(registry, sort_keys=True)
     for value in ("BucketOwnerEnforced", "PublicAccessBlockConfiguration", "VersioningConfiguration",
@@ -193,8 +201,7 @@ def check_iac() -> None:
     require("s3:if-none-match" in encoded, "S3 immutability is not server-enforced")
     require("RouteTableIds is required" in encoded and "Fn::Split" in encoded,
             "gateway endpoint route tables are not fail-closed")
-    require("job_workflow_ref" in encoded and "repository_owner_id:319253481" in encoded
-            and "repository_id:1342032975" in encoded
+    require("job_workflow_ref" in encoded and "repo:TrinyxAI@319253481/Trinyx@1342032975" in encoded
             and "ref:refs/heads/codex/platform-release-automation" in encoded,
             "publisher OIDC principal lacks immutable workflow and caller-ref identity")
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
@@ -203,6 +210,12 @@ def check_iac() -> None:
         "deploy OIDC subject-template output drift",
     )
     encoded = json.dumps(deploy, sort_keys=True)
+    require(
+        immutable_repo_subject in encoded
+        and "repository_owner_id:" not in encoded
+        and "repository_id:" not in encoded,
+        "deploy does not use the post-2026 immutable GitHub repo subject",
+    )
     workflow_ref = deploy["Parameters"]["PlatformWorkflowRef"]
     require(
         workflow_ref["Default"] == PINNED_PRIVILEGED_WORKFLOW_COMMIT

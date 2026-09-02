@@ -12,11 +12,24 @@ class IacContractTests(unittest.TestCase):
     def load(self, relative: str) -> dict:
         return json.loads((ROOT / relative).read_text(encoding="utf-8"))
 
+    def test_post_2026_immutable_repo_oidc_subject_contract(self) -> None:
+        template = self.load("platform/aws/bootstrap/github-oidc-staging-bootstrap.json")
+        encoded = json.dumps(template["Resources"]["StagingGitHubOidcBootstrapRole"], sort_keys=True)
+        self.assertEqual(
+            "repo,context,ref,job_workflow_ref",
+            template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"],
+        )
+        self.assertIn("repo:TrinyxAI@319253481/Trinyx@1342032975", encoded)
+        self.assertIn("environment:staging", encoded)
+        self.assertIn("ref:refs/heads/codex/platform-release-automation", encoded)
+        self.assertNotIn("repository_owner_id:", encoded)
+        self.assertNotIn("repository_id:", encoded)
+
     def test_registry_security_and_iam_separation(self) -> None:
         template = self.load("platform/aws/staging/release-registry.json")
         bucket = template["Resources"]["ReleaseRegistryBucket"]
         properties = bucket["Properties"]
-        self.assertEqual("c513bb305baec25e7e70a18c7539af3b99b7bc4f", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("00fb3aef892d84754c8fb8d953171cb46fb05959", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         self.assertEqual("Retain", bucket["DeletionPolicy"])
         self.assertEqual("BucketOwnerEnforced", properties["BucketOwnershipControls"]["Rules"][0]["ObjectOwnership"])
@@ -28,11 +41,12 @@ class IacContractTests(unittest.TestCase):
         self.assertNotIn("ssm:SendCommand", publisher)
         self.assertNotIn("kms:Decrypt", publisher)
         self.assertIn("environment:staging", publisher)
-        self.assertIn("repository_owner_id:319253481", publisher)
-        self.assertIn("repository_id:1342032975", publisher)
+        self.assertIn("repo:TrinyxAI@319253481/Trinyx@1342032975", publisher)
+        self.assertNotIn("repository_owner_id:", publisher)
+        self.assertNotIn("repository_id:", publisher)
         self.assertIn("ref:refs/heads/codex/platform-release-automation", publisher)
         self.assertEqual(
-            "repository_owner_id,repository_id,context,ref,job_workflow_ref",
+            "repo,context,ref,job_workflow_ref",
             template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"],
         )
         self.assertIn("staging-release-register-impl.yml", publisher)
@@ -64,10 +78,13 @@ class IacContractTests(unittest.TestCase):
 
     def test_deploy_role_and_fixed_document_boundaries(self) -> None:
         template = self.load("platform/aws/staging/deploy-control-plane.json")
-        self.assertEqual("c513bb305baec25e7e70a18c7539af3b99b7bc4f", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("00fb3aef892d84754c8fb8d953171cb46fb05959", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
         self.assertIn("environment:staging", role)
+        self.assertIn("repo:TrinyxAI@319253481/Trinyx@1342032975", role)
+        self.assertNotIn("repository_owner_id:", role)
+        self.assertNotIn("repository_id:", role)
         self.assertIn("ref:refs/heads/codex/platform-release-automation", role)
         self.assertIn("staging-qualification-impl.yml", role)
         self.assertIn("staging-legacy-adopt-impl.yml", role)
@@ -83,7 +100,7 @@ class IacContractTests(unittest.TestCase):
         self.assertIn("ControlPlaneCommit", parameters)
         self.assertNotIn("PlatformCommit", parameters)
         self.assertEqual(
-            "repository_owner_id,repository_id,context,ref,job_workflow_ref",
+            "repo,context,ref,job_workflow_ref",
             template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"],
         )
         self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))

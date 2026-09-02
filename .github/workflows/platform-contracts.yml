@@ -45,6 +45,8 @@ jobs:
         run: python3 -m unittest discover -s platform/automation/tests -v
       - name: Run reusable repository policy
         run: python3 platform/automation/static_policy.py
+      - name: Test Cloud publisher OIDC boundary
+        run: node --test scripts/validate-cloud-publisher-bootstrap.test.mjs
       - name: Validate JSON IaC and contracts
         run: |
           python3 - <<'PY'

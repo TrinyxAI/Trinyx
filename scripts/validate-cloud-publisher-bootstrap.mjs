@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { validateCloudPublisherOidcBoundary } from './cloud-publisher-oidc-policy.mjs';
 
 const backendPath = '.github/workflows/build-trinyx-backend.yml';
 const cloudPath = '.github/workflows/build-trinyx-cloud-images.yml';
-const backend = fs.readFileSync(backendPath, 'utf8');
-const cloud = fs.readFileSync(cloudPath, 'utf8');
+const backend = fs.readFileSync(backendPath, 'utf8').replace(/\r\n/g, '\n');
+const cloud = fs.readFileSync(cloudPath, 'utf8').replace(/\r\n/g, '\n');
 
 function requireText(source, expected, label) {
   if (!source.includes(expected)) throw new Error('[cloud-bootstrap] missing ' + label);
@@ -45,11 +46,12 @@ requireText(cloud, 'Refusing to move immutable', 'Cloud SHA conflict guard');
 for (const [name, source] of [['backend', backend], ['cloud', cloud]]) {
   requireText(source, 'permissions:\n  contents: read', name + ' global read-only permissions');
   forbid(source, /pull_request_target\s*:/, name + ' pull_request_target');
-  forbid(source, /id-token:\s*write/, name + ' id-token write');
   forbid(source, /aws-actions\//, name + ' AWS action');
   forbid(source, /:\s*latest(?:\s|$)/m, name + ' latest image tag');
   forbid(source, /(?:PAT|GHCR_TOKEN|CUSTOM_GITHUB_TOKEN)/, name + ' custom long-lived token');
 }
+
+validateCloudPublisherOidcBoundary(backend, cloud);
 
 const cloudPullRequestJob = cloud.match(/\n  build-pr:[\s\S]*?\n  publish:/);
 if (!cloudPullRequestJob) throw new Error('[cloud-bootstrap] cannot isolate Cloud PR job');

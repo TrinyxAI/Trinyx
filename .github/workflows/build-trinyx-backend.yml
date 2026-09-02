@@ -147,7 +147,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@578c7610373f96d4cd018253f591750e0cfb8ebf
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
     with:
       role_arn: ${{ inputs.role_arn }}
 
@@ -159,7 +159,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@578c7610373f96d4cd018253f591750e0cfb8ebf
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
     with:
       run_id: ${{ inputs.run_id }}
       artifact_id: ${{ inputs.artifact_id }}
@@ -176,7 +176,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@578c7610373f96d4cd018253f591750e0cfb8ebf
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
     with:
       action: normalization-plan
       baseline_release_id: ${{ inputs.baseline_release_id }}
@@ -192,7 +192,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@578c7610373f96d4cd018253f591750e0cfb8ebf
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
     with:
       action: adopt
       baseline_release_id: ${{ inputs.baseline_release_id }}
@@ -210,7 +210,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@578c7610373f96d4cd018253f591750e0cfb8ebf
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@f25b094611c01f45d3876425a86fb6fdd9b00d91
     with:
       baseline_run_id: ${{ inputs.baseline_run_id }}
       baseline_artifact_id: ${{ inputs.baseline_artifact_id }}

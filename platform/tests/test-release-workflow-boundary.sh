@@ -83,7 +83,7 @@ assert 'arn:aws:sts::001634075617:assumed-role/' in probe
 assert 'ssm_orchestrator.py normalize-plan' in adopt
 assert 'LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS' in adopt
 assert '--signer-digest "$SIGNER_DIGEST"' in register
-assert '--signer-digest "$signer_digest"' in qualify
+assert '--signer-digest "$SIGNER_DIGEST"' in qualify
 for frozen in (
     '33485509832','9791964215','755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152',
     'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47','rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4',

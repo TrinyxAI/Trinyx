@@ -171,6 +171,25 @@ def check_iac() -> None:
         (ROOT / "platform/aws/bootstrap/github-oidc-staging-bootstrap.json").read_text(encoding="utf-8")
     )
     registry = json.loads((ROOT / "platform/aws/staging/release-registry.json").read_text(encoding="utf-8"))
+    s3_bucket_count = 0
+    for template_path in sorted((ROOT / "platform/aws").rglob("*.json")):
+        template = json.loads(template_path.read_text(encoding="utf-8"))
+        for logical_id, resource in template.get("Resources", {}).items():
+            if resource.get("Type") != "AWS::S3::Bucket":
+                continue
+            s3_bucket_count += 1
+            properties = resource.get("Properties", {})
+            identity = f"{template_path.relative_to(ROOT).as_posix()}:{logical_id}"
+            require(
+                "BucketOwnershipControls" not in properties,
+                f"unsupported CloudFormation S3 property BucketOwnershipControls:{identity}",
+            )
+            require(
+                properties.get("OwnershipControls", {}).get("Rules", [{}])[0].get("ObjectOwnership")
+                == "BucketOwnerEnforced",
+                f"S3 Object Ownership is not BucketOwnerEnforced:{identity}",
+            )
+    require(s3_bucket_count >= 2, "expected staging S3 bucket contracts are missing")
     for name, template in (("bootstrap", bootstrap), ("registry", registry)):
         workflow_ref = template["Parameters"]["PlatformWorkflowRef"]
         require(

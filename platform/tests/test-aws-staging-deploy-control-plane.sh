@@ -8,7 +8,7 @@ DISPATCHER="$ROOT/platform/host/common/staging-deploy.sh"
 python3 - "$TEMPLATE" <<'PY'
 import json,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
-assert doc['Parameters']['PlatformWorkflowRef']['Default']=='c513bb305baec25e7e70a18c7539af3b99b7bc4f'
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='00fb3aef892d84754c8fb8d953171cb46fb05959'
 assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 resource=doc['Resources']['StagingDeployDocument']
 properties=resource['Properties']
@@ -20,7 +20,7 @@ assert parameters['Mode']['allowedValues']==['install','normalize-plan','plan','
 assert parameters['Role']['allowedValues']==['cloud','paid']
 assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
 assert 'ControlPlaneCommit' in parameters and 'PlatformCommit' not in parameters
-assert doc['Outputs']['RequiredGitHubOidcSubjectTemplate']['Value']=='repository_owner_id,repository_id,context,ref,job_workflow_ref'
+assert doc['Outputs']['RequiredGitHubOidcSubjectTemplate']['Value']=='repo,context,ref,job_workflow_ref'
 steps=properties['Content']['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
 assert steps[0]['inputs']['timeoutSeconds']=='900'
@@ -31,7 +31,7 @@ role=doc['Resources']['StagingDeployRole']['Properties']
 trust=role['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEquals']
 subjects=trust['token.actions.githubusercontent.com:sub']
 assert len(subjects)==2
-assert all('repository_owner_id:319253481:repository_id:1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:' in json.dumps(item) for item in subjects)
+assert all('repo:TrinyxAI@319253481/Trinyx@1342032975:environment:staging:ref:refs/heads/codex/platform-release-automation:job_workflow_ref:' in json.dumps(item) for item in subjects)
 assert 'staging-qualification-impl.yml' in json.dumps(subjects)
 assert 'staging-legacy-adopt-impl.yml' in json.dumps(subjects)
 assert 'staging-release-register-impl.yml' not in json.dumps(subjects)

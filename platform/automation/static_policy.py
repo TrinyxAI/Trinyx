@@ -241,6 +241,12 @@ def check_iac() -> None:
     require("range(90)" not in orchestrator, "orchestrator restored magic 180-second polling loop")
     require("STALE_LOCK_LOOKBACK = dt.timedelta(minutes=5)" in orchestrator,
             "stale-lock AWS clock-skew margin missing")
+    require(
+        "validate_normalization_protocol" in orchestrator
+        and "normalization report SHA-256 mismatch" in orchestrator
+        and "normalization service inventory is incomplete" in orchestrator,
+        "normalization receiver does not authenticate report SHA/cardinality",
+    )
     dispatcher = (ROOT / "platform/host/common/staging-deploy.sh").read_text(encoding="utf-8")
     require("--expected-bundle-digest" in dispatcher, "SSM bundle digest is not checked after install")
     require("normalize-plan" in dispatcher and "legacy-normalization-plan" in dispatcher,
@@ -267,6 +273,12 @@ def check_iac() -> None:
             and "render_ssm_protocol" in normalizer
             and "UNQUALIFIED_EXCESSIVE_DRIFT" in normalizer,
             "legacy normalization report is not bounded/fail-closed")
+    require(
+        "docker\", \"image\", \"inspect" in normalizer
+        and "RepoDigests" in normalizer
+        and "IMAGE_OBJECT_DIGEST_MISMATCH" in normalizer,
+        "legacy normalization image proof is not bound to the running image object",
+    )
     for binding in ("--expected-bundle-digest", "--deployment-id",
                     "--environment-config-revision", "--control-plane-commit"):
         require(binding in normalizer and binding in dispatcher,

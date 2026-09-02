@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import make_release
 from invariants import InvariantError
+from legacy_runtime import SERVICES
 from ssm_orchestrator import (
     STALE_LOCK_CONFIRMATION,
     AwsCliSsmTransport,
@@ -21,7 +24,51 @@ from ssm_orchestrator import (
     Request,
     StagingSaga,
     meaningful_runtime_difference,
+    validate_normalization_protocol,
 )
+
+
+def normalization_protocol(request: Request, hash_mismatches: int = 0) -> str:
+    services = sorted(SERVICES[request.role])
+    lines = [
+        (
+            f"LEGACY_NORMALIZATION_REPORT_V1 role={request.role} "
+            f"release_id={request.release_id} bundle_digest={request.bundle_digest} "
+            f"deployment_id={request.deployment_id} config_revision={request.config_revision} "
+            f"config_digest=sha256:{'7' * 64} "
+            f"control_plane_commit={request.control_plane_commit} "
+            "observed_at=2026-09-02T00:00:00Z compose_version=v2.40.3 "
+            f"service_count={len(services)} hash_matches={len(services) - hash_mismatches} "
+            f"hash_mismatches={hash_mismatches} hash_limit=3"
+        )
+    ]
+    for index, service in enumerate(services, start=1):
+        mismatch = index <= hash_mismatches
+        current_hash = "f" * 64 if mismatch else f"{index:064x}"
+        expected_hash = f"{index:064x}"
+        reasons = "COMPOSE_CONFIG_HASH_MISMATCH" if mismatch else "none"
+        lines.append(
+            f"NORMALIZATION role={request.role} service={service} "
+            f"recreate={'yes' if mismatch else 'no'} reasons={reasons} image_match=yes "
+            f"container_id={index + 1000:064x} image_object=sha256:{index + 2000:064x} "
+            f"configured_image_digest=sha256:{index:064x} "
+            f"expected_image_digest=sha256:{index:064x} "
+            f"repo_digests_sha256=sha256:{index + 3000:064x} "
+            f"current_config_hash={current_hash} expected_config_hash={expected_hash} "
+            f"current_bind_mounts_sha256=sha256:{index + 4000:064x} "
+            f"expected_bind_mounts_sha256=sha256:{index + 4000:064x} "
+            "mutable_checkout=no"
+        )
+    payload = "\n".join(lines) + "\n"
+    report_sha = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    compatibility = "review" if hash_mismatches <= 3 else "stop"
+    lines.append(
+        f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} "
+        f"release_id={request.release_id} services={len(services)} "
+        f"recreate_count={hash_mismatches} compose_version=v2.40.3 "
+        f"compatibility={compatibility} images=matched report_sha256={report_sha}"
+    )
+    return "\n".join(lines) + "\n"
 
 
 class FakeTransport:
@@ -38,14 +85,7 @@ class FakeTransport:
             raise InvariantError("injected transport failure")
         marker = {
             "plan": f"STAGING_DEPLOY_PLAN_OK role={request.role} release_id={request.release_id}",
-            "normalize-plan": (
-                f"LEGACY_NORMALIZATION_REPORT_V1 role={request.role} release_id={request.release_id} "
-                f"bundle_digest={request.bundle_digest} deployment_id={request.deployment_id} "
-                f"config_revision={request.config_revision} config_digest=sha256:{'7' * 64} "
-                f"control_plane_commit={request.control_plane_commit}\n"
-                f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} release_id={request.release_id} "
-                f"compatibility=review images=matched report_sha256=sha256:{'8' * 64}"
-            ),
+            "normalize-plan": normalization_protocol(request).rstrip("\n"),
             "apply": f"STAGING_DEPLOY_APPLY_OK role={request.role} release_id={request.release_id}",
             "rollback": f"STAGING_DEPLOY_ROLLBACK_OK role={request.role} release_id={request.release_id}",
             "health": f"STAGING_DEPLOY_HEALTH_OK role={request.role} release_id={request.release_id}",
@@ -131,6 +171,88 @@ class OrchestratorTests(unittest.TestCase):
     def saga(self, transport: FakeTransport) -> StagingSaga:
         return StagingSaga(transport, "config-1", "1" * 40, NoopSagaLock())
 
+    def normalization_request(self, role: str = "paid") -> Request:
+        return Request(
+            "normalize-plan",
+            role,
+            "rel-v1-" + "2" * 32,
+            "sha256:" + "3" * 64,
+            "dep-" + "4" * 32,
+            "config-1",
+            "5" * 40,
+            None,
+            None,
+        )
+
+    def validate_protocol(self, output: str, request: Request) -> dict[str, object]:
+        return validate_normalization_protocol(
+            output,
+            request.role,
+            request.release_id,
+            request.bundle_digest,
+            request.deployment_id,
+            request.config_revision,
+            request.control_plane_commit,
+        )
+
+    def test_normalization_receiver_accepts_exact_paid_and_cloud_inventories(self) -> None:
+        for role, count in (("paid", 8), ("cloud", 20)):
+            with self.subTest(role=role):
+                request = self.normalization_request(role)
+                report = self.validate_protocol(normalization_protocol(request), request)
+                self.assertEqual(count, report["serviceCount"])
+                self.assertEqual(0, report["recreateCount"])
+                self.assertRegex(str(report["reportSha256"]), r"^sha256:[0-9a-f]{64}$")
+
+    def test_normalization_receiver_rejects_missing_service(self) -> None:
+        request = self.normalization_request()
+        lines = normalization_protocol(request).splitlines()
+        del lines[1]
+        with self.assertRaises(InvariantError):
+            self.validate_protocol("\n".join(lines) + "\n", request)
+
+    def test_normalization_receiver_rejects_duplicate_service(self) -> None:
+        request = self.normalization_request()
+        lines = normalization_protocol(request).splitlines()
+        lines[2] = lines[1]
+        with self.assertRaises(InvariantError):
+            self.validate_protocol("\n".join(lines) + "\n", request)
+
+    def test_normalization_receiver_rejects_unknown_service(self) -> None:
+        request = self.normalization_request()
+        lines = normalization_protocol(request).splitlines()
+        service = sorted(SERVICES["paid"])[0]
+        lines[1] = lines[1].replace(f"service={service}", "service=unknown-service")
+        with self.assertRaises(InvariantError):
+            self.validate_protocol("\n".join(lines) + "\n", request)
+
+    def test_normalization_receiver_rejects_wrong_report_sha(self) -> None:
+        request = self.normalization_request()
+        output = normalization_protocol(request)
+        output = re.sub(
+            r"report_sha256=sha256:[0-9a-f]{64}\n$",
+            "report_sha256=sha256:" + "f" * 64 + "\n",
+            output,
+        )
+        with self.assertRaisesRegex(InvariantError, "SHA-256 mismatch"):
+            self.validate_protocol(output, request)
+
+    def test_normalization_receiver_rejects_wrong_recreate_count(self) -> None:
+        request = self.normalization_request()
+        output = normalization_protocol(request).replace("recreate_count=0", "recreate_count=1")
+        with self.assertRaises(InvariantError):
+            self.validate_protocol(output, request)
+
+    def test_normalization_receiver_rejects_marker_not_last(self) -> None:
+        request = self.normalization_request()
+        with self.assertRaises(InvariantError):
+            self.validate_protocol(normalization_protocol(request) + "EXTRA=1\n", request)
+
+    def test_normalization_receiver_rejects_truncated_output(self) -> None:
+        request = self.normalization_request()
+        with self.assertRaisesRegex(InvariantError, "truncated"):
+            self.validate_protocol(normalization_protocol(request)[:-1], request)
+
     def test_legacy_normalization_plan_is_paid_then_cloud_and_read_only(self) -> None:
         transport = FakeTransport()
         release = "rel-v1-" + "2" * 32
@@ -145,8 +267,9 @@ class OrchestratorTests(unittest.TestCase):
     def test_legacy_normalization_plan_fails_closed_on_unqualified_hash_semantics(self) -> None:
         class UnqualifiedTransport(FakeTransport):
             def execute(self, request: Request) -> str:
-                value = super().execute(request)
-                return value.replace("compatibility=review", "compatibility=stop")
+                if request.mode == "normalize-plan":
+                    return normalization_protocol(request, hash_mismatches=4)
+                return super().execute(request)
         with self.assertRaisesRegex(InvariantError, "exceeds the review threshold"):
             self.saga(UnqualifiedTransport()).legacy_normalization_plan(
                 "rel-v1-" + "2" * 32, "sha256:" + "3" * 64

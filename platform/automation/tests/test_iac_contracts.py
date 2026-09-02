@@ -153,6 +153,19 @@ class IacContractTests(unittest.TestCase):
         self.assertNotIn("TrinyxProduction", encoded)
         self.assertNotIn("/trinyx/production", encoded)
 
+    def test_normalization_schema_binds_running_image_object_repo_digests(self) -> None:
+        schema = self.load("platform/contracts/legacy-normalization-plan.schema.json")
+        service = schema["properties"]["services"]["additionalProperties"]
+        self.assertFalse(service["additionalProperties"])
+        self.assertTrue(
+            {"currentImageObjectId", "currentRepoDigests", "imageObjectVerified"}
+            .issubset(set(service["required"]))
+        )
+        self.assertIn(
+            "IMAGE_OBJECT_DIGEST_MISMATCH",
+            service["properties"]["reasons"]["items"]["enum"],
+        )
+
     def test_o6_o12_contract_schemas_are_committed_and_closed(self) -> None:
         expected = {
             "platform/contracts/deployment-record.schema.json": {

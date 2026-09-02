@@ -106,6 +106,7 @@ def build_normalization_plan(
     role: str,
     baseline_release_id: str,
     containers: list[dict[str, Any]],
+    image_inspections: list[dict[str, Any]],
     rendered_model: dict[str, Any],
     expected_hashes: dict[str, str],
     version: str,
@@ -138,6 +139,21 @@ def build_normalization_plan(
     containers_by_id = {
         str(item.get("Id", "")): item for item in containers if isinstance(item, dict)
     }
+    repo_digests_by_image: dict[str, list[str]] = {}
+    for image in image_inspections:
+        require(isinstance(image, dict), "invalid Docker image inspection")
+        image_id = str(image.get("Id", ""))
+        repo_digests = image.get("RepoDigests")
+        require(IMAGE_OBJECT_RE.fullmatch(image_id) is not None,
+                "invalid inspected Docker image object ID")
+        require(
+            isinstance(repo_digests, list)
+            and repo_digests
+            and all(isinstance(value, str) and IMAGE_RE.fullmatch(value) for value in repo_digests),
+            "Docker image lacks immutable RepoDigests",
+        )
+        require(image_id not in repo_digests_by_image, "duplicate Docker image inspection")
+        repo_digests_by_image[image_id] = sorted(set(repo_digests))
 
     services: dict[str, dict[str, Any]] = {}
     hash_matches = 0
@@ -156,16 +172,24 @@ def build_normalization_plan(
                 "legacy configured image is not digest-only")
         require(IMAGE_OBJECT_RE.fullmatch(current_image_object_id) is not None,
                 "legacy Docker image object ID is invalid")
+        require(current_image_object_id in repo_digests_by_image,
+                "running Docker image object was not inspected")
         require(IMAGE_RE.fullmatch(expected_image) is not None, "baseline image is not digest-only")
+        current_repo_digests = repo_digests_by_image[current_image_object_id]
         current_mounts = state["mounts"]
         wanted_mounts = expected_mounts(service_model)
         mutable_checkout = any(FORBIDDEN_MUTABLE_CHECKOUT in item["source"] for item in current_mounts)
         current_hash = state["composeConfigHash"]
         expected_hash = expected_hashes[service]
         reasons: list[str] = []
-        if current_configured_image != expected_image:
+        configured_image_matches = current_configured_image == expected_image
+        image_object_matches = expected_image in current_repo_digests
+        if not configured_image_matches:
             reasons.append("IMAGE_DIGEST_MISMATCH")
-        else:
+        if not image_object_matches:
+            reasons.append("IMAGE_OBJECT_DIGEST_MISMATCH")
+        image_verified = configured_image_matches and image_object_matches
+        if image_verified:
             image_matches += 1
         if current_hash != expected_hash:
             reasons.append("COMPOSE_CONFIG_HASH_MISMATCH")
@@ -179,7 +203,9 @@ def build_normalization_plan(
             "currentContainerId": state["containerId"],
             "currentConfiguredImage": current_configured_image,
             "currentImageObjectId": current_image_object_id,
+            "currentRepoDigests": current_repo_digests,
             "expectedImageDigest": expected_image,
+            "imageObjectVerified": image_verified,
             "currentComposeConfigHash": current_hash,
             "expectedComposeConfigHash": expected_hash,
             "currentMounts": current_mounts,
@@ -253,10 +279,11 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
             "NORMALIZATION "
             f"role={role} service={service} "
             f"recreate={'yes' if item['recreateRequired'] else 'no'} reasons={reasons} "
-            f"image_match={'yes' if item['currentConfiguredImage'] == item['expectedImageDigest'] else 'no'} "
+            f"image_match={'yes' if item['imageObjectVerified'] else 'no'} "
             f"container_id={item['currentContainerId']} image_object={item['currentImageObjectId']} "
             f"configured_image_digest={_image_digest(item['currentConfiguredImage'])} "
             f"expected_image_digest={_image_digest(item['expectedImageDigest'])} "
+            f"repo_digests_sha256={sha256_bytes(canonical_json(item['currentRepoDigests']))} "
             f"current_config_hash={item['currentComposeConfigHash']} "
             f"expected_config_hash={item['expectedComposeConfigHash']} "
             f"current_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['currentMounts'])))} "
@@ -301,6 +328,23 @@ def inspect_containers() -> list[dict[str, Any]]:
     return containers
 
 
+def inspect_images(containers: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    image_ids = sorted({
+        str(item.get("Image", ""))
+        for item in containers
+        if isinstance(item, dict)
+        and isinstance(item.get("Config"), dict)
+        and (item["Config"].get("Labels") or {}).get("com.docker.compose.service") in SERVICES[role]
+    })
+    require(
+        image_ids and all(IMAGE_OBJECT_RE.fullmatch(value) for value in image_ids),
+        "invalid Docker image inventory",
+    )
+    images = docker_json(["docker", "image", "inspect", *image_ids])
+    require(isinstance(images, list), "invalid Docker image inspection")
+    return images
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", choices=("cloud", "paid"), required=True)
@@ -327,10 +371,12 @@ def main() -> None:
     # already reconciled/materialized host state.
     rendered_model = adapter.render_model(base, release_dir, plan)
     expected_hashes = adapter.compose_config_hashes(base, release_dir, plan)
+    containers = inspect_containers()
     record = build_normalization_plan(
         args.role,
         args.baseline_release,
-        inspect_containers(),
+        containers,
+        inspect_images(containers, args.role),
         rendered_model,
         expected_hashes,
         compose_version(),

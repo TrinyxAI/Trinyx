@@ -60,11 +60,23 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             }
         return containers, {"services": models}, hashes
 
-    def build(self, containers: list[dict], model: dict, hashes: dict[str, str], role: str = "paid") -> dict:
+    def build(
+        self,
+        containers: list[dict],
+        model: dict,
+        hashes: dict[str, str],
+        role: str = "paid",
+        image_inspections: list[dict] | None = None,
+    ) -> dict:
+        inspected = image_inspections or [
+            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
+            for container in containers
+        ]
         return build_normalization_plan(
             role,
             "rel-v1-" + "a" * 32,
             containers,
+            inspected,
             model,
             hashes,
             "v2.40.3",
@@ -126,6 +138,22 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         self.assertIn("IMAGE_DIGEST_MISMATCH", result["services"][service]["reasons"])
         self.assertIn("currentConfiguredImage", result["services"][service])
         self.assertRegex(result["services"][service]["currentImageObjectId"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_running_image_object_must_expose_expected_repo_digest(self) -> None:
+        containers, model, hashes = self.fixture()
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
+            for container in containers
+        ]
+        service = sorted(SERVICES["paid"])[0]
+        inspected[0]["RepoDigests"] = [
+            f"ghcr.io/trinyxai/{service}@sha256:" + "f" * 64
+        ]
+        result = self.build(containers, model, hashes, image_inspections=inspected)
+        item = result["services"][service]
+        self.assertFalse(item["imageObjectVerified"])
+        self.assertIn("IMAGE_OBJECT_DIGEST_MISMATCH", item["reasons"])
+        self.assertEqual("MISMATCH", result["imageCompatibility"])
 
     def test_report_is_bound_and_bounded_with_marker_last(self) -> None:
         containers, model, hashes = self.fixture()

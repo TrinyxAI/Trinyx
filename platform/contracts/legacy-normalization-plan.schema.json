@@ -137,6 +137,8 @@
           "currentContainerId",
           "currentConfiguredImage",
           "currentImageObjectId",
+          "currentRepoDigests",
+          "imageObjectVerified",
           "expectedImageDigest",
           "currentComposeConfigHash",
           "expectedComposeConfigHash",
@@ -195,11 +197,24 @@
             "items": {
               "enum": [
                 "IMAGE_DIGEST_MISMATCH",
+                "IMAGE_OBJECT_DIGEST_MISMATCH",
                 "COMPOSE_CONFIG_HASH_MISMATCH",
                 "BIND_MOUNT_MISMATCH",
                 "MUTABLE_CHECKOUT_MOUNT"
               ]
             }
+          },
+          "currentRepoDigests": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+            }
+          },
+          "imageObjectVerified": {
+            "type": "boolean"
           }
         }
       }

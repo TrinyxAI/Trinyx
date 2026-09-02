@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -18,10 +19,12 @@ from pathlib import Path
 from typing import Callable, Iterator, Protocol
 
 if __package__:
-    from .invariants import InvariantError, RELEASE_RE, require, validate_release_manifest
+    from .invariants import DIGEST_RE, SHA_RE, InvariantError, RELEASE_RE, require, validate_release_manifest
+    from .legacy_runtime import SERVICES
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from invariants import InvariantError, RELEASE_RE, require, validate_release_manifest  # type: ignore
+    from invariants import DIGEST_RE, SHA_RE, InvariantError, RELEASE_RE, require, validate_release_manifest  # type: ignore
+    from legacy_runtime import SERVICES  # type: ignore
 
 INSTANCES = {"cloud": "i-06f414cdb30078a9d", "paid": "i-0b8fd709ff82f6dd2"}
 SSM_EXECUTION_TIMEOUT_SECONDS = 900
@@ -279,6 +282,179 @@ def new_deployment_id() -> str:
     return "dep-" + uuid.uuid4().hex
 
 
+def _normalization_fields(line: str, prefix: str, expected: set[str]) -> dict[str, str]:
+    parts = line.split(" ")
+    require(parts and parts[0] == prefix and all(parts), f"invalid {prefix} protocol line")
+    fields: dict[str, str] = {}
+    for token in parts[1:]:
+        require(token.count("=") == 1, f"invalid {prefix} protocol token")
+        key, value = token.split("=", 1)
+        require(key in expected and key not in fields and value, f"invalid/duplicate {prefix} field")
+        fields[key] = value
+    require(set(fields) == expected, f"incomplete {prefix} protocol fields")
+    return fields
+
+
+def _normalization_int(value: str, label: str) -> int:
+    require(re.fullmatch(r"[0-9]{1,3}", value) is not None, f"invalid {label}")
+    return int(value)
+
+
+def validate_normalization_protocol(
+    output: str,
+    role: str,
+    release_id: str,
+    bundle_digest: str,
+    deployment_id: str,
+    config_revision: str,
+    control_plane_commit: str,
+) -> dict[str, object]:
+    """Authenticate the complete marker-last normalization protocol received from SSM."""
+    require(role in SERVICES, "invalid normalization protocol role")
+    require(RELEASE_RE.fullmatch(release_id) is not None, "invalid normalization release")
+    require(DIGEST_RE.fullmatch(bundle_digest) is not None, "invalid normalization bundle digest")
+    require(re.fullmatch(r"dep-[0-9a-f]{32}", deployment_id) is not None,
+            "invalid normalization deployment ID")
+    require(re.fullmatch(r"[A-Za-z0-9._-]{1,128}", config_revision) is not None,
+            "invalid normalization config revision")
+    require(SHA_RE.fullmatch(control_plane_commit) is not None,
+            "invalid normalization control-plane commit")
+    require(0 < len(output.encode("utf-8")) < NORMALIZATION_PROTOCOL_MAX_BYTES,
+            "legacy normalization protocol exceeds the SSM-safe budget")
+    require("\r" not in output and output.endswith("\n"),
+            "normalization protocol is truncated or has non-canonical newlines")
+    lines = output[:-1].split("\n")
+    expected_services = SERVICES[role]
+    require(len(lines) == len(expected_services) + 2,
+            "normalization protocol service cardinality mismatch")
+    require(all(lines), "normalization protocol contains an empty line")
+
+    header_keys = {
+        "role", "release_id", "bundle_digest", "deployment_id", "config_revision",
+        "config_digest", "control_plane_commit", "observed_at", "compose_version",
+        "service_count", "hash_matches", "hash_mismatches", "hash_limit",
+    }
+    header = _normalization_fields(lines[0], "LEGACY_NORMALIZATION_REPORT_V1", header_keys)
+    require(
+        header["role"] == role
+        and header["release_id"] == release_id
+        and header["bundle_digest"] == bundle_digest
+        and header["deployment_id"] == deployment_id
+        and header["config_revision"] == config_revision
+        and header["control_plane_commit"] == control_plane_commit,
+        "normalization header context binding mismatch",
+    )
+    require(DIGEST_RE.fullmatch(header["config_digest"]) is not None,
+            "invalid normalization config digest")
+    require(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", header["observed_at"]) is not None,
+            "invalid normalization observation timestamp")
+    require(re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?",
+                         header["compose_version"]) is not None,
+            "invalid normalization Compose version")
+    service_count = _normalization_int(header["service_count"], "normalization service count")
+    hash_matches = _normalization_int(header["hash_matches"], "normalization hash match count")
+    hash_mismatches = _normalization_int(header["hash_mismatches"], "normalization hash mismatch count")
+    hash_limit = _normalization_int(header["hash_limit"], "normalization hash limit")
+    require(
+        service_count == len(expected_services)
+        and hash_matches + hash_mismatches == service_count
+        and hash_limit == 3,
+        "normalization header count invariant failed",
+    )
+
+    service_keys = {
+        "role", "service", "recreate", "reasons", "image_match", "container_id",
+        "image_object", "configured_image_digest", "expected_image_digest",
+        "repo_digests_sha256", "current_config_hash", "expected_config_hash",
+        "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
+        "mutable_checkout",
+    }
+    allowed_reasons = {
+        "IMAGE_DIGEST_MISMATCH", "IMAGE_OBJECT_DIGEST_MISMATCH",
+        "COMPOSE_CONFIG_HASH_MISMATCH", "BIND_MOUNT_MISMATCH",
+        "MUTABLE_CHECKOUT_MOUNT",
+    }
+    seen: set[str] = set()
+    recreate_count = 0
+    calculated_hash_mismatches = 0
+    all_images_match = True
+    for line in lines[1:-1]:
+        fields = _normalization_fields(line, "NORMALIZATION", service_keys)
+        service = fields["service"]
+        require(fields["role"] == role and service in expected_services and service not in seen,
+                "normalization service is unknown, duplicated or role-mismatched")
+        seen.add(service)
+        require(fields["recreate"] in {"yes", "no"}
+                and fields["image_match"] in {"yes", "no"}
+                and fields["mutable_checkout"] in {"yes", "no"},
+                "invalid normalization boolean field")
+        reasons = [] if fields["reasons"] == "none" else fields["reasons"].split(",")
+        require(
+            len(reasons) == len(set(reasons))
+            and all(reason in allowed_reasons for reason in reasons)
+            and (fields["recreate"] == "yes") == bool(reasons)
+            and (fields["mutable_checkout"] == "yes") == ("MUTABLE_CHECKOUT_MOUNT" in reasons),
+            "normalization reasons/recreate invariant failed",
+        )
+        for key in ("container_id", "current_config_hash", "expected_config_hash"):
+            require(re.fullmatch(r"[0-9a-f]{64}", fields[key]) is not None,
+                    f"invalid normalization {key}")
+        require(re.fullmatch(r"sha256:[0-9a-f]{64}", fields["image_object"]) is not None,
+                "invalid normalization image object ID")
+        for key in (
+            "configured_image_digest", "expected_image_digest", "repo_digests_sha256",
+            "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
+        ):
+            require(DIGEST_RE.fullmatch(fields[key]) is not None,
+                    f"invalid normalization {key}")
+        if fields["image_match"] == "yes":
+            require(fields["configured_image_digest"] == fields["expected_image_digest"],
+                    "normalization image match contradicts configured digest")
+        else:
+            all_images_match = False
+        if fields["current_config_hash"] != fields["expected_config_hash"]:
+            calculated_hash_mismatches += 1
+        if fields["recreate"] == "yes":
+            recreate_count += 1
+    require(seen == expected_services, "normalization service inventory is incomplete")
+    require(
+        calculated_hash_mismatches == hash_mismatches
+        and service_count - calculated_hash_mismatches == hash_matches,
+        "normalization hash summary differs from service lines",
+    )
+
+    marker_keys = {
+        "role", "release_id", "services", "recreate_count", "compose_version",
+        "compatibility", "images", "report_sha256",
+    }
+    marker = _normalization_fields(
+        lines[-1], "LEGACY_NORMALIZATION_PLAN_COMPLETE", marker_keys
+    )
+    compatibility = "review" if hash_mismatches <= hash_limit else "stop"
+    images = "matched" if all_images_match else "mismatch"
+    require(
+        marker["role"] == role
+        and marker["release_id"] == release_id
+        and _normalization_int(marker["services"], "marker service count") == service_count
+        and _normalization_int(marker["recreate_count"], "marker recreate count") == recreate_count
+        and marker["compose_version"] == header["compose_version"]
+        and marker["compatibility"] == compatibility
+        and marker["images"] == images,
+        "normalization final marker summary mismatch",
+    )
+    payload = "\n".join(lines[:-1]) + "\n"
+    expected_report_sha = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    require(marker["report_sha256"] == expected_report_sha,
+            "normalization report SHA-256 mismatch")
+    return {
+        "compatibility": compatibility,
+        "images": images,
+        "serviceCount": service_count,
+        "recreateCount": recreate_count,
+        "reportSha256": expected_report_sha,
+    }
+
+
 class StagingSaga:
     def __init__(self, transport: Transport, config_revision: str, control_plane_commit: str, lock: SagaLock):
         require(re.fullmatch(r"[A-Za-z0-9._-]{1,128}", config_revision) is not None, "bad config revision")
@@ -345,34 +521,26 @@ class StagingSaga:
                 output = self._request(
                     "normalize-plan", role, release_id, bundle_digest, None, None, owner
                 )
-                # The host emits a bounded marker-last protocol: no raw JSON or mount paths.
+                # Strictly authenticate cardinality, service inventory, marker-last
+                # framing and SHA-256 before exposing the report for human review.
+                report = validate_normalization_protocol(
+                    output,
+                    role,
+                    release_id,
+                    bundle_digest,
+                    owner,
+                    self.config_revision,
+                    self.control_plane_commit,
+                )
                 print(output.rstrip())
                 require(
-                    len(output.encode("utf-8")) < NORMALIZATION_PROTOCOL_MAX_BYTES,
-                    f"{role} legacy normalization protocol exceeds the SSM-safe budget",
-                )
-                header = (
-                    f"LEGACY_NORMALIZATION_REPORT_V1 role={role} release_id={release_id} "
-                    f"bundle_digest={bundle_digest} deployment_id={owner} "
-                    f"config_revision={self.config_revision} "
-                )
-                require(header in output, f"{role} legacy normalization audit binding is missing")
-                require(
-                    f"control_plane_commit={self.control_plane_commit}" in output,
-                    f"{role} legacy normalization control-plane identity is missing",
+                    report["compatibility"] == "review",
+                    f"{role} Compose config-hash drift exceeds the review threshold",
                 )
                 require(
-                    re.search(r"report_sha256=sha256:[0-9a-f]{64}\n?$", output) is not None,
-                    f"{role} legacy normalization report digest is missing or marker is not final",
+                    report["images"] == "matched",
+                    f"{role} runtime images differ from the immutable baseline",
                 )
-                require(
-                    f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={role} release_id={release_id}" in output,
-                    f"{role} legacy normalization plan not acknowledged",
-                )
-                require("compatibility=review" in output,
-                        f"{role} Compose config-hash drift exceeds the review threshold")
-                require("images=matched" in output,
-                        f"{role} runtime images differ from the immutable baseline")
 
     def adopt_legacy_baseline(self, release_id: str, bundle_digest: str) -> None:
         owner = new_deployment_id()

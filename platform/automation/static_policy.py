@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
 PINNED_CONTROL_PLANE_CODE_COMMIT = "e160e3e1c12995ad522a936c95061e03c174f8d8"
-PINNED_PRIVILEGED_WORKFLOW_COMMIT = "00fb3aef892d84754c8fb8d953171cb46fb05959"
+PINNED_PRIVILEGED_WORKFLOW_COMMIT = "578c7610373f96d4cd018253f591750e0cfb8ebf"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",
@@ -285,6 +285,20 @@ def check_iac() -> None:
                 f"legacy normalization audit binding missing:{binding}")
     require("adapter.materialize(" not in normalizer,
             "legacy normalization plan must not materialize or mutate host state")
+    runbook = (ROOT / "docs/deployment/o6-o12-staging-automation.md").read_text(encoding="utf-8")
+    require(
+        '"use_immutable_subject":true' in runbook
+        and "/repos/TrinyxAI/Trinyx/actions/oidc/customization/sub" in runbook
+        and "bounded normalization protocol" in runbook
+        and "Review the JSON output" not in runbook,
+        "runbook lacks explicit immutable OIDC GET verification/bounded protocol",
+    )
+    require(
+        runbook.index("Install the canonical baseline on Cloud and Paid")
+        < runbook.index("staging-legacy-normalization-plan")
+        < runbook.index("Only now capture schema-v3 baseline observations"),
+        "runbook does not enforce normalization before baseline observation",
+    )
     registry_client = (ROOT / "platform/automation/release_registry.py").read_text(encoding="utf-8")
     require(
         f'APPROVED_BUILDER_WORKFLOW_COMMIT = "{PINNED_BUILDER_WORKFLOW_COMMIT}"' in registry_client

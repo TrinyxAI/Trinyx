@@ -208,7 +208,7 @@ and incurs no AWS managed-CA monthly fee.
 
 - **SECURITY_CRITICAL — privileged code identity:** the reusable workflow YAML and
   its executable checkout are now separate immutable identities. AWS-privileged
-  workflows at `00fb3aef892d84754c8fb8d953171cb46fb05959` checkout `d9080a2068cae049ac1860c27007d09f79241c18`, assert `git rev-parse HEAD` before
+  workflows at `578c7610373f96d4cd018253f591750e0cfb8ebf` checkout `e160e3e1c12995ad522a936c95061e03c174f8d8`, assert `git rev-parse HEAD` before
   credentials, and write that code SHA as `controlPlaneCommit`. IAM also requires
   the exact caller branch ref. A mutable caller checkout cannot supply privileged
   Python.
@@ -251,8 +251,7 @@ Trinyx uses the repository-level custom OIDC template
 `repo,context,ref,job_workflow_ref`. The immutable repository segment is
 `repo:TrinyxAI@319253481/Trinyx@1342032975`; owner/repository IDs must not be
 repeated as legacy top-level claim keys. AWS trust must be migrated first, then
-GitHub configured with `{"use_default":false,"include_claim_keys":["repo","context","ref","job_workflow_ref"]}`,
-then the exact-account OIDC probe run immediately.
+GitHub configured with `{"use_default":false,"use_immutable_subject":true,"include_claim_keys":["repo","context","ref","job_workflow_ref"]}`, GET-verified, then the exact-account OIDC probe run immediately.
 
 The read-only legacy normalization command emits a marker-last line protocol,
 never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
@@ -261,3 +260,21 @@ baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
 SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
 returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+
+
+### Normalization receiver integrity closure
+
+The host proves both the configured digest and the running Docker image object:
+the expected immutable reference must appear in that object's `RepoDigests`.
+The orchestrator accepts a normalization report only when it contains one exact
+header, exactly 8 unique Paid or 20 unique Cloud service records with the
+canonical names, and one final marker. It recomputes SHA-256 over every
+pre-marker byte and verifies service, image, hash, recreate and compatibility
+summaries. Missing, duplicate, unknown, truncated, reordered-after-marker or
+digest-mismatched output fails before human review or mutation.
+
+The only approved live order is reconcile/materialize → install baseline
+inactive → authenticated Paid/Cloud normalization plan → separately approved
+minimal normalization → zero-recreate normalization proof → schema-v3 baseline
+observation → pointer-only adoption → candidate plan. Observation before
+normalization is intentionally not a valid bootstrap path.

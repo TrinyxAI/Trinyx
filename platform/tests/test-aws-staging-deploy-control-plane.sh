@@ -8,7 +8,7 @@ DISPATCHER="$ROOT/platform/host/common/staging-deploy.sh"
 python3 - "$TEMPLATE" <<'PY'
 import json,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
-assert doc['Parameters']['PlatformWorkflowRef']['Default']=='00fb3aef892d84754c8fb8d953171cb46fb05959'
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='578c7610373f96d4cd018253f591750e0cfb8ebf'
 assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 resource=doc['Resources']['StagingDeployDocument']
 properties=resource['Properties']

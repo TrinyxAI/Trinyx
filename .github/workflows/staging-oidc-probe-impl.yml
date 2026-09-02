@@ -33,7 +33,7 @@ jobs:
           test "$GITHUB_REPOSITORY_ID" = '1342032975'
           test "$GITHUB_REPOSITORY_OWNER_ID" = '319253481'
           test "$GITHUB_REF" = 'refs/heads/codex/platform-release-automation'
-          [[ "$ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/TrinyxStagingGitHubOidcBootstrapRole$ ]]
+          test "$ROLE_ARN" = "arn:aws:iam::001634075617:role/TrinyxStagingGitHubOidcBootstrapRole"
           echo OIDC_PROBE_CONTEXT_GUARD_OK
 
       - name: Exchange GitHub OIDC token for AWS identity
@@ -48,7 +48,10 @@ jobs:
         run: |
           set -euo pipefail
           IDENTITY=$(aws sts get-caller-identity --output json)
+          ACCOUNT=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["Account"])')
           CALLER_ARN=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["Arn"])')
-          [[ "$CALLER_ARN" =~ ^arn:aws:sts::[0-9]{12}:assumed-role/TrinyxStagingGitHubOidcBootstrapRole/trinyx-stg-oidc-[0-9]+$ ]]
+          test "$ACCOUNT" = "001634075617"
+          [[ "$CALLER_ARN" =~ ^arn:aws:sts::001634075617:assumed-role/TrinyxStagingGitHubOidcBootstrapRole/trinyx-stg-oidc-[0-9]+$ ]]
+          echo AWS_ACCOUNT_ID=001634075617
           echo AWS_CALLER_ROLE=TrinyxStagingGitHubOidcBootstrapRole
           echo AWS_GITHUB_OIDC_STS_PROBE_OK

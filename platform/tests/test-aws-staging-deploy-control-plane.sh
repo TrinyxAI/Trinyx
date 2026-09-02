@@ -50,7 +50,7 @@ print('AWS_STAGING_DEPLOY_CONTROL_PLANE_CONTRACT_OK')
 PY
 
 bash -n "$DISPATCHER"
-grep -Fq 'install|plan|adopt|restore-legacy|apply|rollback|health' "$DISPATCHER"
+grep -Fq 'install|normalize-plan|plan|adopt|restore-legacy|apply|rollback|health' "$DISPATCHER"
 grep -Fq -- '--expected-bundle-digest "$BUNDLE_DIGEST"' "$DISPATCHER"
 grep -Fq 'exec /usr/bin/env python3 "$ENGINE"' "$DISPATCHER"
 echo STAGING_DEPLOY_DISPATCHER_FIXED_PROGRAM_OK

@@ -21,7 +21,7 @@ python3 - "$CANDIDATE_WRAPPER" "$CANDIDATE" "$CE_WRAPPER" "$CE" "$PLATFORM" "$RE
 from pathlib import Path
 import re,sys
 BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
-CONTROL_PLANE_CODE="1884e7d6e2621109f0d0595f974552521933e22d"
+CONTROL_PLANE_CODE="d00143d7bbd5619e98f447ce0935fe6ea26ccd37"
 PRIVILEGED_WORKFLOW="e01dc32f89385e85dbb900986348d8a77c9d2255"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(
@@ -77,6 +77,11 @@ for implementation in (register,qualify,adopt):
 for implementation in (qualify,adopt):
     assert '--control-plane-commit "$CONTROL_PLANE_COMMIT"' in implementation
     assert '--control-plane-commit "$GITHUB_SHA"' not in implementation
+assert 'arn:aws:iam::001634075617:role/TrinyxStagingGitHubOidcBootstrapRole' in probe
+assert 'test "$ACCOUNT" = "001634075617"' in probe
+assert 'arn:aws:sts::001634075617:assumed-role/' in probe
+assert 'ssm_orchestrator.py normalize-plan' in adopt
+assert 'LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS' in adopt
 assert '--signer-digest "$SIGNER_DIGEST"' in register
 assert '--signer-digest "$signer_digest"' in qualify
 for frozen in (

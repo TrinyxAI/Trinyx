@@ -3,6 +3,10 @@ name: Adopt Proven Staging Baseline Implementation
 on:
   workflow_call:
     inputs:
+      action:
+        description: 'normalization-plan is read-only; adopt performs the separately approved pointer transition'
+        required: true
+        type: string
       baseline_release_id:
         required: true
         type: string
@@ -37,12 +41,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      CONTROL_PLANE_COMMIT: 1884e7d6e2621109f0d0595f974552521933e22d
+      CONTROL_PLANE_COMMIT: d00143d7bbd5619e98f447ce0935fe6ea26ccd37
     steps:
       - name: Checkout reviewed control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
-          ref: 1884e7d6e2621109f0d0595f974552521933e22d
+          ref: d00143d7bbd5619e98f447ce0935fe6ea26ccd37
           persist-credentials: false
       - name: Verify immutable control-plane checkout
         shell: bash
@@ -52,6 +56,7 @@ jobs:
       - name: Validate immutable identities and inputs
         shell: bash
         env:
+          ACTION: ${{ inputs.action }}
           BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
           BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
           CONFIG_REVISION: ${{ inputs.environment_config_revision }}
@@ -63,6 +68,7 @@ jobs:
           test "$GITHUB_REPOSITORY" = TrinyxAI/Trinyx
           test "$GITHUB_REPOSITORY_ID" = 1342032975
           test "$GITHUB_REPOSITORY_OWNER_ID" = 319253481
+          [[ "$ACTION" =~ ^(normalization-plan|adopt)$ ]]
           [[ "$BASELINE_RELEASE_ID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
           [[ "$BASELINE_BUNDLE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$CONFIG_REVISION" =~ ^[A-Za-z0-9._-]{1,128}$ ]]
@@ -75,9 +81,10 @@ jobs:
           role-to-assume: ${{ inputs.deploy_role_arn }}
           aws-region: us-east-1
           role-session-name: trinyx-staging-adopt-${{ github.run_id }}
-      - name: Install without activation then adopt pointer only
+      - name: Run read-only normalization plan or separately approved adoption
         shell: bash
         env:
+          ACTION: ${{ inputs.action }}
           BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
           BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
           CONFIG_REVISION: ${{ inputs.environment_config_revision }}
@@ -86,6 +93,11 @@ jobs:
         run: |
           set -euo pipefail
           common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --control-plane-commit "$CONTROL_PLANE_COMMIT")
+          if [ "$ACTION" = normalization-plan ]; then
+            python3 platform/automation/ssm_orchestrator.py normalize-plan "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
+            echo LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS
+            exit 0
+          fi
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"
           python3 platform/automation/ssm_orchestrator.py adopt "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
           python3 platform/automation/ssm_orchestrator.py health "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"

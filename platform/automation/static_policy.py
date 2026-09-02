@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
-PINNED_CONTROL_PLANE_CODE_COMMIT = "1884e7d6e2621109f0d0595f974552521933e22d"
+PINNED_CONTROL_PLANE_CODE_COMMIT = "d00143d7bbd5619e98f447ce0935fe6ea26ccd37"
 PINNED_PRIVILEGED_WORKFLOW_COMMIT = "e01dc32f89385e85dbb900986348d8a77c9d2255"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
@@ -99,6 +99,13 @@ def check_workflows() -> None:
             require(not any(x in trigger for x in ("\n  push:", "\n  pull_request:", "\n  schedule:")),
                     f"automatic live implementation trigger:{path.name}")
             require("environment: staging" in text, f"missing staging environment:{path.name}")
+            if path.name == "staging-oidc-probe-impl.yml":
+                require(
+                    "arn:aws:iam::001634075617:role/TrinyxStagingGitHubOidcBootstrapRole" in text
+                    and 'test "$ACCOUNT" = "001634075617"' in text
+                    and "arn:aws:sts::001634075617:assumed-role/" in text,
+                    "OIDC probe does not prove the exact staging AWS account",
+                )
             if path.name != "staging-oidc-probe-impl.yml":
                 require(
                     f"ref: {PINNED_CONTROL_PLANE_CODE_COMMIT}" in text
@@ -112,6 +119,13 @@ def check_workflows() -> None:
                         '--control-plane-commit "$CONTROL_PLANE_COMMIT"' in text
                         and '--control-plane-commit "$GITHUB_SHA"' not in text,
                         f"deployment audit identity comes from caller SHA:{path.name}",
+                    )
+                if path.name == "staging-legacy-adopt-impl.yml":
+                    require(
+                        "LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS" in text
+                        and "ssm_orchestrator.py normalize-plan" in text
+                        and "if [ \"$ACTION\" = normalization-plan ]" in text,
+                        "legacy normalization plan is not a separate read-only workflow action",
                     )
         if path.name == "platform-contracts.yml":
             lower = text.lower()

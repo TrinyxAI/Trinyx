@@ -16,10 +16,11 @@ assert properties['Name']=='Trinyx-Staging-Deploy'
 assert properties['UpdateMethod']=='NewVersion'
 assert properties['VersionName']=={'Ref':'DocumentVersionName'}
 parameters=properties['Content']['parameters']
-assert parameters['Mode']['allowedValues']==['install','plan','adopt','restore-legacy','apply','rollback','health']
+assert parameters['Mode']['allowedValues']==['install','normalize-plan','plan','adopt','restore-legacy','apply','rollback','health']
 assert parameters['Role']['allowedValues']==['cloud','paid']
 assert all(value['interpolationType']=='ENV_VAR' for value in parameters.values())
 assert 'ControlPlaneCommit' in parameters and 'PlatformCommit' not in parameters
+assert doc['Outputs']['RequiredGitHubOidcSubjectTemplate']['Value']=='repository_owner_id,repository_id,context,ref,job_workflow_ref'
 steps=properties['Content']['mainSteps']
 assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
 assert steps[0]['inputs']['timeoutSeconds']=='900'

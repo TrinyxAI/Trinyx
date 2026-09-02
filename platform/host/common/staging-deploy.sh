@@ -13,7 +13,7 @@ PREVIOUS_CLOUD_RELEASE=${9:-}
 PREVIOUS_PAID_RELEASE=${10:-}
 
 case "$MODE" in
-  install|plan|adopt|restore-legacy|apply|rollback|health) ;;
+  install|normalize-plan|plan|adopt|restore-legacy|apply|rollback|health) ;;
   *) echo "ERROR_INVALID_DEPLOY_MODE" >&2; exit 64 ;;
 esac
 
@@ -90,10 +90,16 @@ printf 'STAGING_DEPLOY_ACTIVE_TARGET=%s\n' "$ACTIVE_TARGET"
 
 ENGINE=/usr/local/lib/trinyx/deploy_engine.py
 INVARIANTS=/usr/local/lib/trinyx/invariants.py
+NORMALIZER=/usr/local/lib/trinyx/legacy-normalization-plan
 REGISTRY=/usr/local/lib/trinyx/release_registry.py
 test -x "$ENGINE" || { echo ERROR_DEPLOY_ENGINE_MISSING >&2; exit 66; }
 test -x "$INVARIANTS" || { echo ERROR_INVARIANTS_MISSING >&2; exit 66; }
 test -x "$REGISTRY" || { echo ERROR_RELEASE_REGISTRY_CLIENT_MISSING >&2; exit 66; }
+
+if [ "$MODE" = normalize-plan ]; then
+  test -x "$NORMALIZER" || { echo ERROR_LEGACY_NORMALIZATION_PLANNER_MISSING >&2; exit 66; }
+  exec /usr/bin/env python3 "$NORMALIZER" --role "$ROLE" --baseline-release "$RELEASE_ID" --base "$BASE"
+fi
 
 if [ "$MODE" = install ]; then
   CANDIDATE="/var/lib/trinyx/release-candidates/$RELEASE_ID"

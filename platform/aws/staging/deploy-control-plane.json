@@ -46,6 +46,7 @@
               "type": "String",
               "allowedValues": [
                 "install",
+                "normalize-plan",
                 "plan",
                 "adopt",
                 "restore-legacy",
@@ -263,7 +264,7 @@
       }
     },
     "RequiredGitHubOidcSubjectTemplate": {
-      "Value": "repository_owner_id,repository_id,context,job_workflow_ref"
+      "Value": "repository_owner_id,repository_id,context,ref,job_workflow_ref"
     },
     "StagingDeployOidcSubjects": {
       "Value": {

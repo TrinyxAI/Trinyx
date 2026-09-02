@@ -38,6 +38,7 @@ class FakeTransport:
             raise InvariantError("injected transport failure")
         marker = {
             "plan": f"STAGING_DEPLOY_PLAN_OK role={request.role} release_id={request.release_id}",
+            "normalize-plan": f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} release_id={request.release_id} compatibility=qualified images=matched",
             "apply": f"STAGING_DEPLOY_APPLY_OK role={request.role} release_id={request.release_id}",
             "rollback": f"STAGING_DEPLOY_ROLLBACK_OK role={request.role} release_id={request.release_id}",
             "health": f"STAGING_DEPLOY_HEALTH_OK role={request.role} release_id={request.release_id}",
@@ -122,6 +123,27 @@ class FakeLockTransport:
 class OrchestratorTests(unittest.TestCase):
     def saga(self, transport: FakeTransport) -> StagingSaga:
         return StagingSaga(transport, "config-1", "1" * 40, NoopSagaLock())
+
+    def test_legacy_normalization_plan_is_paid_then_cloud_and_read_only(self) -> None:
+        transport = FakeTransport()
+        release = "rel-v1-" + "2" * 32
+        self.saga(transport).legacy_normalization_plan(release, "sha256:" + "3" * 64)
+        self.assertEqual(
+            [("normalize-plan", "paid", release), ("normalize-plan", "cloud", release)],
+            transport.calls,
+        )
+        self.assertEqual(1, len(set(transport.deployment_ids)))
+        self.assertFalse(any(mode in {"apply", "adopt", "rollback", "install"} for mode, _, _ in transport.calls))
+
+    def test_legacy_normalization_plan_fails_closed_on_unqualified_hash_semantics(self) -> None:
+        class UnqualifiedTransport(FakeTransport):
+            def execute(self, request: Request) -> str:
+                value = super().execute(request)
+                return value.replace("compatibility=qualified", "compatibility=unqualified")
+        with self.assertRaisesRegex(InvariantError, "not qualified"):
+            self.saga(UnqualifiedTransport()).legacy_normalization_plan(
+                "rel-v1-" + "2" * 32, "sha256:" + "3" * 64
+            )
 
     def test_legacy_adoption_is_paid_then_cloud_and_uses_one_lock_owner(self) -> None:
         transport = FakeTransport()

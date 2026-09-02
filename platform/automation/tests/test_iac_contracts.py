@@ -31,6 +31,10 @@ class IacContractTests(unittest.TestCase):
         self.assertIn("repository_owner_id:319253481", publisher)
         self.assertIn("repository_id:1342032975", publisher)
         self.assertIn("ref:refs/heads/codex/platform-release-automation", publisher)
+        self.assertEqual(
+            "repository_owner_id,repository_id,context,ref,job_workflow_ref",
+            template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"],
+        )
         self.assertIn("staging-release-register-impl.yml", publisher)
         self.assertNotIn("staging-oidc-probe-impl.yml", publisher)
         bucket_policy = template["Resources"]["ReleaseRegistryBucketPolicy"]["Properties"]["PolicyDocument"]["Statement"]
@@ -78,9 +82,13 @@ class IacContractTests(unittest.TestCase):
         parameters = document["Content"]["parameters"]
         self.assertIn("ControlPlaneCommit", parameters)
         self.assertNotIn("PlatformCommit", parameters)
+        self.assertEqual(
+            "repository_owner_id,repository_id,context,ref,job_workflow_ref",
+            template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"],
+        )
         self.assertTrue(all(value["interpolationType"] == "ENV_VAR" for value in parameters.values()))
         self.assertEqual(
-            ["install", "plan", "adopt", "restore-legacy", "apply", "rollback", "health"],
+            ["install", "normalize-plan", "plan", "adopt", "restore-legacy", "apply", "rollback", "health"],
             parameters["Mode"]["allowedValues"],
         )
         step = document["Content"]["mainSteps"][0]

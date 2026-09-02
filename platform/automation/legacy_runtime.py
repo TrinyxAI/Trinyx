@@ -26,7 +26,7 @@ MOUNT_TYPE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 FORBIDDEN_MUTABLE_CHECKOUT = "/srv/trinyx/" + "pr25-"
 
 
-def normalize_mounts(container: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize_mounts(container: dict[str, Any], *, reject_mutable_checkout: bool = True) -> list[dict[str, Any]]:
     raw_mounts = container.get("Mounts")
     require(isinstance(raw_mounts, list), "invalid Docker mount inventory")
     normalized: list[dict[str, Any]] = []
@@ -40,7 +40,8 @@ def normalize_mounts(container: dict[str, Any]) -> list[dict[str, Any]]:
         require(len(source) <= 4096 and "\x00" not in source and "\n" not in source, "invalid Docker mount source")
         require(destination.startswith("/") and len(destination) <= 4096, "invalid Docker mount destination")
         require(isinstance(read_write, bool), "invalid Docker mount access mode")
-        require(FORBIDDEN_MUTABLE_CHECKOUT not in source, "mutable checkout is mounted in legacy runtime")
+        if reject_mutable_checkout:
+            require(FORBIDDEN_MUTABLE_CHECKOUT not in source, "mutable checkout is mounted in legacy runtime")
         normalized.append({
             "type": mount_type,
             "source": source,
@@ -51,7 +52,12 @@ def normalize_mounts(container: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
-def compose_runtime_state(role: str, containers: list[dict[str, Any]]) -> tuple[str, dict[str, dict[str, Any]]]:
+def compose_runtime_state(
+    role: str,
+    containers: list[dict[str, Any]],
+    *,
+    reject_mutable_checkout: bool = True,
+) -> tuple[str, dict[str, dict[str, Any]]]:
     require(role in SERVICES, "invalid observation role")
     observed: dict[str, dict[str, Any]] = {}
     projects: set[str] = set()
@@ -79,7 +85,7 @@ def compose_runtime_state(role: str, containers: list[dict[str, Any]]) -> tuple[
             "composeProject": compose_project,
             "composeService": compose_service,
             "composeConfigHash": compose_config_hash,
-            "mounts": normalize_mounts(container),
+            "mounts": normalize_mounts(container, reject_mutable_checkout=reject_mutable_checkout),
         }
     require(set(observed) == SERVICES[role], "runtime inventory mismatch")
     require(len(projects) == 1, "runtime spans multiple Docker Compose projects")

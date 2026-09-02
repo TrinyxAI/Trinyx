@@ -337,6 +337,24 @@ class StagingSaga:
             )
             require(f"STAGING_DEPLOY_HEALTH_OK role={role} release_id={release_id}" in output, f"{role} health failed")
 
+    def legacy_normalization_plan(self, release_id: str, bundle_digest: str) -> None:
+        owner = new_deployment_id()
+        with self.lock.hold(owner):
+            for role in ("paid", "cloud"):
+                output = self._request(
+                    "normalize-plan", role, release_id, bundle_digest, None, None, owner
+                )
+                # Output is limited to IDs, digests, hashes and mount paths.
+                print(output.rstrip())
+                require(
+                    f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={role} release_id={release_id}" in output,
+                    f"{role} legacy normalization plan not acknowledged",
+                )
+                require("compatibility=qualified" in output,
+                        f"{role} Compose config-hash semantics are not qualified")
+                require("images=matched" in output,
+                        f"{role} runtime images differ from the immutable baseline")
+
     def adopt_legacy_baseline(self, release_id: str, bundle_digest: str) -> None:
         owner = new_deployment_id()
         with self.lock.hold(owner):
@@ -439,7 +457,7 @@ def meaningful_runtime_difference(baseline_manifest: Path, candidate_manifest: P
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("install", "adopt", "deploy", "rollback", "health", "diff", "break-lock"))
+    parser.add_argument("command", choices=("install", "normalize-plan", "adopt", "deploy", "rollback", "health", "diff", "break-lock"))
     parser.add_argument("--document", default="Trinyx-Staging-Deploy")
     parser.add_argument("--document-version")
     parser.add_argument("--registry-bucket")
@@ -474,11 +492,14 @@ def main() -> None:
     transport = AwsCliSsmTransport(args.document, args.document_version, args.registry_bucket)
     saga = StagingSaga(transport, args.config_revision, args.control_plane_commit, AwsCliStagingLock(transport))
     require(args.release_id and args.bundle_digest, "release identity inputs required")
-    if args.command != "adopt":
+    if args.command not in ("adopt", "normalize-plan"):
         require(args.previous_cloud and args.previous_paid, "previous release inputs required")
     if args.command == "install":
         saga.install(args.release_id, args.bundle_digest, args.previous_cloud, args.previous_paid)
         print(f"STAGING_SAGA_INSTALL_OK release_id={args.release_id}")
+    elif args.command == "normalize-plan":
+        saga.legacy_normalization_plan(args.release_id, args.bundle_digest)
+        print(f"STAGING_SAGA_LEGACY_NORMALIZATION_PLAN_OK release_id={args.release_id}")
     elif args.command == "adopt":
         saga.adopt_legacy_baseline(args.release_id, args.bundle_digest)
         print(f"STAGING_SAGA_LEGACY_ADOPTION_OK release_id={args.release_id}")

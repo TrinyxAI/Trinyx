@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trinyx.ai/contracts/legacy-normalization-plan.schema.json",
+  "title": "Trinyx Staging Legacy Runtime Normalization Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "environment",
+    "role",
+    "baselineReleaseId",
+    "observedAt",
+    "composeProject",
+    "composeVersion",
+    "composeHashCapability",
+    "composeHashCompatibility",
+    "imageCompatibility",
+    "serviceCount",
+    "recreateServices",
+    "services"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "environment": {
+      "const": "staging"
+    },
+    "role": {
+      "enum": [
+        "cloud",
+        "paid"
+      ]
+    },
+    "baselineReleaseId": {
+      "pattern": "^rel-v1-[0-9a-f]{32}$"
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "composeProject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "composeVersion": {
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
+    },
+    "composeHashCapability": {
+      "const": "SUPPORTED"
+    },
+    "composeHashCompatibility": {
+      "enum": [
+        "QUALIFIED",
+        "UNQUALIFIED_ALL_SERVICES_DIFFER"
+      ]
+    },
+    "imageCompatibility": {
+      "enum": [
+        "MATCHED",
+        "MISMATCH"
+      ]
+    },
+    "serviceCount": {
+      "enum": [
+        8,
+        20
+      ]
+    },
+    "recreateServices": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "services": {
+      "type": "object",
+      "minProperties": 8,
+      "maxProperties": 20,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currentContainerId",
+          "currentImageDigest",
+          "expectedImageDigest",
+          "currentComposeConfigHash",
+          "expectedComposeConfigHash",
+          "currentMounts",
+          "expectedMounts",
+          "mutableCheckoutMounted",
+          "recreateRequired",
+          "reasons"
+        ],
+        "properties": {
+          "currentContainerId": {
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "currentImageDigest": {
+            "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+          },
+          "expectedImageDigest": {
+            "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+          },
+          "currentComposeConfigHash": {
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expectedComposeConfigHash": {
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "currentMounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/mount"
+            }
+          },
+          "expectedMounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/mount"
+            }
+          },
+          "mutableCheckoutMounted": {
+            "type": "boolean"
+          },
+          "recreateRequired": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "IMAGE_DIGEST_MISMATCH",
+                "COMPOSE_CONFIG_HASH_MISMATCH",
+                "BIND_MOUNT_MISMATCH",
+                "MUTABLE_CHECKOUT_MOUNT"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "mount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "source",
+        "destination",
+        "readOnly"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

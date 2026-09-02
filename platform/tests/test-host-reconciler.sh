@@ -26,6 +26,7 @@ run_role() {
   test "$(stat -c %a "$fake/etc/trinyx/platform/environment.env")" = 600
   test "$(stat -c %a "$fake/usr/local/lib/trinyx/runtime-env.sh")" = 750
   test "$(stat -c %a "$fake/usr/local/lib/trinyx/baseline-observation")" = 750
+  test "$(stat -c %a "$fake/usr/local/lib/trinyx/legacy-normalization-plan")" = 750
   test "$(stat -c %a "$fake/usr/local/lib/trinyx/legacy_runtime.py")" = 750
   test "$(stat -c %a "$fake/usr/local/lib/trinyx/offline-staging-pki")" = 750
   test "$(stat -c %a "$fake/etc/docker/daemon.json")" = 644

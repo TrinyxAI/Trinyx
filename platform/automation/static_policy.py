@@ -164,6 +164,12 @@ def check_iac() -> None:
             and workflow_ref["AllowedPattern"] == "^[0-9a-f]{40}$",
             f"{name} OIDC workflow identity is not immutable",
         )
+    canonical_subject_template = "repository_owner_id,repository_id,context,ref,job_workflow_ref"
+    for name, template in (("bootstrap", bootstrap), ("registry", registry)):
+        require(
+            template["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"] == canonical_subject_template,
+            f"{name} OIDC subject-template output drift",
+        )
     encoded = json.dumps(registry, sort_keys=True)
     for value in ("BucketOwnerEnforced", "PublicAccessBlockConfiguration", "VersioningConfiguration",
                   "aws:SecureTransport", "s3:PutObject", "s3:GetObject", "environment:staging"):
@@ -178,6 +184,10 @@ def check_iac() -> None:
             and "ref:refs/heads/codex/platform-release-automation" in encoded,
             "publisher OIDC principal lacks immutable workflow and caller-ref identity")
     deploy = json.loads((ROOT / "platform/aws/staging/deploy-control-plane.json").read_text(encoding="utf-8"))
+    require(
+        deploy["Outputs"]["RequiredGitHubOidcSubjectTemplate"]["Value"] == canonical_subject_template,
+        "deploy OIDC subject-template output drift",
+    )
     encoded = json.dumps(deploy, sort_keys=True)
     workflow_ref = deploy["Parameters"]["PlatformWorkflowRef"]
     require(
@@ -206,6 +216,8 @@ def check_iac() -> None:
             "stale-lock AWS clock-skew margin missing")
     dispatcher = (ROOT / "platform/host/common/staging-deploy.sh").read_text(encoding="utf-8")
     require("--expected-bundle-digest" in dispatcher, "SSM bundle digest is not checked after install")
+    require("normalize-plan" in dispatcher and "legacy-normalization-plan" in dispatcher,
+            "read-only legacy normalization dispatcher is missing")
     pca = json.loads((ROOT / "platform/aws/staging/private-ca-plan.json").read_text(encoding="utf-8"))
     require(pca["Parameters"]["StagingPkiMode"]["Default"] == "OFFLINE_SELF_MANAGED",
             "offline staging PKI is not the default")
@@ -220,6 +232,12 @@ def check_iac() -> None:
     require("LEGACY_BASELINE_EFFECTIVE_CONFIG_MISMATCH" in engine
             and "compose_config_hashes" in engine and "current_compose_runtime" in engine,
             "legacy adoption is not bound to effective container Compose config")
+    normalizer = (ROOT / "platform/automation/legacy_normalization_plan.py").read_text(encoding="utf-8")
+    require("composeHashCompatibility" in normalizer and "MUTABLE_CHECKOUT_MOUNT" in normalizer
+            and "recreateRequired" in normalizer and "compose_version" in normalizer,
+            "legacy normalization plan lacks runtime/config/mount compatibility evidence")
+    require("adapter.materialize(" not in normalizer,
+            "legacy normalization plan must not materialize or mutate host state")
     registry_client = (ROOT / "platform/automation/release_registry.py").read_text(encoding="utf-8")
     require(
         f'APPROVED_BUILDER_WORKFLOW_COMMIT = "{PINNED_BUILDER_WORKFLOW_COMMIT}"' in registry_client

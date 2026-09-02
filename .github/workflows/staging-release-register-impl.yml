@@ -304,7 +304,7 @@ jobs:
           },sort_keys=True,separators=(',',':'))+'\n')
           PY
           python3 platform/automation/release_registry.py --help >/dev/null
-          python3 -c "from pathlib import Path; from platform.automation.release_registry import validate_candidate; validate_candidate(Path('candidate'))"
+          PYTHONPATH=platform python3 -c "from pathlib import Path; from automation.release_registry import validate_candidate; validate_candidate(Path('candidate'))"
       - name: Assume publisher-only AWS role
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
         with:

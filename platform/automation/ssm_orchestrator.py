@@ -28,6 +28,7 @@ SSM_EXECUTION_TIMEOUT_SECONDS = 900
 SSM_POLL_GRACE_SECONDS = 60
 STALE_LOCK_LOOKBACK = dt.timedelta(minutes=5)
 SSM_POLL_INTERVAL_SECONDS = 2.0
+NORMALIZATION_PROTOCOL_MAX_BYTES = 20_000
 ACTIVE_COMMAND_STATUSES = {"Pending", "InProgress", "Delayed", "Cancelling"}
 STALE_LOCK_CONFIRMATION = "AWS_STAGING_STALE_LOCK_BREAK_APPROVED"
 
@@ -344,14 +345,32 @@ class StagingSaga:
                 output = self._request(
                     "normalize-plan", role, release_id, bundle_digest, None, None, owner
                 )
-                # Output is limited to IDs, digests, hashes and mount paths.
+                # The host emits a bounded marker-last protocol: no raw JSON or mount paths.
                 print(output.rstrip())
+                require(
+                    len(output.encode("utf-8")) < NORMALIZATION_PROTOCOL_MAX_BYTES,
+                    f"{role} legacy normalization protocol exceeds the SSM-safe budget",
+                )
+                header = (
+                    f"LEGACY_NORMALIZATION_REPORT_V1 role={role} release_id={release_id} "
+                    f"bundle_digest={bundle_digest} deployment_id={owner} "
+                    f"config_revision={self.config_revision} "
+                )
+                require(header in output, f"{role} legacy normalization audit binding is missing")
+                require(
+                    f"control_plane_commit={self.control_plane_commit}" in output,
+                    f"{role} legacy normalization control-plane identity is missing",
+                )
+                require(
+                    re.search(r"report_sha256=sha256:[0-9a-f]{64}\n?$", output) is not None,
+                    f"{role} legacy normalization report digest is missing or marker is not final",
+                )
                 require(
                     f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={role} release_id={release_id}" in output,
                     f"{role} legacy normalization plan not acknowledged",
                 )
-                require("compatibility=qualified" in output,
-                        f"{role} Compose config-hash semantics are not qualified")
+                require("compatibility=review" in output,
+                        f"{role} Compose config-hash drift exceeds the review threshold")
                 require("images=matched" in output,
                         f"{role} runtime images differ from the immutable baseline")
 

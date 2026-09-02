@@ -158,6 +158,15 @@ class IacContractTests(unittest.TestCase):
                 "environmentConfigRevision", "environmentConfigDigest", "controlPlaneCommit", "approvalScope",
                 "approvedForPointerAdoption",
             },
+            "platform/contracts/legacy-normalization-plan.schema.json": {
+                "schemaVersion", "environment", "role", "baselineReleaseId", "bundleDigest",
+                "deploymentId", "environmentConfigRevision", "environmentConfigDigest",
+                "controlPlaneCommit", "observedAt", "composeProject", "composeVersion",
+                "composeHashCapability", "composeHashCompatibility",
+                "composeHashCalibrationMatches", "composeHashCalibrationTotal",
+                "composeHashMismatchCount", "composeHashMismatchLimit", "imageCompatibility",
+                "serviceCount", "recreateServices", "services",
+            },
         }
         for path, required in expected.items():
             schema = self.load(path)

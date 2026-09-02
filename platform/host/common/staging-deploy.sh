@@ -98,7 +98,14 @@ test -x "$REGISTRY" || { echo ERROR_RELEASE_REGISTRY_CLIENT_MISSING >&2; exit 66
 
 if [ "$MODE" = normalize-plan ]; then
   test -x "$NORMALIZER" || { echo ERROR_LEGACY_NORMALIZATION_PLANNER_MISSING >&2; exit 66; }
-  exec /usr/bin/env python3 "$NORMALIZER" --role "$ROLE" --baseline-release "$RELEASE_ID" --base "$BASE"
+  exec /usr/bin/env python3 "$NORMALIZER" \
+    --role "$ROLE" \
+    --baseline-release "$RELEASE_ID" \
+    --expected-bundle-digest "$BUNDLE_DIGEST" \
+    --deployment-id "$DEPLOYMENT_ID" \
+    --environment-config-revision "$CONFIG_REVISION" \
+    --control-plane-commit "$CONTROL_PLANE_COMMIT" \
+    --base "$BASE"
 fi
 
 if [ "$MODE" = install ]; then

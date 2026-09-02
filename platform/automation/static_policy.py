@@ -250,6 +250,14 @@ def check_iac() -> None:
     require("composeHashCompatibility" in normalizer and "MUTABLE_CHECKOUT_MOUNT" in normalizer
             and "recreateRequired" in normalizer and "compose_version" in normalizer,
             "legacy normalization plan lacks runtime/config/mount compatibility evidence")
+    require("SSM_STDOUT_MAX_BYTES = 20_000" in normalizer
+            and "render_ssm_protocol" in normalizer
+            and "UNQUALIFIED_EXCESSIVE_DRIFT" in normalizer,
+            "legacy normalization report is not bounded/fail-closed")
+    for binding in ("--expected-bundle-digest", "--deployment-id",
+                    "--environment-config-revision", "--control-plane-commit"):
+        require(binding in normalizer and binding in dispatcher,
+                f"legacy normalization audit binding missing:{binding}")
     require("adapter.materialize(" not in normalizer,
             "legacy normalization plan must not materialize or mutate host state")
     registry_client = (ROOT / "platform/automation/release_registry.py").read_text(encoding="utf-8")

@@ -38,7 +38,14 @@ class FakeTransport:
             raise InvariantError("injected transport failure")
         marker = {
             "plan": f"STAGING_DEPLOY_PLAN_OK role={request.role} release_id={request.release_id}",
-            "normalize-plan": f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} release_id={request.release_id} compatibility=qualified images=matched",
+            "normalize-plan": (
+                f"LEGACY_NORMALIZATION_REPORT_V1 role={request.role} release_id={request.release_id} "
+                f"bundle_digest={request.bundle_digest} deployment_id={request.deployment_id} "
+                f"config_revision={request.config_revision} config_digest=sha256:{'7' * 64} "
+                f"control_plane_commit={request.control_plane_commit}\n"
+                f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} release_id={request.release_id} "
+                f"compatibility=review images=matched report_sha256=sha256:{'8' * 64}"
+            ),
             "apply": f"STAGING_DEPLOY_APPLY_OK role={request.role} release_id={request.release_id}",
             "rollback": f"STAGING_DEPLOY_ROLLBACK_OK role={request.role} release_id={request.release_id}",
             "health": f"STAGING_DEPLOY_HEALTH_OK role={request.role} release_id={request.release_id}",
@@ -139,8 +146,8 @@ class OrchestratorTests(unittest.TestCase):
         class UnqualifiedTransport(FakeTransport):
             def execute(self, request: Request) -> str:
                 value = super().execute(request)
-                return value.replace("compatibility=qualified", "compatibility=unqualified")
-        with self.assertRaisesRegex(InvariantError, "not qualified"):
+                return value.replace("compatibility=review", "compatibility=stop")
+        with self.assertRaisesRegex(InvariantError, "exceeds the review threshold"):
             self.saga(UnqualifiedTransport()).legacy_normalization_plan(
                 "rel-v1-" + "2" * 32, "sha256:" + "3" * 64
             )

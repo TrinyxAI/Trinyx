@@ -9,11 +9,20 @@
     "environment",
     "role",
     "baselineReleaseId",
+    "bundleDigest",
+    "deploymentId",
+    "environmentConfigRevision",
+    "environmentConfigDigest",
+    "controlPlaneCommit",
     "observedAt",
     "composeProject",
     "composeVersion",
     "composeHashCapability",
     "composeHashCompatibility",
+    "composeHashCalibrationMatches",
+    "composeHashCalibrationTotal",
+    "composeHashMismatchCount",
+    "composeHashMismatchLimit",
     "imageCompatibility",
     "serviceCount",
     "recreateServices",
@@ -21,7 +30,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "environment": {
       "const": "staging"
@@ -33,7 +42,28 @@
       ]
     },
     "baselineReleaseId": {
+      "type": "string",
       "pattern": "^rel-v1-[0-9a-f]{32}$"
+    },
+    "bundleDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "deploymentId": {
+      "type": "string",
+      "pattern": "^dep-[0-9a-f]{32}$"
+    },
+    "environmentConfigRevision": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "environmentConfigDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "controlPlaneCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
     },
     "observedAt": {
       "type": "string",
@@ -41,9 +71,11 @@
     },
     "composeProject": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 128
     },
     "composeVersion": {
+      "type": "string",
       "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
     },
     "composeHashCapability": {
@@ -51,9 +83,28 @@
     },
     "composeHashCompatibility": {
       "enum": [
-        "QUALIFIED",
-        "UNQUALIFIED_ALL_SERVICES_DIFFER"
+        "QUALIFIED_REVIEW",
+        "UNQUALIFIED_EXCESSIVE_DRIFT"
       ]
+    },
+    "composeHashCalibrationMatches": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
+    "composeHashCalibrationTotal": {
+      "enum": [
+        8,
+        20
+      ]
+    },
+    "composeHashMismatchCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
+    "composeHashMismatchLimit": {
+      "const": 3
     },
     "imageCompatibility": {
       "enum": [
@@ -71,6 +122,7 @@
       "type": "array",
       "uniqueItems": true,
       "items": {
+        "type": "string",
         "pattern": "^[a-z0-9][a-z0-9-]*$"
       }
     },
@@ -83,7 +135,8 @@
         "additionalProperties": false,
         "required": [
           "currentContainerId",
-          "currentImageDigest",
+          "currentConfiguredImage",
+          "currentImageObjectId",
           "expectedImageDigest",
           "currentComposeConfigHash",
           "expectedComposeConfigHash",
@@ -95,18 +148,27 @@
         ],
         "properties": {
           "currentContainerId": {
+            "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
-          "currentImageDigest": {
+          "currentConfiguredImage": {
+            "type": "string",
             "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
           },
+          "currentImageObjectId": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
           "expectedImageDigest": {
+            "type": "string",
             "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
           },
           "currentComposeConfigHash": {
+            "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
           "expectedComposeConfigHash": {
+            "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
           "currentMounts": {
@@ -158,11 +220,13 @@
           "type": "string"
         },
         "source": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4096
         },
         "destination": {
           "type": "string",
-          "pattern": "^/"
+          "pattern": "^/",
+          "maxLength": 4096
         },
         "readOnly": {
           "type": "boolean"

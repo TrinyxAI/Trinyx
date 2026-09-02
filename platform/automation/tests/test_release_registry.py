@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import make_release, write_json
-from invariants import InvariantError
-from release_registry import OBJECT_FILES, fetch, register
+from invariants import InvariantError, calculated_release_id, sha256_bytes
+from release_registry import FROZEN_CANDIDATE, OBJECT_FILES, fetch, register
 
 
 class MemoryRegistry:
@@ -64,6 +67,75 @@ def make_candidate(directory: Path) -> tuple[str, str]:
         },
     )
     return release_id, manifest["deploymentBundle"]["digest"]
+
+
+def make_legacy_candidate(
+    directory: Path,
+    *,
+    tar_mode: int = 0o644,
+) -> tuple[str, str, dict[str, str]]:
+    make_candidate(directory)
+    source_tar = directory / "deployment-bundle.tar"
+    rebuilt = io.BytesIO()
+    with (
+        tarfile.open(source_tar, mode="r") as source,
+        tarfile.open(fileobj=rebuilt, mode="w", format=tarfile.USTAR_FORMAT) as target,
+    ):
+        for member in source.getmembers():
+            content = source.extractfile(member)
+            if content is None:
+                raise AssertionError("fixture bundle member is not a regular file")
+            payload = content.read()
+            info = tarfile.TarInfo(member.name)
+            info.size = len(payload)
+            info.mode = tar_mode
+            info.mtime = 0
+            target.addfile(info, io.BytesIO(payload))
+    tar_bytes = rebuilt.getvalue()
+
+    bundle_manifest_path = directory / "deployment-bundle.json"
+    bundle_manifest = json.loads(bundle_manifest_path.read_text())
+    for entry in bundle_manifest["files"]:
+        del entry["mode"]
+    bundle_manifest["digest"] = sha256_bytes(tar_bytes)
+    bundle_manifest["sizeBytes"] = len(tar_bytes)
+    write_json(bundle_manifest_path, bundle_manifest)
+    source_tar.write_bytes(tar_bytes)
+
+    release_path = directory / "release.json"
+    release = json.loads(release_path.read_text())
+    release["deploymentBundle"]["digest"] = bundle_manifest["digest"]
+    release["deploymentBundle"]["sizeBytes"] = bundle_manifest["sizeBytes"]
+    release["releaseId"] = ""
+    release["releaseId"] = calculated_release_id(release)
+    write_json(release_path, release)
+
+    provenance_path = directory / "provenance.json"
+    provenance = json.loads(provenance_path.read_text())
+    provenance.update(
+        {
+            "signerWorkflow": "build-release-candidate.yml",
+            "signerDigest": release["sourceCommit"],
+            "compatibility": "frozen-historical-builder",
+            "sourceCommit": release["sourceCommit"],
+        }
+    )
+    write_json(provenance_path, provenance)
+
+    frozen = {
+        "sourceCommit": release["sourceCommit"],
+        "releaseId": release["releaseId"],
+        "bundleDigest": bundle_manifest["digest"],
+        "artifactId": str(provenance["artifactId"]),
+        "runId": str(provenance["runId"]),
+        "artifactDigest": provenance["artifactDigest"],
+        "releaseManifestDigest": sha256_bytes(release_path.read_bytes()),
+        "imageInventoryDigest": sha256_bytes(
+            (directory / "release-images.json").read_bytes()
+        ),
+        "bundleManifestDigest": sha256_bytes(bundle_manifest_path.read_bytes()),
+    }
+    return release["releaseId"], bundle_manifest["digest"], frozen
 
 
 class RegistryTests(unittest.TestCase):
@@ -118,6 +190,99 @@ class RegistryTests(unittest.TestCase):
         write_json(provenance_path, provenance)
         with self.assertRaisesRegex(InvariantError, "restricted to the frozen candidate"):
             register(self.registry, self.candidate)
+
+    def test_modern_bundle_manifest_requires_mode(self) -> None:
+        bundle_manifest_path = self.candidate / "deployment-bundle.json"
+        bundle_manifest = json.loads(bundle_manifest_path.read_text())
+        del bundle_manifest["files"][0]["mode"]
+        write_json(bundle_manifest_path, bundle_manifest)
+        with self.assertRaisesRegex(InvariantError, "bad bundle file contract"):
+            register(self.registry, self.candidate)
+
+    def test_historical_legacy_schema_round_trip_preserves_original_bytes(self) -> None:
+        self.assertEqual(
+            "sha256:ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+            FROZEN_CANDIDATE["releaseManifestDigest"],
+        )
+        self.assertEqual(
+            "sha256:fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+            FROZEN_CANDIDATE["imageInventoryDigest"],
+        )
+        self.assertEqual(
+            "sha256:b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
+            FROZEN_CANDIDATE["bundleManifestDigest"],
+        )
+        self.assertEqual(
+            "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+            FROZEN_CANDIDATE["bundleDigest"],
+        )
+
+        candidate = Path(self.temp.name) / "legacy"
+        candidate.mkdir()
+        release_id, bundle_digest, frozen = make_legacy_candidate(candidate)
+        original_manifest = (candidate / "deployment-bundle.json").read_bytes()
+        original_tar = (candidate / "deployment-bundle.tar").read_bytes()
+        registry = MemoryRegistry()
+        with patch.dict(FROZEN_CANDIDATE, frozen, clear=True):
+            first = register(registry, candidate)
+            second = register(registry, candidate)
+            self.assertEqual(first, second)
+            destination = Path(self.temp.name) / "legacy-downloaded"
+            fetch(registry, release_id, bundle_digest, destination)
+
+        self.assertEqual(
+            frozen["bundleManifestDigest"],
+            sha256_bytes(original_manifest),
+        )
+        self.assertEqual(
+            original_manifest,
+            (destination / "deployment-bundle.json").read_bytes(),
+        )
+        self.assertEqual(original_tar, (destination / "deployment-bundle.tar").read_bytes())
+
+    def test_historical_legacy_schema_requires_tar_mode_0644(self) -> None:
+        candidate = Path(self.temp.name) / "legacy-wrong-mode"
+        candidate.mkdir()
+        _, _, frozen = make_legacy_candidate(candidate, tar_mode=0o600)
+        with (
+            patch.dict(FROZEN_CANDIDATE, frozen, clear=True),
+            self.assertRaisesRegex(InvariantError, "size/mode mismatch"),
+        ):
+            register(MemoryRegistry(), candidate)
+
+    def test_legacy_schema_is_rejected_for_non_historical_candidate(self) -> None:
+        candidate = Path(self.temp.name) / "legacy-non-frozen"
+        candidate.mkdir()
+        make_legacy_candidate(candidate)
+        with self.assertRaisesRegex(
+            InvariantError,
+            "restricted to the frozen candidate",
+        ):
+            register(MemoryRegistry(), candidate)
+
+    def test_historical_legacy_schema_still_checks_path_size_and_digest(self) -> None:
+        cases = (
+            ("path", "unexpected.txt", "unsafe/unexpected bundle member"),
+            ("sizeBytes", 999999, "size/mode mismatch"),
+            ("digest", "sha256:" + "0" * 64, "internal file hash"),
+        )
+        for field, value, error in cases:
+            with self.subTest(field=field):
+                candidate = Path(self.temp.name) / f"legacy-bad-{field}"
+                candidate.mkdir()
+                _, _, frozen = make_legacy_candidate(candidate)
+                bundle_manifest_path = candidate / "deployment-bundle.json"
+                bundle_manifest = json.loads(bundle_manifest_path.read_text())
+                bundle_manifest["files"][0][field] = value
+                write_json(bundle_manifest_path, bundle_manifest)
+                frozen["bundleManifestDigest"] = sha256_bytes(
+                    bundle_manifest_path.read_bytes()
+                )
+                with (
+                    patch.dict(FROZEN_CANDIDATE, frozen, clear=True),
+                    self.assertRaisesRegex(InvariantError, error),
+                ):
+                    register(MemoryRegistry(), candidate)
 
     def test_wrong_sha_tampered_bundle_and_internal_hash(self) -> None:
         bundle = self.candidate / "deployment-bundle.tar"

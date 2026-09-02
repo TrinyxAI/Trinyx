@@ -41,12 +41,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      CONTROL_PLANE_COMMIT: d9080a2068cae049ac1860c27007d09f79241c18
+      CONTROL_PLANE_COMMIT: e160e3e1c12995ad522a936c95061e03c174f8d8
     steps:
       - name: Checkout reviewed control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
-          ref: d9080a2068cae049ac1860c27007d09f79241c18
+          ref: e160e3e1c12995ad522a936c95061e03c174f8d8
           persist-credentials: false
       - name: Verify immutable control-plane checkout
         shell: bash

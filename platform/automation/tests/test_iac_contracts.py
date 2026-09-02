@@ -25,6 +25,28 @@ class IacContractTests(unittest.TestCase):
         self.assertNotIn("repository_owner_id:", encoded)
         self.assertNotIn("repository_id:", encoded)
 
+    def test_s3_bucket_ownership_uses_supported_cloudformation_property(self) -> None:
+        templates = sorted((ROOT / "platform/aws").rglob("*.json"))
+        buckets_checked = 0
+        for path in templates:
+            template = json.loads(path.read_text(encoding="utf-8"))
+            for logical_id, resource in template.get("Resources", {}).items():
+                if resource.get("Type") != "AWS::S3::Bucket":
+                    continue
+                buckets_checked += 1
+                properties = resource.get("Properties", {})
+                self.assertNotIn(
+                    "BucketOwnershipControls",
+                    properties,
+                    f"{path.relative_to(ROOT)}:{logical_id}",
+                )
+                self.assertEqual(
+                    "BucketOwnerEnforced",
+                    properties["OwnershipControls"]["Rules"][0]["ObjectOwnership"],
+                    f"{path.relative_to(ROOT)}:{logical_id}",
+                )
+        self.assertGreaterEqual(buckets_checked, 2)
+
     def test_registry_security_and_iam_separation(self) -> None:
         template = self.load("platform/aws/staging/release-registry.json")
         bucket = template["Resources"]["ReleaseRegistryBucket"]
@@ -32,7 +54,8 @@ class IacContractTests(unittest.TestCase):
         self.assertEqual("578c7610373f96d4cd018253f591750e0cfb8ebf", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         self.assertEqual("Retain", bucket["DeletionPolicy"])
-        self.assertEqual("BucketOwnerEnforced", properties["BucketOwnershipControls"]["Rules"][0]["ObjectOwnership"])
+        self.assertNotIn("BucketOwnershipControls", properties)
+        self.assertEqual("BucketOwnerEnforced", properties["OwnershipControls"]["Rules"][0]["ObjectOwnership"])
         self.assertTrue(all(properties["PublicAccessBlockConfiguration"].values()))
         self.assertEqual("Enabled", properties["VersioningConfiguration"]["Status"])
         self.assertEqual("AES256", properties["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]["ServerSideEncryptionByDefault"]["SSEAlgorithm"])

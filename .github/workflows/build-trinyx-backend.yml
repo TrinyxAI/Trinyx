@@ -31,6 +31,7 @@ on:
           - release-candidate
           - staging-oidc-probe
           - staging-release-register
+          - staging-legacy-normalization-plan
           - staging-legacy-adopt
           - staging-qualification
       run_id:
@@ -146,7 +147,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
       role_arn: ${{ inputs.role_arn }}
 
@@ -158,7 +159,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
       run_id: ${{ inputs.run_id }}
       artifact_id: ${{ inputs.artifact_id }}
@@ -169,14 +170,31 @@ jobs:
       registry_bucket: ${{ inputs.registry_bucket }}
       publisher_role_arn: ${{ inputs.publisher_role_arn }}
 
+  staging_legacy_normalization_plan:
+    name: Pre-merge read-only legacy normalization plan bridge
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-legacy-normalization-plan'
+    permissions:
+      contents: read
+      id-token: write
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
+    with:
+      action: normalization-plan
+      baseline_release_id: ${{ inputs.baseline_release_id }}
+      baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
+      environment_config_revision: ${{ inputs.environment_config_revision }}
+      registry_bucket: ${{ inputs.registry_bucket }}
+      deploy_role_arn: ${{ inputs.deploy_role_arn }}
+      document_version: ${{ inputs.document_version }}
+
   staging_legacy_adopt:
     name: Pre-merge proven legacy baseline adoption bridge
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/platform-release-automation' && inputs.operation == 'staging-legacy-adopt'
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
+      action: adopt
       baseline_release_id: ${{ inputs.baseline_release_id }}
       baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
       environment_config_revision: ${{ inputs.environment_config_revision }}
@@ -192,7 +210,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
       baseline_run_id: ${{ inputs.baseline_run_id }}
       baseline_artifact_id: ${{ inputs.baseline_artifact_id }}

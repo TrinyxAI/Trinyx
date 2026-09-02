@@ -22,7 +22,7 @@ from pathlib import Path
 import re,sys
 BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
 CONTROL_PLANE_CODE="d00143d7bbd5619e98f447ce0935fe6ea26ccd37"
-PRIVILEGED_WORKFLOW="e01dc32f89385e85dbb900986348d8a77c9d2255"
+PRIVILEGED_WORKFLOW="c513bb305baec25e7e70a18c7539af3b99b7bc4f"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(
     Path(x).read_text(encoding='utf-8') for x in sys.argv[1:]
@@ -102,6 +102,7 @@ for operation,target in (
     ('release-candidate','build-release-candidate-impl.yml'),
     ('staging-oidc-probe','staging-oidc-probe-impl.yml'),
     ('staging-release-register','staging-release-register-impl.yml'),
+    ('staging-legacy-normalization-plan','staging-legacy-adopt-impl.yml'),
     ('staging-legacy-adopt','staging-legacy-adopt-impl.yml'),
     ('staging-qualification','staging-qualification-impl.yml'),
 ):
@@ -109,6 +110,8 @@ for operation,target in (
     assert target in bridge
     expected=BUILDER if operation=='release-candidate' else PRIVILEGED_WORKFLOW
     assert f'{target}@{expected}' in bridge
+assert 'action: normalization-plan' in bridge
+assert 'action: adopt' in bridge
 
 for path in Path(sys.argv[1]).parents[2].joinpath('.github/workflows').glob('*.yml'):
     text=path.read_text(encoding='utf-8')

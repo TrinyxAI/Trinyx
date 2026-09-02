@@ -3,6 +3,14 @@ name: Adopt Cryptographically Proven Staging Baseline
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: 'Run the read-only normalization plan first; adoption requires a separate dispatch'
+        required: true
+        type: choice
+        default: normalization-plan
+        options:
+          - normalization-plan
+          - adopt
       baseline_release_id:
         required: true
         type: string
@@ -32,8 +40,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
+      action: ${{ inputs.action }}
       baseline_release_id: ${{ inputs.baseline_release_id }}
       baseline_bundle_digest: ${{ inputs.baseline_bundle_digest }}
       environment_config_revision: ${{ inputs.environment_config_revision }}

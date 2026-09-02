@@ -104,7 +104,7 @@ remains fail-closed and requires direct AWS review.
    registry and deploy-control-plane stacks in account `001634075617`, region
    `us-east-1`. The subjects include immutable repository IDs, Environment,
    caller `ref:refs/heads/codex/platform-release-automation`, and privileged
-   reusable-workflow commit `e01dc32f89385e85dbb900986348d8a77c9d2255`.
+   reusable-workflow commit `c513bb305baec25e7e70a18c7539af3b99b7bc4f`.
 3. Execute the reviewed AWS trust migration using the existing administrative
    path. Only then configure the GitHub repository custom subject template as
    `repository_owner_id,repository_id,context,ref,job_workflow_ref`.
@@ -135,7 +135,7 @@ Docker prune, volume deletion, DB drop or Redis flush.
 
 Do not execute these steps as part of repository implementation. They are the later human-gated sequence.
 
-1. Review the branch CI and exact identity chain: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`, audited executable control-plane code `1884e7d6e2621109f0d0595f974552521933e22d`, and AWS-privileged reusable workflow `e01dc32f89385e85dbb900986348d8a77c9d2255`.
+1. Review the branch CI and exact identity chain: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`, audited executable control-plane code `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, and AWS-privileged reusable workflow `c513bb305baec25e7e70a18c7539af3b99b7bc4f`.
 2. Protect branch `codex/platform-release-automation` and GitHub Environment `staging` for only that branch.
 3. Prepare/review the AWS trust change sets for the new subject containing `repository_owner_id,repository_id,context,ref,job_workflow_ref`; keep `EnableS3GatewayEndpoint=false` until real route-table IDs exist.
 4. Execute the reviewed AWS trust migration through the existing administrative path.
@@ -186,10 +186,49 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   builder and the CE publisher, preventing the repository-wide custom OIDC
   template from encountering a direct job without `job_workflow_ref`.
 - The immutable identity chain is explicit: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`,
-  executable control-plane code `1884e7d6e2621109f0d0595f974552521933e22d`, and privileged reusable workflow
-  `e01dc32f89385e85dbb900986348d8a77c9d2255`. The latter checks out the former by exact SHA and asserts HEAD before
+  executable control-plane code `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, and privileged reusable workflow
+  `c513bb305baec25e7e70a18c7539af3b99b7bc4f`. The latter checks out the former by exact SHA and asserts HEAD before
   credentials. AWS IAM pins the privileged workflow plus exact caller branch ref.
 - Deployment/adoption records use `controlPlaneCommit`; release `sourceCommit`
   and builder `platformCommit` retain their distinct meanings.
 - Offline encrypted staging root/issuer is the O10 default. The optional
   two-CA AWS PCA hierarchy remains disabled and paid.
+
+
+## Legacy runtime normalization gate
+
+The legacy runtime is not eligible for pointer-only adoption while any effective
+container mount still references a mutable checkout. Do not weaken this gate and
+do not edit observation evidence.
+
+After the immutable baseline is installed without activation and host
+configuration is reconciled/materialized, dispatch
+`staging-legacy-normalization-plan`. This action invokes SSM mode
+`normalize-plan` under the global staging lock. It is read-only: it does not
+run a materializer, write a plan file, recreate a container, change `active`, or
+run health mutations.
+
+For every exact 20 Cloud / 8 Paid service it reports current and expected image
+digests, Compose config hashes, mounts, container ID and `recreateRequired`
+reasons. It fails the workflow if every service hash differs (Compose semantics
+unqualified) or any runtime image differs from the immutable baseline.
+
+Review the JSON output independently. The expected initial legacy delta is at
+least Paid `paid-edge` because its effective container may still mount the
+historical mutable Caddyfile. If unexpected services require recreation, stop.
+
+A later, separately approved normalization mutation must be delta-only:
+
+```text
+preserve and validate the known-good TLS material at canonical paths
+→ docker compose ... up -d --no-deps --wait paid-edge
+→ Paid liveness
+→ Cloud→Paid strict hostname/CA TLS smoke
+→ public edge smoke
+→ rerun normalization plan
+```
+
+Never recreate all Paid/Cloud services globally. Do not combine Caddy source,
+filesystem paths and CA/leaf rotation unless the old certificate cannot be
+validated. If old trust cannot be preserved, stop and review an explicit
+old+new trust transition before any recreate.

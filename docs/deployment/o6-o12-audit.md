@@ -208,7 +208,7 @@ and incurs no AWS managed-CA monthly fee.
 
 - **SECURITY_CRITICAL — privileged code identity:** the reusable workflow YAML and
   its executable checkout are now separate immutable identities. AWS-privileged
-  workflows at `e01dc32f89385e85dbb900986348d8a77c9d2255` checkout `1884e7d6e2621109f0d0595f974552521933e22d`, assert `git rev-parse HEAD` before
+  workflows at `c513bb305baec25e7e70a18c7539af3b99b7bc4f` checkout `d00143d7bbd5619e98f447ce0935fe6ea26ccd37`, assert `git rev-parse HEAD` before
   credentials, and write that code SHA as `controlPlaneCommit`. IAM also requires
   the exact caller branch ref. A mutable caller checkout cannot supply privileged
   Python.
@@ -224,3 +224,22 @@ and incurs no AWS managed-CA monthly fee.
 - **OIDC migration availability:** AWS trust is reviewed/executed before GitHub
   custom-sub activation; the OIDC probe follows immediately and all mismatch
   paths stop fail-closed.
+
+
+## Fifth independent review closures
+
+- **RELIABILITY_CRITICAL — canonical OIDC template:** all three CloudFormation
+  outputs now require exactly
+  `repository_owner_id,repository_id,context,ref,job_workflow_ref`; static and
+  fixture policies reject any drift.
+- **DEFENSE_IN_DEPTH — exact STS account:** the bootstrap probe accepts only IAM
+  account `001634075617`, verifies the returned `Account`, and matches the
+  exact STS assumed-role ARN.
+- **LIVE_BOOTSTRAP_BLOCKER — legacy normalization:** a new read-only
+  `normalize-plan` SSM path reports image/config-hash/mount deltas without
+  materialization or mutation. Mutable checkout mounts are reported as required
+  recreations, not permitted as baseline evidence. All-image mismatch and
+  all-service config-hash mismatch remain fail-closed compatibility gates.
+- **OPERATIONAL STOP:** normalization output is CI-implemented only. No container
+  recreation, TLS transition, baseline adoption, AWS change set or staging plan
+  has been live validated.

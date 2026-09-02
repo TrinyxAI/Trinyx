@@ -45,7 +45,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@e01dc32f89385e85dbb900986348d8a77c9d2255
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@c513bb305baec25e7e70a18c7539af3b99b7bc4f
     with:
       run_id: ${{ inputs.run_id }}
       artifact_id: ${{ inputs.artifact_id }}

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
 PINNED_CONTROL_PLANE_CODE_COMMIT = "ee40526a1891d42cd572bf64326b365f0f68b64f"
-PINNED_PRIVILEGED_WORKFLOW_COMMIT = "9954d6b56a5d06b9d053cd8748df50bcf516a82f"
+PINNED_PRIVILEGED_WORKFLOW_COMMIT = "1340ad64ac358694a3f88848db4665769da82f0c"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",

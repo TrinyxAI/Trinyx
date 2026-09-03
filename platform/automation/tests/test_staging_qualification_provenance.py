@@ -105,6 +105,11 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             "head_sha": source,
             "path": ".github/workflows/build-trinyx-backend.yml",
             "conclusion": "success",
+            "created_at": (
+                "2026-08-30T10:00:00Z"
+                if prefix == "BASELINE"
+                else "2026-08-31T11:22:33Z"
+            ),
             "repository": {"full_name": "TrinyxAI/Trinyx"},
             "referenced_workflows": referenced,
         }
@@ -300,8 +305,17 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
         env = self.combined_env(baseline_historical, candidate_historical)
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
+            artifacts = directory / "artifacts"
+            artifacts.mkdir()
+            verified_at = {
+                "baseline": "2026-08-30T10:00:00Z",
+                "candidate": "2026-08-31T11:22:33Z",
+            }
             for name, historical in (("baseline", baseline_historical), ("candidate", candidate_historical)):
                 self.write_release(directory / name, env, name.upper())
+                (artifacts / f"{name}-verified-build-created-at.txt").write_text(
+                    verified_at[name] + "\n", encoding="utf-8"
+                )
                 policy = self.historical_policy() if historical else self.modern_policy()
                 (directory / f"{name}-attestation-policy.env").write_text(
                     "".join(f"{key}={value}\n" for key, value in policy.items()), encoding="utf-8"

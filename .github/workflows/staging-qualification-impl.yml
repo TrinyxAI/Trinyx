@@ -157,13 +157,19 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > artifacts/candidate-run.json
           python3 - <<'PY'
           # BEGIN STAGING_QUALIFICATION_RUN_PROVENANCE_VALIDATION
+          import datetime as dt
           import json
           import os
+          import re
+          from pathlib import Path
 
           REPOSITORY = "TrinyxAI/Trinyx"
           CALLER_REF = "refs/heads/codex/platform-release-automation"
           BUILDER_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
           HISTORICAL_SOURCE = "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47"
+          UTC_RFC3339 = re.compile(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,6})?Z"
+          )
           HISTORICAL_IDENTITY = {
               "GITHUB_REPOSITORY": REPOSITORY,
               "GITHUB_REPOSITORY_ID": "1342032975",
@@ -188,6 +194,23 @@ jobs:
                   "RELEASE_ID": os.environ[f"{prefix}_RELEASE_ID"],
                   "BUNDLE_DIGEST": os.environ[f"{prefix}_BUNDLE_DIGEST"],
               }
+
+          def verified_created_at(run, name):
+              value = run.get("created_at")
+              if (
+                  not isinstance(value, str)
+                  or UTC_RFC3339.fullmatch(value) is None
+              ):
+                  raise SystemExit(f"invalid verified build run created_at:{name}")
+              try:
+                  parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"invalid verified build run created_at:{name}"
+                  ) from exc
+              if parsed.tzinfo != dt.timezone.utc:
+                  raise SystemExit(f"verified build run created_at is not UTC:{name}")
+              return value
 
           for name in ("baseline", "candidate"):
               prefix = name.upper()
@@ -248,6 +271,11 @@ jobs:
                       raise SystemExit(f"historical builder ref mismatch:{name}")
               elif matches[0].get("ref") is not None:
                   raise SystemExit(f"SHA-pinned builder unexpectedly has ref:{name}")
+
+              Path(f"artifacts/{name}-verified-build-created-at.txt").write_text(
+                  verified_created_at(run, name) + "\n",
+                  encoding="utf-8",
+              )
           # END STAGING_QUALIFICATION_RUN_PROVENANCE_VALIDATION
           PY
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT_ID/zip" > artifacts/baseline.zip
@@ -403,9 +431,10 @@ jobs:
           # END STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
           python3 - <<'PY'
           # BEGIN STAGING_QUALIFICATION_PROVENANCE_GENERATION
-          import datetime
+          import datetime as dt
           import json
           import os
+          import re
           from pathlib import Path
 
           EXPECTED_POLICY_KEYS = {
@@ -422,6 +451,9 @@ jobs:
               "runId": "33485509832",
               "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
           }
+          UTC_RFC3339 = re.compile(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,6})?Z"
+          )
 
           def read_policy(path):
               policy = {}
@@ -437,6 +469,27 @@ jobs:
               if policy["REQUIRE_INTERNAL_ATTESTATIONS"] not in {"true", "false"}:
                   raise SystemExit("invalid attestation policy value")
               return policy
+
+          def verified_build_created_at(name):
+              value = Path(
+                  f"artifacts/{name}-verified-build-created-at.txt"
+              ).read_text(encoding="utf-8").strip()
+              if UTC_RFC3339.fullmatch(value) is None:
+                  raise SystemExit(f"invalid verified build created_at:{name}")
+              try:
+                  parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
+              except ValueError as exc:
+                  raise SystemExit(
+                      f"invalid verified build created_at:{name}"
+                  ) from exc
+              if parsed.tzinfo != dt.timezone.utc:
+                  raise SystemExit(f"verified build created_at is not UTC:{name}")
+              return value
+
+          def render_provenance(provenance):
+              return (
+                  json.dumps(provenance, sort_keys=True, separators=(",", ":")) + "\n"
+              ).encode("utf-8")
 
           for name in ("baseline", "candidate"):
               prefix = name.upper()
@@ -472,27 +525,20 @@ jobs:
                   }
               if policy != expected:
                   raise SystemExit(f"attestation/provenance policy mismatch:{name}")
-              Path(name, "provenance.json").write_text(
-                  json.dumps(
-                      {
-                          "schemaVersion": 2,
-                          "repository": "TrinyxAI/Trinyx",
-                          "signerWorkflow": policy["SIGNER_WORKFLOW"],
-                          "signerDigest": policy["SIGNER_DIGEST"],
-                          "compatibility": policy["COMPATIBILITY"],
-                          "sourceCommit": release["sourceCommit"],
-                          "artifactId": actual["artifactId"],
-                          "runId": actual["runId"],
-                          "artifactDigest": actual["artifactDigest"],
-                          "verifiedAt": datetime.datetime.now(datetime.timezone.utc)
-                              .isoformat()
-                              .replace("+00:00", "Z"),
-                      },
-                      sort_keys=True,
-                      separators=(",", ":"),
-                  )
-                  + "\n",
-                  encoding="utf-8",
+              provenance = {
+                  "schemaVersion": 2,
+                  "repository": "TrinyxAI/Trinyx",
+                  "signerWorkflow": policy["SIGNER_WORKFLOW"],
+                  "signerDigest": policy["SIGNER_DIGEST"],
+                  "compatibility": policy["COMPATIBILITY"],
+                  "sourceCommit": release["sourceCommit"],
+                  "artifactId": actual["artifactId"],
+                  "runId": actual["runId"],
+                  "artifactDigest": actual["artifactDigest"],
+                  "verifiedAt": verified_build_created_at(name),
+              }
+              Path(name, "provenance.json").write_bytes(
+                  render_provenance(provenance)
               )
           # END STAGING_QUALIFICATION_PROVENANCE_GENERATION
           PY
@@ -508,10 +554,238 @@ jobs:
         shell: bash
         env:
           REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+          BASELINE_ARTIFACT_ID: ${{ inputs.baseline_artifact_id }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
+          BASELINE_ARTIFACT_DIGEST: ${{ inputs.baseline_artifact_digest }}
+          BASELINE_RELEASE_ID: ${{ inputs.baseline_release_id }}
+          BASELINE_BUNDLE_DIGEST: ${{ inputs.baseline_bundle_digest }}
+          BASELINE_SOURCE_COMMIT: ${{ inputs.baseline_source_commit }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+          CANDIDATE_RELEASE_ID: ${{ inputs.candidate_release_id }}
+          CANDIDATE_BUNDLE_DIGEST: ${{ inputs.candidate_bundle_digest }}
+          CANDIDATE_SOURCE_COMMIT: ${{ inputs.candidate_source_commit }}
         run: |
           set -euo pipefail
-          python3 platform/automation/release_registry.py register --bucket "$REGISTRY_BUCKET" --candidate-dir baseline
-          python3 platform/automation/release_registry.py register --bucket "$REGISTRY_BUCKET" --candidate-dir candidate
+          # BEGIN STAGING_QUALIFICATION_REGISTRY_IDEMPOTENCE
+          register_entry() {
+            local name="$1"
+            local prefix="${name^^}"
+            local release_var="${prefix}_RELEASE_ID"
+            local bundle_var="${prefix}_BUNDLE_DIGEST"
+            local release_id="${!release_var}"
+            local bundle_digest="${!bundle_var}"
+            local compatibility
+            compatibility="$(
+              python3 - "$name" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          name = sys.argv[1]
+          provenance = json.loads(
+              Path(name, "provenance.json").read_text(encoding="utf-8")
+          )
+          compatibility = provenance.get("compatibility")
+          if compatibility not in {
+              "frozen-historical-builder",
+              "pinned-reusable-builder",
+          }:
+              raise SystemExit("invalid qualification registration compatibility")
+          print(compatibility)
+          PY
+            )"
+
+            case "$compatibility" in
+              pinned-reusable-builder)
+                python3 platform/automation/release_registry.py register \
+                  --bucket "$REGISTRY_BUCKET" \
+                  --candidate-dir "$name"
+                ;;
+              frozen-historical-builder)
+                local bundle_hex="${bundle_digest#sha256:}"
+                local registration_key="staging/releases/$release_id/$bundle_hex/registration.json"
+                local marker_error
+                marker_error="$(mktemp)"
+                if aws s3api head-object \
+                  --bucket "$REGISTRY_BUCKET" \
+                  --key "$registration_key" \
+                  --region us-east-1 \
+                  --output json \
+                  --no-cli-pager >/dev/null 2>"$marker_error"; then
+                  local destination="existing-$name-registration"
+                  test ! -e "$destination"
+                  python3 platform/automation/release_registry.py fetch \
+                    --bucket "$REGISTRY_BUCKET" \
+                    --release-id "$release_id" \
+                    --bundle-digest "$bundle_digest" \
+                    --destination "$destination"
+                  PYTHONPATH=platform python3 -c "from pathlib import Path; from automation.release_registry import validate_candidate; validate_candidate(Path('$destination'))"
+                  ENTRY_NAME="$name" ENTRY_PREFIX="$prefix" python3 - <<'PY'
+          # BEGIN STAGING_QUALIFICATION_EXISTING_FROZEN_EQUIVALENCE
+          import datetime as dt
+          import hashlib
+          import hmac
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          FROZEN_IDENTITY = {
+              "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+              "GITHUB_REPOSITORY_ID": "1342032975",
+              "GITHUB_REPOSITORY_OWNER_ID": "319253481",
+              "RUN_ID": "33485509832",
+              "ARTIFACT_ID": "9791964215",
+              "ARTIFACT_DIGEST": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+              "SOURCE_COMMIT": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+              "RELEASE_ID": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "BUNDLE_DIGEST": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+          FROZEN_INTERNAL_SHA256 = {
+              "release.json": "ad5a5b702d9659e0af5d5b82a422953ba2390a94396949f897757568c9b59789",
+              "release-images.json": "fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
+              "deployment-bundle.json": "b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
+              "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+          }
+          PROVENANCE_KEYS = {
+              "schemaVersion",
+              "repository",
+              "signerWorkflow",
+              "signerDigest",
+              "compatibility",
+              "sourceCommit",
+              "artifactId",
+              "runId",
+              "artifactDigest",
+              "verifiedAt",
+          }
+          FROZEN_PROVENANCE = {
+              "schemaVersion": 2,
+              "repository": "TrinyxAI/Trinyx",
+              "signerWorkflow": "build-release-candidate.yml",
+              "signerDigest": FROZEN_IDENTITY["SOURCE_COMMIT"],
+              "compatibility": "frozen-historical-builder",
+              "sourceCommit": FROZEN_IDENTITY["SOURCE_COMMIT"],
+              "artifactId": FROZEN_IDENTITY["ARTIFACT_ID"],
+              "runId": FROZEN_IDENTITY["RUN_ID"],
+              "artifactDigest": FROZEN_IDENTITY["ARTIFACT_DIGEST"],
+          }
+          UTC_RFC3339 = re.compile(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,6})?Z"
+          )
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          def sha256(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def require_utc_timestamp(value):
+              require(
+                  isinstance(value, str) and UTC_RFC3339.fullmatch(value) is not None,
+                  "invalid frozen provenance verifiedAt",
+              )
+              try:
+                  parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
+              except ValueError as exc:
+                  raise SystemExit("invalid frozen provenance verifiedAt") from exc
+              require(
+                  parsed.tzinfo == dt.timezone.utc,
+                  "frozen provenance verifiedAt is not UTC",
+              )
+
+          def current_identity(env, prefix):
+              return {
+                  "GITHUB_REPOSITORY": env["GITHUB_REPOSITORY"],
+                  "GITHUB_REPOSITORY_ID": env["GITHUB_REPOSITORY_ID"],
+                  "GITHUB_REPOSITORY_OWNER_ID": env["GITHUB_REPOSITORY_OWNER_ID"],
+                  "RUN_ID": env[f"{prefix}_RUN_ID"],
+                  "ARTIFACT_ID": env[f"{prefix}_ARTIFACT_ID"],
+                  "ARTIFACT_DIGEST": env[f"{prefix}_ARTIFACT_DIGEST"],
+                  "SOURCE_COMMIT": env[f"{prefix}_SOURCE_COMMIT"],
+                  "RELEASE_ID": env[f"{prefix}_RELEASE_ID"],
+                  "BUNDLE_DIGEST": env[f"{prefix}_BUNDLE_DIGEST"],
+              }
+
+          def verify_existing_frozen_registration(env, name, prefix, root=Path(".")):
+              candidate = root / name
+              stored = root / f"existing-{name}-registration"
+              identity = current_identity(env, prefix)
+              for key, expected in FROZEN_IDENTITY.items():
+                  require(
+                      identity.get(key) == expected,
+                      f"existing frozen compatibility identity mismatch:{name}:{key}",
+                  )
+              for filename, expected_digest in FROZEN_INTERNAL_SHA256.items():
+                  local_path = candidate / filename
+                  stored_path = stored / filename
+                  require(
+                      hmac.compare_digest(sha256(local_path), expected_digest),
+                      f"local frozen object digest mismatch:{name}:{filename}",
+                  )
+                  require(
+                      hmac.compare_digest(
+                          local_path.read_bytes(), stored_path.read_bytes()
+                      ),
+                      f"stored frozen object differs:{name}:{filename}",
+                  )
+
+              local_provenance = json.loads(
+                  (candidate / "provenance.json").read_text(encoding="utf-8")
+              )
+              stored_provenance = json.loads(
+                  (stored / "provenance.json").read_text(encoding="utf-8")
+              )
+              require(
+                  set(local_provenance) == PROVENANCE_KEYS
+                  and set(stored_provenance) == PROVENANCE_KEYS,
+                  f"frozen provenance schema mismatch:{name}",
+              )
+              for key, expected in FROZEN_PROVENANCE.items():
+                  require(
+                      local_provenance.get(key) == expected
+                      and stored_provenance.get(key) == expected,
+                      f"frozen provenance mismatch:{name}:{key}",
+                  )
+              require_utc_timestamp(local_provenance["verifiedAt"])
+              require_utc_timestamp(stored_provenance["verifiedAt"])
+
+          if __name__ == "__main__":
+              verify_existing_frozen_registration(
+                  os.environ,
+                  os.environ["ENTRY_NAME"],
+                  os.environ["ENTRY_PREFIX"],
+              )
+          # END STAGING_QUALIFICATION_EXISTING_FROZEN_EQUIVALENCE
+          PY
+                  echo "QUALIFICATION_REGISTRATION_OK name=$name release_id=$release_id bundle=$bundle_digest existing_frozen_registration=true"
+                else
+                  local marker_status=$?
+                  if grep -Eq 'An error occurred \((404|NoSuchKey|NotFound)\) when calling the HeadObject operation: (Not Found|NoSuchKey)' "$marker_error"; then
+                    python3 platform/automation/release_registry.py register \
+                      --bucket "$REGISTRY_BUCKET" \
+                      --candidate-dir "$name"
+                  else
+                    cat "$marker_error" >&2
+                    rm -f "$marker_error"
+                    return "$marker_status"
+                  fi
+                fi
+                rm -f "$marker_error"
+                ;;
+              *)
+                echo "ERROR_INVALID_QUALIFICATION_REGISTRATION_COMPATIBILITY:$name" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          register_entry baseline
+          register_entry candidate
+          # END STAGING_QUALIFICATION_REGISTRY_IDEMPOTENCE
       - name: Assume deploy-only role
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
         with:

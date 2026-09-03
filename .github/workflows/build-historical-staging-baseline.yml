@@ -1,0 +1,16 @@
+name: Build Historical Staging Baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/build-historical-staging-baseline-impl.yml

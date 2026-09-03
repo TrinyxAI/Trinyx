@@ -238,8 +238,11 @@ and incurs no AWS managed-CA monthly fee.
 - **LIVE_BOOTSTRAP_BLOCKER — legacy normalization:** a new read-only
   `normalize-plan` SSM path reports image/config-hash/mount deltas without
   materialization or mutation. Mutable checkout mounts are reported as required
-  recreations, not permitted as baseline evidence. All-image mismatch and
-  all-service config-hash mismatch remain fail-closed compatibility gates.
+  recreations, not permitted as baseline evidence. Legacy image tags are never
+  trusted: the exact Docker image object's immutable `RepoDigests` prove
+  content identity, while non-canonical configured references and true content
+  mismatches remain distinct bounded-plan reasons. Missing object evidence and
+  excessive config-hash drift remain fail-closed gates.
 - **OPERATIONAL STOP:** normalization output is CI-implemented only. No container
   recreation, TLS transition, baseline adoption, AWS change set or staging plan
   has been live validated.
@@ -264,8 +267,11 @@ returns `compatibility=stop`; no bulk recreation is inferred or authorized.
 
 ### Normalization receiver integrity closure
 
-The host proves both the configured digest and the running Docker image object:
-the expected immutable reference must appear in that object's `RepoDigests`.
+The host records the configured reference but trusts only the running Docker
+image object: the expected immutable reference must appear in that exact
+object's `RepoDigests`. A tag may therefore be observed but never treated as
+identity; matching content behind a tag still requires a separately approved
+canonical-reference normalization.
 The orchestrator accepts a normalization report only when it contains one exact
 header, exactly 8 unique Paid or 20 unique Cloud service records with the
 canonical names, and one final marker. It recomputes SHA-256 over every
@@ -273,7 +279,14 @@ pre-marker byte and verifies service, image, hash, recreate and compatibility
 summaries. Missing, duplicate, unknown, truncated, reordered-after-marker or
 digest-mismatched output fails before human review or mutation.
 
-The only approved live order is reconcile/materialize → install baseline
+The metadata-only historical import is distinct from observation: it may create
+a canonical release only from exact historical GitHub publication runs and
+artifact ID, immutable Paid tag provenance, the exact historical source tree,
+and the reviewed static third-party inventory. It performs no application
+rebuild and live runtime evidence cannot substitute for any missing provenance.
+
+The only approved live order is reconcile/materialize → register canonical
+baseline → install baseline
 inactive → authenticated Paid/Cloud normalization plan → separately approved
 minimal normalization → zero-recreate normalization proof → schema-v3 baseline
 observation → pointer-only adoption → candidate plan. Observation before

@@ -234,6 +234,31 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   two-CA AWS PCA hierarchy remains disabled and paid.
 
 
+## Canonical historical baseline import
+
+`build-historical-staging-baseline.yml` reconstructs one genuine canonical
+release for source commit `aeb2a447ea7ce0436a60549713636225dfe1a2c1`
+without rebuilding or publishing application images. It authenticates the
+exact historical backend/Cloud and frontend workflow runs, downloads Cloud
+manifest artifact `9777989306` by ID, proves the immutable Paid full-SHA tags
+and OCI revision, then combines those inputs with the reviewed static
+third-party inventory. The trusted current packaging tools build the bundle
+from the exact historical source tree as data and `release.py` computes the
+content-derived release ID. The four canonical files receive GitHub build
+provenance attestations.
+
+This is not baseline observation and it never imports identities from EC2.
+Live runtime evidence cannot replace missing historical publication provenance.
+The workflow has read-only package access, performs only manifest inspection,
+and contains no image build, push, registration or AWS operation. Do not run it
+until its repository change is independently reviewed.
+
+The operational order remains: prove and build the canonical baseline →
+register it → install without changing `active` → Paid normalization PLAN →
+Cloud normalization PLAN → STOP and review → separately approved bounded
+normalization.
+
+
 ## Legacy runtime normalization gate
 
 The legacy runtime is not eligible for pointer-only adoption while any effective
@@ -247,9 +272,16 @@ configuration is reconciled/materialized, dispatch
 run a materializer, write a plan file, recreate a container, change `active`, or
 run health mutations.
 
-For every exact 20 Cloud / 8 Paid service it reports current and expected image
-digests, Compose config hashes, mounts, container ID and `recreateRequired`
-reasons. It fails the workflow when more than three service hashes differ, when the exact service inventory or report SHA cannot be authenticated, or when the configured/running image object lacks the immutable baseline RepoDigest.
+For every exact 20 Cloud / 8 Paid service it reports the observed
+`Config.Image`, the exact Docker image object and its immutable `RepoDigests`,
+the expected digest, Compose config hashes, mounts, container ID and
+`recreateRequired` reasons. A legacy tag is observation metadata only: it is
+never resolved or trusted. Content matches only when the expected canonical
+`repository@sha256` occurs in the exact object's `RepoDigests`; a matching
+object behind a tag is reported separately as a non-canonical configured
+reference requiring bounded recreation. Missing object evidence fails closed.
+The workflow also fails when more than three service hashes differ or when the
+exact service inventory or report SHA cannot be authenticated.
 
 Review the authenticated bounded normalization protocol independently; verify its final recomputed `report_sha256` and exact 8/20 service inventory. The expected initial legacy delta is at
 least Paid `paid-edge` because its effective container may still mount the
@@ -287,3 +319,6 @@ baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
 SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
 returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+PLAN performs no pull, build, push, start or recreate. A proven content
+mismatch remains visible for separate human review; APPLY is never implied and
+must remain release/bundle/config/service bounded under the global lock.

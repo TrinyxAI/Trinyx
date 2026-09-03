@@ -1,0 +1,137 @@
+name: Build Historical Staging Baseline Implementation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: trinyx-historical-staging-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout trusted baseline builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify trusted builder checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: Checkout exact historical source as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          path: historical-source
+          persist-credentials: false
+      - name: Authenticate historical GitHub publication evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit=aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          test "$(git -C historical-source rev-parse HEAD)" = "$source_commit"
+          mkdir -p historical-input/cloud historical-input/paid
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417 > historical-input/backend-run.json
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444302902 > historical-input/frontend-run.json
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417/artifacts \
+            --jq '.artifacts[] | select(.id == 9777989306)' > historical-input/artifact.json
+          test "$(jq -r .id historical-input/artifact.json)" = 9777989306
+          gh api /repos/TrinyxAI/Trinyx/actions/artifacts/9777989306/zip > historical-input/cloud.zip
+          unzip -q historical-input/cloud.zip -d historical-input/cloud
+          test -f historical-input/cloud/cloud-image-manifest.json
+      - name: Inspect immutable Paid image provenance without pull
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspect() {
+            local package="$1" out="$2"
+            local tag="${package}:aeb2a447ea7ce0436a60549713636225dfe1a2c1"
+            local digest image labels
+            digest=$(docker buildx imagetools inspect "$tag" | awk '$1 == "Digest:" {print $2; exit}')
+            image=$(docker buildx imagetools inspect "$tag" --format '{{json .Image}}')
+            labels=$(jq -ce '.config.Labels | select(type == "object")' <<<"$image")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            jq -n --arg package "$package" --arg tag "$tag" --arg digest "$digest" \
+              --argjson labels "$labels" '{package:$package,tag:$tag,digest:$digest,labels:$labels}' > "$out"
+          }
+          inspect ghcr.io/trinyxai/trinyx-backend historical-input/paid/backend-inspect.json
+          inspect ghcr.io/trinyxai/trinyx-frontend historical-input/paid/frontend-inspect.json
+      - name: Validate evidence and construct canonical Paid manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/historical_baseline.py \
+            --backend-run historical-input/backend-run.json \
+            --frontend-run historical-input/frontend-run.json \
+            --artifact historical-input/artifact.json \
+            --cloud-manifest historical-input/cloud/cloud-image-manifest.json \
+            --inventory platform/release/runtime-inventory.json \
+            --backend-inspect historical-input/paid/backend-inspect.json \
+            --frontend-inspect historical-input/paid/frontend-inspect.json \
+            --out historical-input/paid
+      - name: Assemble canonical 28-image inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/assemble-release-images.py \
+            --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
+            --inventory platform/release/runtime-inventory.json \
+            --manifest historical-input/cloud/cloud-image-manifest.json \
+            --manifest historical-input/paid/backend.json \
+            --manifest historical-input/paid/frontend.json \
+            --manifest platform/release/third-party-images.json \
+            --out release-images.json
+          python3 platform/release/validate-runtime-images.py \
+            --contract platform/release/runtime-inventory.json --images release-images.json
+      - name: Build deterministic bundle from exact historical source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/build-deployment-bundle.py \
+            --repo historical-source \
+            --contract platform/release/deployment-bundle-files.json \
+            --out deployment-bundle.tar \
+            --manifest-out deployment-bundle.json
+      - name: Create canonical release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/release.py create \
+            --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
+            --source-ref refs/heads/codex/trinyx-cloud-gateway-v2 \
+            --platform-commit "$GITHUB_SHA" \
+            --images release-images.json \
+            --bundle-manifest deployment-bundle.json \
+            --out release.json
+          python3 platform/release/release.py validate --manifest release.json
+          jq -er '.releaseId | test("^rel-v1-[0-9a-f]{32}$")' release.json >/dev/null
+      - name: Upload canonical historical baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: trinyx-historical-staging-baseline-aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          path: |
+            release.json
+            release-images.json
+            deployment-bundle.json
+            deployment-bundle.tar
+          if-no-files-found: error
+          retention-days: 365
+      - name: Attest exact canonical baseline subjects
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            release.json
+            release-images.json
+            deployment-bundle.json
+            deployment-bundle.tar

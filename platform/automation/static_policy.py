@@ -23,6 +23,7 @@ LIVE_IMPLEMENTATIONS = {name.replace(".yml", "-impl.yml") for name in LIVE_WRAPP
 OIDC_IMPLEMENTATIONS = LIVE_IMPLEMENTATIONS | {
     "build-release-candidate-impl.yml",
     "build-trinyx-ce-images-impl.yml",
+    "build-historical-staging-baseline-impl.yml",
 }
 
 

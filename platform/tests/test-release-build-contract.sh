@@ -12,6 +12,21 @@ FIXTURE="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
 ASSEMBLER="$ROOT/platform/release/assemble-release-images.py"
 BUNDLE_BUILDER="$ROOT/platform/release/build-deployment-bundle.py"
 BUNDLE_CONTRACT="$ROOT/platform/release/deployment-bundle-files.json"
+HISTORICAL_WORKFLOW="$ROOT/.github/workflows/build-historical-staging-baseline-impl.yml"
+HISTORICAL_WRAPPER="$ROOT/.github/workflows/build-historical-staging-baseline.yml"
+
+grep -Fq 'uses: ./.github/workflows/build-historical-staging-baseline-impl.yml' "$HISTORICAL_WRAPPER"
+
+grep -Fq '33444272417' "$HISTORICAL_WORKFLOW"
+grep -Fq '33444302902' "$HISTORICAL_WORKFLOW"
+grep -Fq '9777989306' "$HISTORICAL_WORKFLOW"
+grep -Fq 'docker buildx imagetools inspect' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--repo historical-source' "$HISTORICAL_WORKFLOW"
+grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
+if grep -Eq 'docker build(x build)? |docker/build-push-action|docker push|imagetools create|packages: write|--release-id' "$HISTORICAL_WORKFLOW"; then
+  echo ERROR_HISTORICAL_BASELINE_IS_NOT_METADATA_ONLY >&2
+  exit 1
+fi
 
 python3 - "$FIXTURE" "$SOURCE" "$TMP" <<'PY'
 import json, pathlib, sys

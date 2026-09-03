@@ -65,11 +65,10 @@ def normalization_protocol(
             else "none"
         )
         lines.append(
-            f"NORMALIZATION role={request.role} service={service} "
+            f"NORMALIZATION service={service} "
             f"recreate={'yes' if mismatch else 'no'} reasons={reasons} image_match=yes "
             f"container_id={index + 1000:064x} image_object=sha256:{index + 2000:064x} "
             "configured_image_canonical=yes "
-            f"configured_image_sha256=sha256:{index + 2500:064x} "
             f"expected_image_digest=sha256:{index:064x} "
             f"repo_digests_sha256=sha256:{index + 3000:064x} "
             f"compose_drift={compose_drift} current_config_hash={current_hash} "

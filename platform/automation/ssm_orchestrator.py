@@ -368,8 +368,8 @@ def validate_normalization_protocol(
     )
 
     service_keys = {
-        "role", "service", "recreate", "reasons", "image_match", "container_id",
-        "image_object", "configured_image_canonical", "configured_image_sha256",
+        "service", "recreate", "reasons", "image_match", "container_id",
+        "image_object", "configured_image_canonical",
         "expected_image_digest",
         "repo_digests_sha256", "compose_drift", "current_config_hash",
         "expected_config_hash",
@@ -391,7 +391,7 @@ def validate_normalization_protocol(
     for line in lines[1:-1]:
         fields = _normalization_fields(line, "NORMALIZATION", service_keys)
         service = fields["service"]
-        require(fields["role"] == role and service in expected_services and service not in seen,
+        require(service in expected_services and service not in seen,
                 "normalization service is unknown, duplicated or role-mismatched")
         seen.add(service)
         require(fields["recreate"] in {"yes", "no"}
@@ -416,7 +416,7 @@ def validate_normalization_protocol(
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", fields["image_object"]) is not None,
                 "invalid normalization image object ID")
         for key in (
-            "configured_image_sha256", "expected_image_digest", "repo_digests_sha256",
+            "expected_image_digest", "repo_digests_sha256",
             "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
         ):
             require(DIGEST_RE.fullmatch(fields[key]) is not None,

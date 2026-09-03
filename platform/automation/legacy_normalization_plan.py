@@ -368,12 +368,11 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
         }[item["composeDriftClassification"]]
         lines.append(
             "NORMALIZATION "
-            f"role={role} service={service} "
+            f"service={service} "
             f"recreate={'yes' if item['recreateRequired'] else 'no'} reasons={reasons} "
             f"image_match={'yes' if item['imageContentMatches'] else 'no'} "
             f"container_id={item['currentContainerId']} image_object={item['currentImageObjectId']} "
             f"configured_image_canonical={'yes' if item['configuredImageCanonical'] else 'no'} "
-            f"configured_image_sha256={sha256_bytes(item['currentConfiguredImage'].encode('utf-8'))} "
             f"expected_image_digest={_image_digest(item['expectedImageDigest'])} "
             f"repo_digests_sha256={sha256_bytes(canonical_json(item['currentRepoDigests']))} "
             f"compose_drift={compose_drift} "

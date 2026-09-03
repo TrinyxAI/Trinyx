@@ -371,7 +371,7 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         self.assertIn("configured_image_canonical=yes", output)
         self.assertIn("compose_drift=matched", output)
         self.assertNotIn("explained_config_hash=", output)
-        self.assertRegex(output, r"configured_image_sha256=sha256:[0-9a-f]{64}")
+        self.assertNotIn("configured_image_sha256=", output)
         self.assertIn("bundle_digest=sha256:" + "b" * 64, output)
         self.assertIn("deployment_id=dep-" + "c" * 32, output)
         self.assertIn("config_revision=config-1", output)

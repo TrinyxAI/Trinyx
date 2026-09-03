@@ -67,6 +67,7 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
             "head_sha": HISTORICAL_SOURCE,
             "path": ".github/workflows/build-trinyx-backend.yml",
             "conclusion": "success",
+            "created_at": "2026-08-31T16:51:21Z",
             "repository": {"full_name": "TrinyxAI/Trinyx"},
             "referenced_workflows": [
                 {

@@ -175,6 +175,7 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         item = result["services"][service]
         self.assertEqual("redis:7-alpine", item["currentConfiguredImage"])
         self.assertTrue(item["imageContentMatches"])
+        self.assertTrue(item["imageObjectVerified"])
         self.assertFalse(item["configuredImageCanonical"])
         self.assertEqual(["IMAGE_REFERENCE_NON_CANONICAL"], item["reasons"])
         self.assertTrue(item["recreateRequired"])

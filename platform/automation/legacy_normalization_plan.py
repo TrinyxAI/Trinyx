@@ -210,6 +210,7 @@ def build_normalization_plan(
             "currentConfiguredImage": current_configured_image,
             "currentImageObjectId": current_image_object_id,
             "currentRepoDigests": current_repo_digests,
+            "imageObjectVerified": True,
             "expectedImageDigest": expected_image,
             "configuredImageCanonical": configured_image_canonical,
             "imageContentMatches": image_content_matches,

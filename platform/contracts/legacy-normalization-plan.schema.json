@@ -138,6 +138,7 @@
           "currentConfiguredImage",
           "currentImageObjectId",
           "currentRepoDigests",
+          "imageObjectVerified",
           "configuredImageCanonical",
           "imageContentMatches",
           "expectedImageDigest",
@@ -213,6 +214,9 @@
               "type": "string",
               "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
             }
+          },
+          "imageObjectVerified": {
+            "const": true
           },
           "configuredImageCanonical": {
             "type": "boolean"

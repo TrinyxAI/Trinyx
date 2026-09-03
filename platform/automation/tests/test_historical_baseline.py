@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(ROOT / "platform" / "release"))
 
 import historical_baseline as hb
@@ -111,26 +112,63 @@ class HistoricalBaselineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 hb.validate_artifact(item)
 
-    def test_cloud_manifest_requires_exact_commit_and_14_unique_services(self) -> None:
+    def test_real_legacy_cloud_manifest_is_mapped_by_exact_structural_binding(self) -> None:
         inventory = json.loads((ROOT / "platform/release/runtime-inventory.json").read_text())
-        app_names = [
-            item["name"] for item in inventory["images"]
-            if item["role"] == "cloud" and item["name"] not in {
-                "cloud-postgres", "cloud-redis", "cloud-minio", "cloud-minio-init",
-                "cloud-searxng", "cloud-edge",
-            }
-        ]
-        manifest = {"schemaVersion": 1, "commit": hb.SOURCE_COMMIT,
-                    "images": [{"name": name} for name in app_names]}
-        hb.validate_cloud_manifest(manifest, inventory)
+        historical_inventory = json.loads(
+            (FIXTURES / "historical-cloud-images-aeb2.json").read_text()
+        )
+        manifest = json.loads(
+            (FIXTURES / "historical-cloud-manifest-aeb2.json").read_text()
+        )
+        canonical = hb.canonical_cloud_manifest(manifest, inventory, historical_inventory)
+        self.assertEqual(14, len(canonical["images"]))
+        self.assertEqual(
+            {"cloud-" + name for name in {
+                "agent", "auth", "catalog", "conversation", "datasource", "gateway",
+                "interface", "keycloak", "migration", "orchestrator", "publication",
+                "storage", "trigger", "websearch",
+            }},
+            {item["name"] for item in canonical["images"]},
+        )
+        source = {item["service"]: item for item in manifest["images"]}
+        for item in canonical["images"]:
+            original = source[item["service"]]
+            self.assertEqual(original["environment"], item["environment"])
+            self.assertEqual(original["package"], item["package"])
+            self.assertEqual(original["digest"], item["digest"])
+            self.assertEqual(original["immutableRef"], item["immutableRef"])
+
         wrong = copy.deepcopy(manifest)
         wrong["commit"] = "f" * 40
         with self.assertRaises(ValueError):
-            hb.validate_cloud_manifest(wrong, inventory)
+            hb.canonical_cloud_manifest(wrong, inventory, historical_inventory)
         duplicate = copy.deepcopy(manifest)
         duplicate["images"][-1] = duplicate["images"][0]
         with self.assertRaises(ValueError):
-            hb.validate_cloud_manifest(duplicate, inventory)
+            hb.canonical_cloud_manifest(duplicate, inventory, historical_inventory)
+
+        for key in ("service", "environment", "package"):
+            with self.subTest(binding=key):
+                drift = copy.deepcopy(manifest)
+                drift["images"][0][key] += "-wrong"
+                with self.assertRaises(ValueError):
+                    hb.canonical_cloud_manifest(drift, inventory, historical_inventory)
+        for key, value in (
+            ("digest", "mutable"),
+            ("immutableRef", "ghcr.io/trinyxai/trinyx-cloud-agent:latest"),
+        ):
+            with self.subTest(image_identity=key):
+                drift = copy.deepcopy(manifest)
+                drift["images"][0][key] = value
+                with self.assertRaises(ValueError):
+                    hb.canonical_cloud_manifest(drift, inventory, historical_inventory)
+
+    def test_artifact_digest_is_the_exact_real_github_value(self) -> None:
+        self.assertEqual(
+            "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0",
+            hb.CLOUD_ARTIFACT_DIGEST,
+        )
+        hb.validate_artifact(artifact_fixture())
 
     def test_paid_tag_digest_and_oci_revision_are_strict(self) -> None:
         package = "ghcr.io/trinyxai/trinyx-backend"
@@ -161,6 +199,14 @@ class HistoricalBaselineTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
+        self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)
+        self.assertIn("sha256sum --check --strict", workflow)
+        self.assertIn(hb.CLOUD_ARTIFACT_DIGEST.removeprefix("sha256:"), workflow)
+        self.assertIn("actions: read", wrapper)
+        self.assertIn("actions: read", workflow)
+        self.assertIn("ref: ${{ job.workflow_sha }}", workflow)
+        self.assertIn('--platform-commit "$TRUSTED_BUILDER_COMMIT"', workflow)
+        self.assertNotIn('--platform-commit "$GITHUB_SHA"', workflow)
         self.assertIn("platform/release/release.py create", workflow)
         self.assertIn("--repo historical-source", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)

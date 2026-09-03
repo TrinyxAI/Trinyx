@@ -17,7 +17,7 @@ BACKEND_RUN_ID = 33444272417
 FRONTEND_RUN_ID = 33444302902
 CLOUD_ARTIFACT_ID = 9777989306
 CLOUD_ARTIFACT_NAME = f"trinyx-cloud-image-manifest-{SOURCE_COMMIT}"
-CLOUD_ARTIFACT_DIGEST = "sha256:8cb6a3df3aab35cd54db2d5760c785c7dd862229d1334be75eeff5b41bf52287"
+CLOUD_ARTIFACT_DIGEST = "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0"
 BACKEND_WORKFLOW = ".github/workflows/build-trinyx-backend.yml"
 CLOUD_WORKFLOW = f"{REPOSITORY}/.github/workflows/build-trinyx-cloud-images.yml@{SOURCE_COMMIT}"
 FRONTEND_WORKFLOW = ".github/workflows/build-trinyx-frontend.yml"
@@ -99,25 +99,114 @@ def validate_artifact(artifact: Any) -> None:
     )
 
 
-def validate_cloud_manifest(document: Any, inventory: Any) -> None:
+def canonical_cloud_manifest(
+    document: Any,
+    inventory: Any,
+    historical_inventory: Any,
+) -> dict[str, Any]:
     require(isinstance(document, dict), "Cloud manifest is not an object")
+    require(
+        set(document) == {"schemaVersion", "commit", "generatedAt", "images"},
+        "Cloud manifest schema mismatch",
+    )
     require(document.get("schemaVersion") == 1, "Cloud manifest schema mismatch")
     require(document.get("commit") == SOURCE_COMMIT, "Cloud manifest source mismatch")
     images = document.get("images")
     require(isinstance(images, list) and len(images) == 14, "Cloud manifest cardinality mismatch")
     require(isinstance(inventory, dict) and isinstance(inventory.get("images"), list),
             "runtime inventory is invalid")
-    expected = {
-        item["name"] for item in inventory["images"]
+    require(
+        isinstance(historical_inventory, dict)
+        and historical_inventory.get("schemaVersion") == 1
+        and isinstance(historical_inventory.get("images"), list)
+        and len(historical_inventory["images"]) == 14,
+        "historical Cloud inventory is invalid",
+    )
+
+    current = [
+        item for item in inventory["images"]
         if isinstance(item, dict) and item.get("role") == "cloud"
-        and str(item.get("name", "")).startswith("cloud-")
         and item.get("name") not in {
             "cloud-postgres", "cloud-redis", "cloud-minio", "cloud-minio-init",
             "cloud-searxng", "cloud-edge",
         }
+    ]
+    require(len(current) == 14, "canonical Cloud inventory cardinality mismatch")
+    canonical_by_binding: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in current:
+        require(
+            set(item) == {"name", "role", "service", "environment"},
+            "canonical Cloud inventory entry is invalid",
+        )
+        binding = (item["service"], item["environment"])
+        require(binding not in canonical_by_binding, "ambiguous canonical Cloud binding")
+        canonical_by_binding[binding] = item
+
+    historical_by_name: dict[str, dict[str, str]] = {}
+    for raw in historical_inventory["images"]:
+        required = {"name", "service", "package", "environment"}
+        require(
+            isinstance(raw, dict) and required.issubset(raw),
+            "historical Cloud inventory entry is invalid",
+        )
+        item = {key: str(raw[key]) for key in required}
+        require(item["name"] not in historical_by_name, "duplicate historical Cloud name")
+        require(
+            item["package"].startswith("ghcr.io/trinyxai/")
+            and "@" not in item["package"]
+            and not any(ch.isspace() for ch in item["package"]),
+            "historical Cloud package is invalid",
+        )
+        historical_by_name[item["name"]] = item
+    require(len(historical_by_name) == 14, "historical Cloud name cardinality mismatch")
+
+    canonical_images: list[dict[str, str]] = []
+    used_canonical: set[str] = set()
+    seen_historical: set[str] = set()
+    for raw in images:
+        required = {"name", "service", "package", "environment", "digest", "immutableRef"}
+        require(isinstance(raw, dict) and set(raw) == required,
+                "historical Cloud manifest entry is invalid")
+        legacy_name = str(raw["name"])
+        require(legacy_name not in seen_historical, "duplicate historical Cloud manifest name")
+        seen_historical.add(legacy_name)
+        source_binding = historical_by_name.get(legacy_name)
+        require(source_binding is not None, "unexpected historical Cloud manifest name")
+        for key in ("service", "environment", "package"):
+            require(str(raw[key]) == source_binding[key],
+                    f"historical Cloud manifest binding mismatch:{legacy_name}:{key}")
+        digest = str(raw["digest"])
+        immutable_ref = str(raw["immutableRef"])
+        require(DIGEST_RE.fullmatch(digest) is not None,
+                f"historical Cloud digest mismatch:{legacy_name}")
+        require(immutable_ref == source_binding["package"] + "@" + digest,
+                f"historical Cloud immutable ref mismatch:{legacy_name}")
+        canonical = canonical_by_binding.get(
+            (source_binding["service"], source_binding["environment"])
+        )
+        require(canonical is not None, f"missing canonical Cloud binding:{legacy_name}")
+        canonical_name = str(canonical["name"])
+        require(canonical_name not in used_canonical, "duplicate canonical Cloud mapping")
+        used_canonical.add(canonical_name)
+        canonical_images.append({
+            "name": canonical_name,
+            "service": source_binding["service"],
+            "package": source_binding["package"],
+            "environment": source_binding["environment"],
+            "digest": digest,
+            "immutableRef": immutable_ref,
+        })
+
+    require(set(seen_historical) == set(historical_by_name),
+            "missing historical Cloud manifest image")
+    require(set(used_canonical) == {str(item["name"]) for item in current},
+            "missing canonical Cloud mapping")
+    return {
+        "schemaVersion": 1,
+        "commit": SOURCE_COMMIT,
+        "generatedAt": document["generatedAt"],
+        "images": sorted(canonical_images, key=lambda item: item["name"]),
     }
-    names = [item.get("name") for item in images if isinstance(item, dict)]
-    require(len(names) == 14 and set(names) == expected, "Cloud manifest service inventory mismatch")
 
 
 def paid_manifest(document: Any, *, name: str, service: str, environment: str,
@@ -161,6 +250,7 @@ def main() -> None:
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--cloud-manifest", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
+    parser.add_argument("--historical-inventory", type=Path, required=True)
     parser.add_argument("--backend-inspect", type=Path, required=True)
     parser.add_argument("--frontend-inspect", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
@@ -170,7 +260,14 @@ def main() -> None:
     validate_run(load(args.frontend_run), run_id=FRONTEND_RUN_ID,
                  workflow=FRONTEND_WORKFLOW, cloud_reusable=False)
     validate_artifact(load(args.artifact))
-    validate_cloud_manifest(load(args.cloud_manifest), load(args.inventory))
+    write_canonical(
+        args.out / "cloud.json",
+        canonical_cloud_manifest(
+            load(args.cloud_manifest),
+            load(args.inventory),
+            load(args.historical_inventory),
+        ),
+    )
     write_canonical(args.out / "backend.json", paid_manifest(
         load(args.backend_inspect), name="paid-backend", service="livecontext",
         environment="BACKEND_IMAGE", package="ghcr.io/trinyxai/trinyx-backend",

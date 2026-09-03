@@ -4,11 +4,13 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   baseline:
     permissions:
+      actions: read
       contents: read
       packages: read
       id-token: write

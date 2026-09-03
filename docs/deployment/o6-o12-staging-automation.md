@@ -45,6 +45,22 @@ behavior is unchanged. Applying the files to an already running host performs
 no Docker restart. The gate takes effect on the next explicit Docker start or
 host reboot.
 
+If SSM or the network is temporarily unavailable, the materializer retries
+under its existing `Restart=on-failure` policy, while Docker remains failed and
+the application stays stopped. Systemd does not automatically requeue a unit
+whose start job already failed because a required unit failed. After the
+dependency is healthy, the deterministic recovery is therefore:
+
+```text
+systemctl reset-failed docker.service
+systemctl start docker.service
+```
+
+The second start transaction reruns and revalidates the required materializer
+before Docker. It does not run Compose, recreate containers, change `active`,
+or use a timing delay. Operators must not start containers directly while the
+Docker gate is failed.
+
 Application builds remain manual or application-input gated. Registration and
 qualification are separate manual workflows bound to the `staging` GitHub
 Environment. The publisher role cannot call SSM. The deploy role cannot write
@@ -247,11 +263,41 @@ from the exact historical source tree as data and `release.py` computes the
 content-derived release ID. The four canonical files receive GitHub build
 provenance attestations.
 
+The exact historical Cloud artifact uses legacy logical names (`agent`,
+`auth`, ..., `websearch`). Those names are not prefixed heuristically. A
+fail-closed adapter validates every original `name`/`service`/`environment`/
+`package` binding against the exact historical source inventory, maps the
+binding one-to-one to the current canonical inventory, and preserves the
+original digest and immutable reference. The downloaded ZIP is checked against
+GitHub artifact digest
+`sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0`
+before extraction.
+
 This is not baseline observation and it never imports identities from EC2.
 Live runtime evidence cannot replace missing historical publication provenance.
 The workflow has read-only package access, performs only manifest inspection,
 and contains no image build, push, registration or AWS operation. Do not run it
 until its repository change is independently reviewed.
+
+This workflow is **not currently dispatchable**: GitHub requires a manual
+`workflow_dispatch` entry point to exist on the default branch, while this file
+exists only on the platform branch/PR. Do not claim or attempt a branch-only
+manual dispatch. A later, separately reviewed tiny default-branch caller must
+delegate to `build-historical-staging-baseline-impl.yml` at the exact immutable
+final builder SHA and grant only `actions:read`, `contents:read`,
+`packages:read`, `id-token:write`, and `attestations:write`.
+
+The current release registrar also does not yet authorize this new builder.
+After the builder SHA exists and its output is reviewed, a separate registrar
+change must recognize only the exact aeb2 source, exact historical run and
+artifact identities, exact baseline artifact name, exact default-branch caller
+commit, and exact reusable builder path/SHA. All four internal attestations are
+mandatory. Their signer workflow/digest must identify the immutable baseline
+implementation; the attestation source digest must identify the exact caller
+run commit. `release.sourceCommit` remains aeb2 and
+`release.platformCommit` remains the reusable builder's `job.workflow_sha`.
+This is a new modern policy path and must not reuse or widen the frozen f3a4
+compatibility exception.
 
 The operational order remains: prove and build the canonical baseline →
 register it → install without changing `active` → Paid normalization PLAN →

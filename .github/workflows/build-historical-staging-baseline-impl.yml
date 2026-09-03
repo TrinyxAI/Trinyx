@@ -4,6 +4,7 @@ on:
   workflow_call:
 
 permissions:
+  actions: read
   contents: read
   packages: read
   id-token: write
@@ -20,13 +21,16 @@ jobs:
       - name: Checkout trusted baseline builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
       - name: Verify trusted builder checkout
+        env:
+          TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TRUSTED_BUILDER_COMMIT"
+          [[ "$TRUSTED_BUILDER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
       - name: Checkout exact historical source as data
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -48,8 +52,17 @@ jobs:
             --jq '.artifacts[] | select(.id == 9777989306)' > historical-input/artifact.json
           test "$(jq -r .id historical-input/artifact.json)" = 9777989306
           gh api /repos/TrinyxAI/Trinyx/actions/artifacts/9777989306/zip > historical-input/cloud.zip
+          printf '%s  %s\n' \
+            '8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0' \
+            historical-input/cloud.zip | sha256sum --check --strict
           unzip -q historical-input/cloud.zip -d historical-input/cloud
           test -f historical-input/cloud/cloud-image-manifest.json
+      - name: Authenticate to GHCR for read-only metadata inspection
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Inspect immutable Paid image provenance without pull
         shell: bash
         run: |
@@ -77,6 +90,7 @@ jobs:
             --artifact historical-input/artifact.json \
             --cloud-manifest historical-input/cloud/cloud-image-manifest.json \
             --inventory platform/release/runtime-inventory.json \
+            --historical-inventory historical-source/docker/cloud-images.json \
             --backend-inspect historical-input/paid/backend-inspect.json \
             --frontend-inspect historical-input/paid/frontend-inspect.json \
             --out historical-input/paid
@@ -87,7 +101,7 @@ jobs:
           python3 platform/release/assemble-release-images.py \
             --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
             --inventory platform/release/runtime-inventory.json \
-            --manifest historical-input/cloud/cloud-image-manifest.json \
+            --manifest historical-input/paid/cloud.json \
             --manifest historical-input/paid/backend.json \
             --manifest historical-input/paid/frontend.json \
             --manifest platform/release/third-party-images.json \
@@ -104,13 +118,15 @@ jobs:
             --out deployment-bundle.tar \
             --manifest-out deployment-bundle.json
       - name: Create canonical release manifest
+        env:
+          TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
         shell: bash
         run: |
           set -euo pipefail
           python3 platform/release/release.py create \
             --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
             --source-ref refs/heads/codex/trinyx-cloud-gateway-v2 \
-            --platform-commit "$GITHUB_SHA" \
+            --platform-commit "$TRUSTED_BUILDER_COMMIT" \
             --images release-images.json \
             --bundle-manifest deployment-bundle.json \
             --out release.json

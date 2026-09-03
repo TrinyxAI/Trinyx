@@ -187,6 +187,14 @@ Because this repository was created after GitHub's 2026 immutable-subject rollou
 
 ### Pre-merge manual entry point
 
+The historical aeb2 baseline builder remains deliberately non-operational in
+this branch. Its `workflow_dispatch` file is absent from the default branch and
+the current registrar trusts neither its artifact name nor its signer. A later
+default-branch caller must pin the final reusable builder SHA; a separate
+registrar authorization must pin that caller/build identity and require all
+four modern attestations. Neither follow-up may alter the exact frozen f3a4
+exception.
+
 GitHub only dispatches a workflow file registered on the default branch. Until the dedicated workflows are integrated, manually dispatch `build-trinyx-backend.yml` at ref `codex/platform-release-automation` and select one explicit operation. The bridge has no generic command input and calls only pinned repository reusable workflows. Selecting a platform operation does not run backend/frontend tests, Docker build, image publication or any push-triggered staging contact.
 
 

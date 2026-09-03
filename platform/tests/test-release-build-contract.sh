@@ -16,14 +16,22 @@ HISTORICAL_WORKFLOW="$ROOT/.github/workflows/build-historical-staging-baseline-i
 HISTORICAL_WRAPPER="$ROOT/.github/workflows/build-historical-staging-baseline.yml"
 
 grep -Fq 'uses: ./.github/workflows/build-historical-staging-baseline-impl.yml' "$HISTORICAL_WRAPPER"
+grep -Fq 'actions: read' "$HISTORICAL_WRAPPER"
 
 grep -Fq '33444272417' "$HISTORICAL_WORKFLOW"
 grep -Fq '33444302902' "$HISTORICAL_WORKFLOW"
 grep -Fq '9777989306' "$HISTORICAL_WORKFLOW"
+grep -Fq '8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0' "$HISTORICAL_WORKFLOW"
+grep -Fq 'sha256sum --check --strict' "$HISTORICAL_WORKFLOW"
+grep -Fq 'actions: read' "$HISTORICAL_WORKFLOW"
+grep -Fq 'docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9' "$HISTORICAL_WORKFLOW"
 grep -Fq 'docker buildx imagetools inspect' "$HISTORICAL_WORKFLOW"
+grep -Fq 'ref: ${{ job.workflow_sha }}' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--platform-commit "$TRUSTED_BUILDER_COMMIT"' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--manifest historical-input/paid/cloud.json' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--repo historical-source' "$HISTORICAL_WORKFLOW"
 grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
-if grep -Eq 'docker build(x build)? |docker/build-push-action|docker push|imagetools create|packages: write|--release-id' "$HISTORICAL_WORKFLOW"; then
+if grep -Eq 'docker build(x build)? |docker/build-push-action|docker pull|docker push|imagetools create|packages: write|--release-id' "$HISTORICAL_WORKFLOW"; then
   echo ERROR_HISTORICAL_BASELINE_IS_NOT_METADATA_ONLY >&2
   exit 1
 fi

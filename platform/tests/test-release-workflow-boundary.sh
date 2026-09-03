@@ -21,7 +21,7 @@ python3 - "$CANDIDATE_WRAPPER" "$CANDIDATE" "$CE_WRAPPER" "$CE" "$PLATFORM" "$RE
 from pathlib import Path
 import re,sys
 BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
-CONTROL_PLANE_CODE="5a68200d476295f086f871a38c8b5fea7ad8ec0a"
+CONTROL_PLANE_CODE="ee40526a1891d42cd572bf64326b365f0f68b64f"
 PRIVILEGED_WORKFLOW="9954d6b56a5d06b9d053cd8748df50bcf516a82f"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(

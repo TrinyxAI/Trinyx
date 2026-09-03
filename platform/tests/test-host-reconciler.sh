@@ -41,6 +41,12 @@ run_role() {
     diff -u \
       "$ROOT/platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/runtime-static.env" \
       "$fake/etc/trinyx/staging/cloud/config/runtime-static.env"
+    diff -u \
+      "$ROOT/platform/host/cloud/systemd/staging/docker.service.d/20-trinyx-staging-runtime-gate.conf" \
+      "$fake/etc/systemd/system/docker.service.d/20-trinyx-staging-runtime-gate.conf"
+    diff -u \
+      "$ROOT/platform/host/cloud/systemd/staging/trinyx-cloud-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf" \
+      "$fake/etc/systemd/system/trinyx-cloud-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf"
     test ! -e "$fake/etc/trinyx/staging/cloud/active"
   else
     diff -u \
@@ -49,6 +55,12 @@ run_role() {
     diff -u \
       "$ROOT/platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid-runtime.override.yml" \
       "$fake/etc/trinyx/staging/paid/config/paid-runtime.override.yml"
+    diff -u \
+      "$ROOT/platform/host/paid/systemd/staging/docker.service.d/20-trinyx-staging-runtime-gate.conf" \
+      "$fake/etc/systemd/system/docker.service.d/20-trinyx-staging-runtime-gate.conf"
+    diff -u \
+      "$ROOT/platform/host/paid/systemd/staging/trinyx-paid-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf" \
+      "$fake/etc/systemd/system/trinyx-paid-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf"
     test ! -e "$fake/etc/trinyx/staging/paid/active"
   fi
 

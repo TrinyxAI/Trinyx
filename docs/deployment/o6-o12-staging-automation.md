@@ -10,6 +10,41 @@ Build -> Release -> Attestation -> S3 Registry -> SSM -> Install -> Preflight
       -> Activate -> Health -> Rollback
 ```
 
+## Staging reboot contract
+
+Docker state, including images, volumes and existing containers, persists under
+`/srv/trinyx/docker`. The complete runtime generations under `/run/trinyx`
+are ephemeral and must be rebuilt after every boot. Staging-only systemd
+drop-ins therefore gate `docker.service` with `Requires=` and `After=` on
+the role's runtime materializer. Cloud also requires its pre-Docker truststore
+materializer:
+
+```text
+Cloud: local-fs -> pre-docker -> network/SSM runtime materializer -> Docker
+Paid:  local-fs -----------> network/SSM runtime materializer -> Docker
+```
+
+The runtime materializers use the network, AWS CLI/SSM and persistent release
+and configuration files; they do not use Docker. The graph is therefore
+acyclic. A missing persistent input, unavailable SSM value, invalid secret,
+failed ownership/mode check or incomplete generation prevents Docker from
+starting, so restart-managed application containers cannot become boot-ready
+against a partial runtime. Cloud pre-Docker failure has the same fail-closed
+effect.
+
+A reboot does not pull or rebuild images, run Compose, recreate the stack,
+change the active release pointer or delete persistent Docker state. After the
+gate succeeds, Docker may restart only the existing long-running containers
+whose stored policy is `unless-stopped`. Migration and init containers retain
+`restart: "no"` and remain exited unless an explicitly approved deployment
+runs them. The active release selected before reboot remains the source read by
+the materializer.
+
+The reconciler installs these drop-ins only for `staging`; production unit
+behavior is unchanged. Applying the files to an already running host performs
+no Docker restart. The gate takes effect on the next explicit Docker start or
+host reboot.
+
 Application builds remain manual or application-input gated. Registration and
 qualification are separate manual workflows bound to the `staging` GitHub
 Environment. The publisher role cannot call SSM. The deploy role cannot write

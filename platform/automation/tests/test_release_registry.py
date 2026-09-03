@@ -149,6 +149,30 @@ class RegistryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def _registered_marker(self) -> tuple[MemoryRegistry, str, dict[str, Any]]:
+        registry = MemoryRegistry()
+        registration = register(registry, self.candidate)
+        marker_key = (
+            f"staging/releases/{self.release_id}/"
+            f"{self.bundle_digest.removeprefix('sha256:')}/registration.json"
+        )
+        marker = json.loads(registry.objects[marker_key])
+        self.assertEqual(registration, marker)
+        return registry, marker_key, marker
+
+    @staticmethod
+    def _replace_marker(
+        registry: MemoryRegistry,
+        marker_key: str,
+        marker: dict[str, Any],
+    ) -> None:
+        registry.objects[marker_key] = (
+            json.dumps(marker, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        )
+
+    def _fetch_destination(self, suffix: str) -> Path:
+        return Path(self.temp.name) / f"downloaded-{suffix}"
+
     def test_register_fetch_happy_path_and_idempotence(self) -> None:
         first = register(self.registry, self.candidate)
         second = register(self.registry, self.candidate)
@@ -156,6 +180,186 @@ class RegistryTests(unittest.TestCase):
         destination = Path(self.temp.name) / "downloaded"
         fetch(self.registry, self.release_id, self.bundle_digest, destination)
         self.assertEqual({*OBJECT_FILES}, {path.name for path in destination.iterdir()})
+
+    def test_fetch_registration_marker_schema_is_closed(self) -> None:
+        expected_keys = {
+            "schemaVersion",
+            "environment",
+            "releaseId",
+            "bundleDigest",
+            "objects",
+        }
+        registry, marker_key, marker = self._registered_marker()
+        self.assertEqual(expected_keys, set(marker))
+        fetch(
+            registry,
+            self.release_id,
+            self.bundle_digest,
+            self._fetch_destination("valid-marker"),
+        )
+
+        for missing_key in sorted(expected_keys):
+            with self.subTest(missing_key=missing_key):
+                registry, marker_key, marker = self._registered_marker()
+                del marker[missing_key]
+                self._replace_marker(registry, marker_key, marker)
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration marker schema mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(f"missing-{missing_key}"),
+                    )
+
+        registry, marker_key, marker = self._registered_marker()
+        marker["unexpected"] = "not-allowed"
+        self._replace_marker(registry, marker_key, marker)
+        with self.assertRaisesRegex(
+            InvariantError,
+            "registration marker schema mismatch",
+        ):
+            fetch(
+                registry,
+                self.release_id,
+                self.bundle_digest,
+                self._fetch_destination("extra-key"),
+            )
+
+    def test_fetch_registration_marker_root_must_be_object(self) -> None:
+        for index, root in enumerate((None, [], "registration", 1, True)):
+            with self.subTest(root=root):
+                registry, marker_key, _ = self._registered_marker()
+                registry.objects[marker_key] = json.dumps(root).encode() + b"\n"
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration marker schema mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(f"non-object-root-{index}"),
+                    )
+
+    def test_fetch_registration_marker_version_and_environment_are_exact(self) -> None:
+        for version in (2, 0, "1", True, None):
+            with self.subTest(schemaVersion=version):
+                registry, marker_key, marker = self._registered_marker()
+                marker["schemaVersion"] = version
+                self._replace_marker(registry, marker_key, marker)
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration marker version mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(
+                            f"version-{type(version).__name__}-{version}"
+                        ),
+                    )
+
+        for environment in ("prod", "STAGING", "", None):
+            with self.subTest(environment=environment):
+                registry, marker_key, marker = self._registered_marker()
+                marker["environment"] = environment
+                self._replace_marker(registry, marker_key, marker)
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration marker environment mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(
+                            f"environment-{type(environment).__name__}-{environment}"
+                        ),
+                    )
+
+    def test_fetch_retains_registration_identity_and_object_guards(self) -> None:
+        for field, value in (
+            ("releaseId", "rel-v1-" + "0" * 32),
+            ("bundleDigest", "sha256:" + "0" * 64),
+        ):
+            with self.subTest(identity=field):
+                registry, marker_key, marker = self._registered_marker()
+                marker[field] = value
+                self._replace_marker(registry, marker_key, marker)
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration identity mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(f"identity-{field}"),
+                    )
+
+        for objects in ({}, [], [None] * len(OBJECT_FILES)):
+            with self.subTest(objects=type(objects).__name__):
+                registry, marker_key, marker = self._registered_marker()
+                marker["objects"] = objects
+                self._replace_marker(registry, marker_key, marker)
+                expected_error = (
+                    "bad registration object"
+                    if isinstance(objects, list) and len(objects) == len(OBJECT_FILES)
+                    else "registration object inventory mismatch"
+                )
+                with self.assertRaisesRegex(InvariantError, expected_error):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(
+                            f"objects-{type(objects).__name__}-{len(objects)}"
+                        ),
+                    )
+
+        for field, value, error in (
+            ("sha256", "0" * 64, "downloaded object checksum mismatch"),
+            ("sizeBytes", 0, "downloaded object checksum mismatch"),
+            ("key", "staging/releases/escape/release.json", "registration key escapes release prefix"),
+        ):
+            with self.subTest(object_field=field):
+                registry, marker_key, marker = self._registered_marker()
+                marker["objects"][0][field] = value
+                self._replace_marker(registry, marker_key, marker)
+                with self.assertRaisesRegex(InvariantError, error):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(f"object-{field}"),
+                    )
+
+    def test_fetch_rejects_candidate_that_is_invalid_after_verified_download(self) -> None:
+        registry, marker_key, marker = self._registered_marker()
+        release_item = next(
+            item for item in marker["objects"] if item["key"].endswith("/release.json")
+        )
+        tampered_release = json.loads(registry.objects[release_item["key"]])
+        tampered_release["environment"] = "production"
+        tampered_bytes = (
+            json.dumps(tampered_release, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+        )
+        registry.objects[release_item["key"]] = tampered_bytes
+        release_item["sizeBytes"] = len(tampered_bytes)
+        release_item["sha256"] = sha256_bytes(tampered_bytes).removeprefix("sha256:")
+        self._replace_marker(registry, marker_key, marker)
+        with self.assertRaises(InvariantError):
+            fetch(
+                registry,
+                self.release_id,
+                self.bundle_digest,
+                self._fetch_destination("invalid-candidate"),
+            )
 
     def test_missing_s3_object(self) -> None:
         registration = register(self.registry, self.candidate)

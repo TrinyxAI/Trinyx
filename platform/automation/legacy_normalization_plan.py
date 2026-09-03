@@ -44,6 +44,7 @@ else:
 
 IMAGE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 IMAGE_OBJECT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+CONFIGURED_IMAGE_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,4096}$")
 DEPLOYMENT_RE = re.compile(r"^dep-[0-9a-f]{32}$")
 CONFIG_REVISION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 COMPOSE_VERSION_RE = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
@@ -168,8 +169,8 @@ def build_normalization_plan(
         service_model = models[service]
         require(isinstance(service_model, dict), "invalid rendered Compose service")
         expected_image = str(service_model.get("image", ""))
-        require(IMAGE_RE.fullmatch(current_configured_image) is not None,
-                "legacy configured image is not digest-only")
+        require(CONFIGURED_IMAGE_RE.fullmatch(current_configured_image) is not None,
+                "legacy configured image observation is invalid")
         require(IMAGE_OBJECT_RE.fullmatch(current_image_object_id) is not None,
                 "legacy Docker image object ID is invalid")
         require(current_image_object_id in repo_digests_by_image,
@@ -182,14 +183,19 @@ def build_normalization_plan(
         current_hash = state["composeConfigHash"]
         expected_hash = expected_hashes[service]
         reasons: list[str] = []
-        configured_image_matches = current_configured_image == expected_image
-        image_object_matches = expected_image in current_repo_digests
-        if not configured_image_matches:
-            reasons.append("IMAGE_DIGEST_MISMATCH")
-        if not image_object_matches:
+        configured_image_is_digest = IMAGE_RE.fullmatch(current_configured_image) is not None
+        configured_image_canonical = current_configured_image == expected_image
+        image_content_matches = expected_image in current_repo_digests
+        if configured_image_is_digest:
+            require(
+                current_configured_image in current_repo_digests,
+                "configured immutable image contradicts Docker object RepoDigests",
+            )
+        if not configured_image_canonical:
+            reasons.append("IMAGE_REFERENCE_NON_CANONICAL")
+        if not image_content_matches:
             reasons.append("IMAGE_OBJECT_DIGEST_MISMATCH")
-        image_verified = configured_image_matches and image_object_matches
-        if image_verified:
+        if image_content_matches:
             image_matches += 1
         if current_hash != expected_hash:
             reasons.append("COMPOSE_CONFIG_HASH_MISMATCH")
@@ -205,7 +211,8 @@ def build_normalization_plan(
             "currentImageObjectId": current_image_object_id,
             "currentRepoDigests": current_repo_digests,
             "expectedImageDigest": expected_image,
-            "imageObjectVerified": image_verified,
+            "configuredImageCanonical": configured_image_canonical,
+            "imageContentMatches": image_content_matches,
             "currentComposeConfigHash": current_hash,
             "expectedComposeConfigHash": expected_hash,
             "currentMounts": current_mounts,
@@ -219,7 +226,7 @@ def build_normalization_plan(
     mismatch_count = service_count - hash_matches
     recreate = [name for name, item in services.items() if item["recreateRequired"]]
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "environment": "staging",
         "role": role,
         "baselineReleaseId": baseline_release_id,
@@ -249,17 +256,17 @@ def build_normalization_plan(
 
 
 def _image_digest(image_ref: str) -> str:
-    require(IMAGE_RE.fullmatch(image_ref) is not None, "invalid configured image in normalization protocol")
+    require(IMAGE_RE.fullmatch(image_ref) is not None, "invalid expected image in normalization protocol")
     return "sha256:" + image_ref.rsplit("@sha256:", 1)[1]
 
 
 def render_ssm_protocol(record: dict[str, Any]) -> str:
     """Render a bounded, marker-last protocol safe for SSM's 24k stdout field."""
-    require(record.get("schemaVersion") == 2, "unsupported normalization report")
+    require(record.get("schemaVersion") == 3, "unsupported normalization report")
     role = str(record["role"])
     release_id = str(record["baselineReleaseId"])
     header = (
-        "LEGACY_NORMALIZATION_REPORT_V1 "
+        "LEGACY_NORMALIZATION_REPORT_V2 "
         f"role={role} release_id={release_id} bundle_digest={record['bundleDigest']} "
         f"deployment_id={record['deploymentId']} config_revision={record['environmentConfigRevision']} "
         f"config_digest={record['environmentConfigDigest']} "
@@ -279,9 +286,10 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
             "NORMALIZATION "
             f"role={role} service={service} "
             f"recreate={'yes' if item['recreateRequired'] else 'no'} reasons={reasons} "
-            f"image_match={'yes' if item['imageObjectVerified'] else 'no'} "
+            f"image_match={'yes' if item['imageContentMatches'] else 'no'} "
             f"container_id={item['currentContainerId']} image_object={item['currentImageObjectId']} "
-            f"configured_image_digest={_image_digest(item['currentConfiguredImage'])} "
+            f"configured_image_canonical={'yes' if item['configuredImageCanonical'] else 'no'} "
+            f"configured_image_sha256={sha256_bytes(item['currentConfiguredImage'].encode('utf-8'))} "
             f"expected_image_digest={_image_digest(item['expectedImageDigest'])} "
             f"repo_digests_sha256={sha256_bytes(canonical_json(item['currentRepoDigests']))} "
             f"current_config_hash={item['currentComposeConfigHash']} "

@@ -15,6 +15,7 @@ from legacy_normalization_plan import (
     render_ssm_protocol,
 )
 from legacy_runtime import SERVICES
+from invariants import InvariantError
 
 
 def config_hash(service: str) -> str:
@@ -135,15 +136,19 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         )
         result = self.build(containers, model, hashes)
         self.assertEqual("MISMATCH", result["imageCompatibility"])
-        self.assertIn("IMAGE_DIGEST_MISMATCH", result["services"][service]["reasons"])
+        self.assertIn("IMAGE_REFERENCE_NON_CANONICAL", result["services"][service]["reasons"])
+        self.assertIn("IMAGE_OBJECT_DIGEST_MISMATCH", result["services"][service]["reasons"])
         self.assertIn("currentConfiguredImage", result["services"][service])
         self.assertRegex(result["services"][service]["currentImageObjectId"], r"^sha256:[0-9a-f]{64}$")
 
     def test_running_image_object_must_expose_expected_repo_digest(self) -> None:
         containers, model, hashes = self.fixture()
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
         inspected = [
-            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
-            for container in containers
+            {"Id": container["Image"], "RepoDigests": [
+                model["services"][sorted(SERVICES["paid"])[index]]["image"]
+            ]}
+            for index, container in enumerate(containers)
         ]
         service = sorted(SERVICES["paid"])[0]
         inspected[0]["RepoDigests"] = [
@@ -151,9 +156,79 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         ]
         result = self.build(containers, model, hashes, image_inspections=inspected)
         item = result["services"][service]
-        self.assertFalse(item["imageObjectVerified"])
+        self.assertFalse(item["imageContentMatches"])
         self.assertIn("IMAGE_OBJECT_DIGEST_MISMATCH", item["reasons"])
         self.assertEqual("MISMATCH", result["imageCompatibility"])
+
+    def test_legacy_tag_is_observed_from_exact_object_and_requires_recreate(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        expected = model["services"][service]["image"]
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                expected if index == 0 else container["Config"]["Image"]
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        result = self.build(containers, model, hashes, image_inspections=inspected)
+        item = result["services"][service]
+        self.assertEqual("redis:7-alpine", item["currentConfiguredImage"])
+        self.assertTrue(item["imageContentMatches"])
+        self.assertFalse(item["configuredImageCanonical"])
+        self.assertEqual(["IMAGE_REFERENCE_NON_CANONICAL"], item["reasons"])
+        self.assertTrue(item["recreateRequired"])
+        self.assertEqual("MATCHED", result["imageCompatibility"])
+
+    def test_legacy_tag_without_expected_object_digest_is_a_bounded_mismatch(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                (f"redis@sha256:{'f' * 64}" if index == 0 else container["Config"]["Image"])
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        item = self.build(containers, model, hashes, image_inspections=inspected)["services"][service]
+        self.assertFalse(item["imageContentMatches"])
+        self.assertEqual(
+            ["IMAGE_REFERENCE_NON_CANONICAL", "IMAGE_OBJECT_DIGEST_MISMATCH"],
+            item["reasons"],
+        )
+
+    def test_missing_immutable_object_evidence_fails_closed(self) -> None:
+        containers, model, hashes = self.fixture()
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [] if index == 0 else [container["Config"]["Image"]]}
+            for index, container in enumerate(containers)
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
+
+    def test_immutable_config_must_be_consistent_with_exact_object(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        wrong = f"ghcr.io/trinyxai/{service}@sha256:{'f' * 64}"
+        containers[0]["Config"]["Image"] = wrong
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                model["services"][service]["image"] if index == 0 else container["Config"]["Image"]
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
+
+    def test_missing_exact_image_object_inspection_fails_closed(self) -> None:
+        containers, model, hashes = self.fixture()
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
+            for container in containers[1:]
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
 
     def test_report_is_bound_and_bounded_with_marker_last(self) -> None:
         containers, model, hashes = self.fixture()
@@ -167,6 +242,9 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         output = render_ssm_protocol(record)
         self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
         self.assertNotIn('"services":', output)
+        self.assertTrue(output.startswith("LEGACY_NORMALIZATION_REPORT_V2 "))
+        self.assertIn("configured_image_canonical=yes", output)
+        self.assertRegex(output, r"configured_image_sha256=sha256:[0-9a-f]{64}")
         self.assertIn("bundle_digest=sha256:" + "b" * 64, output)
         self.assertIn("deployment_id=dep-" + "c" * 32, output)
         self.assertIn("config_revision=config-1", output)

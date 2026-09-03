@@ -30,7 +30,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "environment": {
       "const": "staging"
@@ -138,7 +138,8 @@
           "currentConfiguredImage",
           "currentImageObjectId",
           "currentRepoDigests",
-          "imageObjectVerified",
+          "configuredImageCanonical",
+          "imageContentMatches",
           "expectedImageDigest",
           "currentComposeConfigHash",
           "expectedComposeConfigHash",
@@ -155,7 +156,7 @@
           },
           "currentConfiguredImage": {
             "type": "string",
-            "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]{1,4096}$"
           },
           "currentImageObjectId": {
             "type": "string",
@@ -196,7 +197,7 @@
             "uniqueItems": true,
             "items": {
               "enum": [
-                "IMAGE_DIGEST_MISMATCH",
+                "IMAGE_REFERENCE_NON_CANONICAL",
                 "IMAGE_OBJECT_DIGEST_MISMATCH",
                 "COMPOSE_CONFIG_HASH_MISMATCH",
                 "BIND_MOUNT_MISMATCH",
@@ -213,7 +214,10 @@
               "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
             }
           },
-          "imageObjectVerified": {
+          "configuredImageCanonical": {
+            "type": "boolean"
+          },
+          "imageContentMatches": {
             "type": "boolean"
           }
         }

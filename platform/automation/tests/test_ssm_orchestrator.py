@@ -32,7 +32,7 @@ def normalization_protocol(request: Request, hash_mismatches: int = 0) -> str:
     services = sorted(SERVICES[request.role])
     lines = [
         (
-            f"LEGACY_NORMALIZATION_REPORT_V1 role={request.role} "
+            f"LEGACY_NORMALIZATION_REPORT_V2 role={request.role} "
             f"release_id={request.release_id} bundle_digest={request.bundle_digest} "
             f"deployment_id={request.deployment_id} config_revision={request.config_revision} "
             f"config_digest=sha256:{'7' * 64} "
@@ -51,7 +51,8 @@ def normalization_protocol(request: Request, hash_mismatches: int = 0) -> str:
             f"NORMALIZATION role={request.role} service={service} "
             f"recreate={'yes' if mismatch else 'no'} reasons={reasons} image_match=yes "
             f"container_id={index + 1000:064x} image_object=sha256:{index + 2000:064x} "
-            f"configured_image_digest=sha256:{index:064x} "
+            "configured_image_canonical=yes "
+            f"configured_image_sha256=sha256:{index + 2500:064x} "
             f"expected_image_digest=sha256:{index:064x} "
             f"repo_digests_sha256=sha256:{index + 3000:064x} "
             f"current_config_hash={current_hash} expected_config_hash={expected_hash} "
@@ -252,6 +253,41 @@ class OrchestratorTests(unittest.TestCase):
         request = self.normalization_request()
         with self.assertRaisesRegex(InvariantError, "truncated"):
             self.validate_protocol(normalization_protocol(request)[:-1], request)
+
+    def test_normalization_receiver_accepts_noncanonical_reference_with_proven_content(self) -> None:
+        request = self.normalization_request()
+        output = normalization_protocol(request)
+        lines = output.rstrip("\n").split("\n")
+        fields = lines[1].replace("recreate=no reasons=none", (
+            "recreate=yes reasons=IMAGE_REFERENCE_NON_CANONICAL"
+        )).replace("configured_image_canonical=yes", "configured_image_canonical=no")
+        lines[1] = fields
+        marker_fields = lines[-1].replace("recreate_count=0", "recreate_count=1")
+        payload = "\n".join(lines[:-1]) + "\n"
+        lines[-1] = re.sub(
+            r"report_sha256=sha256:[0-9a-f]{64}$",
+            "report_sha256=sha256:" + hashlib.sha256(payload.encode()).hexdigest(),
+            marker_fields,
+        )
+        report = self.validate_protocol("\n".join(lines) + "\n", request)
+        self.assertEqual("matched", report["images"])
+        self.assertEqual(1, report["recreateCount"])
+
+    def test_normalization_receiver_rejects_spoofed_image_reason_evidence(self) -> None:
+        request = self.normalization_request()
+        output = normalization_protocol(request)
+        lines = output.rstrip("\n").split("\n")
+        lines[1] = lines[1].replace(
+            "configured_image_canonical=yes", "configured_image_canonical=no"
+        )
+        payload = "\n".join(lines[:-1]) + "\n"
+        lines[-1] = re.sub(
+            r"report_sha256=sha256:[0-9a-f]{64}$",
+            "report_sha256=sha256:" + hashlib.sha256(payload.encode()).hexdigest(),
+            lines[-1],
+        )
+        with self.assertRaisesRegex(InvariantError, "image evidence contradicts"):
+            self.validate_protocol("\n".join(lines) + "\n", request)
 
     def test_legacy_normalization_plan_is_paid_then_cloud_and_read_only(self) -> None:
         transport = FakeTransport()

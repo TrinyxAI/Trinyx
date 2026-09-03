@@ -334,7 +334,7 @@ def validate_normalization_protocol(
         "config_digest", "control_plane_commit", "observed_at", "compose_version",
         "service_count", "hash_matches", "hash_mismatches", "hash_limit",
     }
-    header = _normalization_fields(lines[0], "LEGACY_NORMALIZATION_REPORT_V1", header_keys)
+    header = _normalization_fields(lines[0], "LEGACY_NORMALIZATION_REPORT_V2", header_keys)
     require(
         header["role"] == role
         and header["release_id"] == release_id
@@ -364,13 +364,14 @@ def validate_normalization_protocol(
 
     service_keys = {
         "role", "service", "recreate", "reasons", "image_match", "container_id",
-        "image_object", "configured_image_digest", "expected_image_digest",
+        "image_object", "configured_image_canonical", "configured_image_sha256",
+        "expected_image_digest",
         "repo_digests_sha256", "current_config_hash", "expected_config_hash",
         "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
         "mutable_checkout",
     }
     allowed_reasons = {
-        "IMAGE_DIGEST_MISMATCH", "IMAGE_OBJECT_DIGEST_MISMATCH",
+        "IMAGE_REFERENCE_NON_CANONICAL", "IMAGE_OBJECT_DIGEST_MISMATCH",
         "COMPOSE_CONFIG_HASH_MISMATCH", "BIND_MOUNT_MISMATCH",
         "MUTABLE_CHECKOUT_MOUNT",
     }
@@ -385,7 +386,8 @@ def validate_normalization_protocol(
                 "normalization service is unknown, duplicated or role-mismatched")
         seen.add(service)
         require(fields["recreate"] in {"yes", "no"}
-                and fields["image_match"] in {"yes", "no"}
+            and fields["image_match"] in {"yes", "no"}
+            and fields["configured_image_canonical"] in {"yes", "no"}
                 and fields["mutable_checkout"] in {"yes", "no"},
                 "invalid normalization boolean field")
         reasons = [] if fields["reasons"] == "none" else fields["reasons"].split(",")
@@ -402,15 +404,19 @@ def validate_normalization_protocol(
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", fields["image_object"]) is not None,
                 "invalid normalization image object ID")
         for key in (
-            "configured_image_digest", "expected_image_digest", "repo_digests_sha256",
+            "configured_image_sha256", "expected_image_digest", "repo_digests_sha256",
             "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
         ):
             require(DIGEST_RE.fullmatch(fields[key]) is not None,
                     f"invalid normalization {key}")
-        if fields["image_match"] == "yes":
-            require(fields["configured_image_digest"] == fields["expected_image_digest"],
-                    "normalization image match contradicts configured digest")
-        else:
+        image_matches = fields["image_match"] == "yes"
+        configured_canonical = fields["configured_image_canonical"] == "yes"
+        require(
+            configured_canonical == ("IMAGE_REFERENCE_NON_CANONICAL" not in reasons)
+            and image_matches == ("IMAGE_OBJECT_DIGEST_MISMATCH" not in reasons),
+            "normalization image evidence contradicts reasons",
+        )
+        if not image_matches:
             all_images_match = False
         if fields["current_config_hash"] != fields["expected_config_hash"]:
             calculated_hash_mismatches += 1
@@ -537,10 +543,9 @@ class StagingSaga:
                     report["compatibility"] == "review",
                     f"{role} Compose config-hash drift exceeds the review threshold",
                 )
-                require(
-                    report["images"] == "matched",
-                    f"{role} runtime images differ from the immutable baseline",
-                )
+                # A proven object mismatch is reviewable PLAN output and yields a
+                # bounded recreate reason.  Unprovable identity already fails in
+                # the host observer or authenticated protocol validator.
 
     def adopt_legacy_baseline(self, release_id: str, bundle_digest: str) -> None:
         owner = new_deployment_id()

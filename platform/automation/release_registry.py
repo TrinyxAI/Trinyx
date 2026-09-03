@@ -359,6 +359,25 @@ def fetch(registry: Registry, release_id: str, bundle_digest: str, destination: 
         registration = json.loads(marker)
     except json.JSONDecodeError as exc:
         raise InvariantError("invalid registration marker") from exc
+    registration_keys = {
+        "schemaVersion",
+        "environment",
+        "releaseId",
+        "bundleDigest",
+        "objects",
+    }
+    require(
+        isinstance(registration, dict) and set(registration) == registration_keys,
+        "registration marker schema mismatch",
+    )
+    require(
+        type(registration["schemaVersion"]) is int and registration["schemaVersion"] == 1,
+        "registration marker version mismatch",
+    )
+    require(
+        registration["environment"] == "staging",
+        "registration marker environment mismatch",
+    )
     require(registration.get("releaseId") == release_id and registration.get("bundleDigest") == bundle_digest, "registration identity mismatch")
     objects = registration.get("objects")
     require(isinstance(objects, list) and len(objects) == len(OBJECT_FILES), "registration object inventory mismatch")

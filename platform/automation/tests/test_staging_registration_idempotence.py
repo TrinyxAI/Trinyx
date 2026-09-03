@@ -306,7 +306,7 @@ exec "$REAL_PYTHON" "$@"
         aws.write_text(
             """#!/usr/bin/env bash
 set -euo pipefail
-printf 'called\n' > aws.called
+printf 'called\\n' > aws.called
 case "${FAKE_AWS_MODE:-exists}" in
   exists) exit 0 ;;
   missing)
@@ -339,13 +339,13 @@ import sys
 
 command = sys.argv[1]
 if command == "fetch":
-    Path("fetch.called").write_text("called\n", encoding="utf-8")
+    Path("fetch.called").write_text("called\\n", encoding="utf-8")
     if os.environ.get("FAKE_FETCH_FAIL") == "1":
         raise SystemExit(71)
     destination = Path(sys.argv[sys.argv.index("--destination") + 1])
     destination.mkdir()
 elif command == "register":
-    Path("register.called").write_text("called\n", encoding="utf-8")
+    Path("register.called").write_text("called\\n", encoding="utf-8")
     if os.environ.get("FAKE_REGISTER_FAIL") == "1":
         raise SystemExit(72)
 else:

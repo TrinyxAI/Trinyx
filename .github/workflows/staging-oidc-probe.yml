@@ -16,6 +16,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@9954d6b56a5d06b9d053cd8748df50bcf516a82f
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@1340ad64ac358694a3f88848db4665769da82f0c
     with:
       role_arn: ${{ inputs.role_arn }}

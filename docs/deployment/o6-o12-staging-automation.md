@@ -105,7 +105,7 @@ observation-before-normalization sequence.
    controls, prevent force-push/deletion and prevent self-review when supported.
 2. Prepare and independently review AWS trust, registry and control-plane change
    sets in account `001634075617`, region `us-east-1`, pinned to privileged
-   workflow `9954d6b56a5d06b9d053cd8748df50bcf516a82f`. Keep `EnableS3GatewayEndpoint=false`.
+   workflow `1340ad64ac358694a3f88848db4665769da82f0c`. Keep `EnableS3GatewayEndpoint=false`.
 3. Execute only the reviewed AWS trust migration through the existing
    administrative path.
 4. Configure the repository OIDC subject with:
@@ -119,7 +119,7 @@ observation-before-normalization sequence.
    bucket/publisher role and exact numeric SSM document version, and verify that
    publisher cannot deploy, deploy cannot publish and EC2 profiles are read-only.
 6. Install the reviewed control-plane files pinned to
-   `5a68200d476295f086f871a38c8b5fea7ad8ec0a` through the approved reconciler path. Reconcile/materialize
+   `ee40526a1891d42cd572bf64326b365f0f68b64f` through the approved reconciler path. Reconcile/materialize
    reviewed non-secret config, health and trust inputs on both hosts without
    activating a release or recreating a container.
 7. Stop at `AWS_PCA_LIVE_APPROVAL_REQUIRED`. Use the offline staging PKI
@@ -190,8 +190,8 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   builder and the CE publisher, preventing the repository-wide custom OIDC
   template from encountering a direct job without `job_workflow_ref`.
 - The immutable identity chain is explicit: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`,
-  executable control-plane code `5a68200d476295f086f871a38c8b5fea7ad8ec0a`, and privileged reusable workflow
-  `9954d6b56a5d06b9d053cd8748df50bcf516a82f`. The latter checks out the former by exact SHA and asserts HEAD before
+  executable control-plane code `ee40526a1891d42cd572bf64326b365f0f68b64f`, and privileged reusable workflow
+  `1340ad64ac358694a3f88848db4665769da82f0c`. The latter checks out the former by exact SHA and asserts HEAD before
   credentials. AWS IAM pins the privileged workflow plus exact caller branch ref.
 - Deployment/adoption records use `controlPlaneCommit`; release `sourceCommit`
   and builder `platformCommit` retain their distinct meanings.

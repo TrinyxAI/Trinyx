@@ -15,6 +15,8 @@ OWNER_ID = 319253481
 SOURCE_COMMIT = "aeb2a447ea7ce0436a60549713636225dfe1a2c1"
 BACKEND_RUN_ID = 33444272417
 FRONTEND_RUN_ID = 33444302902
+BACKEND_PUBLISH_JOB_ID = 99660712771
+FRONTEND_PUBLISH_JOB_ID = 99659777935
 CLOUD_ARTIFACT_ID = 9777989306
 CLOUD_ARTIFACT_NAME = f"trinyx-cloud-image-manifest-{SOURCE_COMMIT}"
 CLOUD_ARTIFACT_DIGEST = "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0"
@@ -97,6 +99,32 @@ def validate_artifact(artifact: Any) -> None:
         and workflow_run.get("head_sha") == SOURCE_COMMIT,
         "historical artifact/run binding mismatch",
     )
+
+
+def validate_job(job: Any, *, job_id: int, run_id: int, name: str) -> None:
+    require(isinstance(job, dict), "historical publication job is not an object")
+    require(job.get("id") == job_id, "historical publication job ID mismatch")
+    require(job.get("run_id") == run_id, "historical publication job/run mismatch")
+    require(job.get("head_sha") == SOURCE_COMMIT,
+            "historical publication job source mismatch")
+    require(job.get("conclusion") == "success",
+            "historical publication job was not successful")
+    require(job.get("name") == name, "historical publication job name mismatch")
+    require(
+        job.get("run_url") == f"https://api.github.com/repos/{REPOSITORY}/actions/runs/{run_id}",
+        "historical publication job repository/run URL mismatch",
+    )
+
+
+def historical_paid_digest(log_text: str, *, package: str) -> str:
+    require(isinstance(log_text, str) and log_text, "historical publication log is empty")
+    pattern = re.compile(
+        rf"pushing manifest for {re.escape(package)}:{SOURCE_COMMIT}@"
+        r"(sha256:[0-9a-f]{64})(?:\s|$)"
+    )
+    digests = set(pattern.findall(log_text))
+    require(len(digests) == 1, "historical publication digest evidence is ambiguous or missing")
+    return next(iter(digests))
 
 
 def canonical_cloud_manifest(
@@ -209,14 +237,18 @@ def canonical_cloud_manifest(
     }
 
 
-def paid_manifest(document: Any, *, name: str, service: str, environment: str,
-                  package: str) -> dict[str, Any]:
+def paid_manifest(document: Any, *, historical_digest: str, name: str, service: str,
+                  environment: str, package: str) -> dict[str, Any]:
     require(isinstance(document, dict) and set(document) == {"package", "tag", "digest", "labels"},
             "Paid image inspection schema mismatch")
     require(document["package"] == package, "Paid image package mismatch")
     require(document["tag"] == f"{package}:{SOURCE_COMMIT}", "Paid immutable tag mismatch")
     digest = str(document["digest"])
     require(DIGEST_RE.fullmatch(digest) is not None, "Paid image digest mismatch")
+    require(DIGEST_RE.fullmatch(historical_digest) is not None,
+            "historical Paid image digest is invalid")
+    require(digest == historical_digest,
+            "current Paid tag moved from authenticated historical digest")
     labels = document["labels"]
     require(
         isinstance(labels, dict)
@@ -248,6 +280,10 @@ def main() -> None:
     parser.add_argument("--backend-run", type=Path, required=True)
     parser.add_argument("--frontend-run", type=Path, required=True)
     parser.add_argument("--artifact", type=Path, required=True)
+    parser.add_argument("--backend-job", type=Path, required=True)
+    parser.add_argument("--frontend-job", type=Path, required=True)
+    parser.add_argument("--backend-log", type=Path, required=True)
+    parser.add_argument("--frontend-log", type=Path, required=True)
     parser.add_argument("--cloud-manifest", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--historical-inventory", type=Path, required=True)
@@ -260,6 +296,25 @@ def main() -> None:
     validate_run(load(args.frontend_run), run_id=FRONTEND_RUN_ID,
                  workflow=FRONTEND_WORKFLOW, cloud_reusable=False)
     validate_artifact(load(args.artifact))
+    validate_job(
+        load(args.backend_job), job_id=BACKEND_PUBLISH_JOB_ID,
+        run_id=BACKEND_RUN_ID, name="publish",
+    )
+    validate_job(
+        load(args.frontend_job), job_id=FRONTEND_PUBLISH_JOB_ID,
+        run_id=FRONTEND_RUN_ID, name="build-and-push",
+    )
+    try:
+        backend_log = args.backend_log.read_text(encoding="utf-8")
+        frontend_log = args.frontend_log.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError("cannot read historical publication job log") from exc
+    backend_digest = historical_paid_digest(
+        backend_log, package="ghcr.io/trinyxai/trinyx-backend"
+    )
+    frontend_digest = historical_paid_digest(
+        frontend_log, package="ghcr.io/trinyxai/trinyx-frontend"
+    )
     write_canonical(
         args.out / "cloud.json",
         canonical_cloud_manifest(
@@ -269,11 +324,13 @@ def main() -> None:
         ),
     )
     write_canonical(args.out / "backend.json", paid_manifest(
-        load(args.backend_inspect), name="paid-backend", service="livecontext",
+        load(args.backend_inspect), historical_digest=backend_digest,
+        name="paid-backend", service="livecontext",
         environment="BACKEND_IMAGE", package="ghcr.io/trinyxai/trinyx-backend",
     ))
     write_canonical(args.out / "frontend.json", paid_manifest(
-        load(args.frontend_inspect), name="paid-frontend", service="frontend",
+        load(args.frontend_inspect), historical_digest=frontend_digest,
+        name="paid-frontend", service="frontend",
         environment="FRONTEND_IMAGE", package="ghcr.io/trinyxai/trinyx-frontend",
     ))
     print(f"HISTORICAL_BASELINE_PROVENANCE_OK source_commit={SOURCE_COMMIT}")

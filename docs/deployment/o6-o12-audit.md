@@ -249,8 +249,9 @@ and incurs no AWS managed-CA monthly fee.
   recreations, not permitted as baseline evidence. Legacy image tags are never
   trusted: the exact Docker image object's immutable `RepoDigests` prove
   content identity, while non-canonical configured references and true content
-  mismatches remain distinct bounded-plan reasons. Missing object evidence and
-  excessive config-hash drift remain fail-closed gates.
+  mismatches remain distinct bounded-plan reasons. A structured Compose variant
+  admits only those explained image/mutable-bind substitutions; one unrelated
+  effective configuration change remains a fail-closed gate.
 - **OPERATIONAL STOP:** normalization output is CI-implemented only. No container
   recreation, TLS transition, baseline adoption, AWS change set or staging plan
   has been live validated.
@@ -269,8 +270,9 @@ never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
 under the SSM `StandardOutputContent` limit. Every report is bound to the
 baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
-SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
-returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+SHA-256 of the emitted protocol. Explained canonicalization hashes are separate
+from unexplained drift; any unexplained service returns `compatibility=stop`.
+No bulk recreation is inferred or authorized.
 
 
 ### Normalization receiver integrity closure
@@ -289,8 +291,11 @@ digest-mismatched output fails before human review or mutation.
 
 The metadata-only historical import is distinct from observation: it may create
 a canonical release only from exact historical GitHub publication runs and
-artifact ID, immutable Paid tag provenance, the exact historical source tree,
-and the reviewed static third-party inventory. It performs no application
+artifact ID, original Paid digests extracted from the exact authenticated
+publication job logs, matching present-day full-SHA tags/OCI revisions, the
+exact historical source tree, and the reviewed static third-party inventory.
+The latter makes this an aeb2 first-party baseline plus current reviewed
+third-party policy, not a byte-for-byte snapshot of every legacy container. It performs no application
 rebuild and live runtime evidence cannot substitute for any missing provenance.
 
 The only approved live order is reconcile/materialize → register canonical

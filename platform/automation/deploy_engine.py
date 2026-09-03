@@ -268,6 +268,8 @@ class Adapter(Protocol):
 
     def compose_config_hashes(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, str]: ...
 
+    def compose_model_hashes(self, model: dict[str, Any], services: tuple[str, ...]) -> dict[str, str]: ...
+
     def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]: ...
 
     def run_migrations(self, base: Path, release_dir: Path, plan: HostPlan, services: tuple[str, ...]) -> None: ...
@@ -299,7 +301,13 @@ class ShellAdapter:
     def __init__(self, timeout_seconds: int = 300):
         self.timeout_seconds = timeout_seconds
 
-    def _run(self, argv: list[str], timeout: int | None = None, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        argv: list[str],
+        timeout: int | None = None,
+        capture: bool = False,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
                 argv,
@@ -307,6 +315,7 @@ class ShellAdapter:
                 text=True,
                 stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
                 stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+                input=input_text,
                 timeout=timeout or self.timeout_seconds,
             )
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
@@ -355,16 +364,34 @@ class ShellAdapter:
             timeout=60,
             capture=True,
         )
+        return self._parse_compose_hashes(result.stdout, plan.services)
+
+    @staticmethod
+    def _parse_compose_hashes(output: str, services: tuple[str, ...]) -> dict[str, str]:
         hashes: dict[str, str] = {}
-        for line in result.stdout.splitlines():
+        for line in output.splitlines():
             parts = line.split()
             require(len(parts) == 2, "invalid Compose config-hash output")
             service, config_hash = parts
-            require(service in plan.services and service not in hashes, "unexpected Compose config-hash service")
+            require(service in services and service not in hashes, "unexpected Compose config-hash service")
             require(re.fullmatch(r"[0-9a-f]{64}", config_hash) is not None, "invalid Compose config hash")
             hashes[service] = config_hash
-        require(set(hashes) == set(plan.services), "Compose config-hash inventory mismatch")
+        require(set(hashes) == set(services), "Compose config-hash inventory mismatch")
         return hashes
+
+    def compose_model_hashes(self, model: dict[str, Any], services: tuple[str, ...]) -> dict[str, str]:
+        """Hash an already-rendered model without writing expanded secrets to disk."""
+        require(isinstance(model, dict) and isinstance(model.get("services"), dict),
+                "invalid rendered Compose model")
+        require(set(services).issubset(model["services"]),
+                "rendered Compose model lacks required services")
+        result = self._run(
+            ["docker", "compose", "-f", "-", "config", "--hash", *services],
+            timeout=60,
+            capture=True,
+            input_text=json.dumps(model, sort_keys=True, separators=(",", ":")),
+        )
+        return self._parse_compose_hashes(result.stdout, services)
 
     def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]:
         inventory = self._run(

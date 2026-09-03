@@ -15,6 +15,10 @@ sys.path.insert(0, str(ROOT / "platform" / "release"))
 import historical_baseline as hb
 
 
+BACKEND_HISTORICAL_DIGEST = "sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e"
+FRONTEND_HISTORICAL_DIGEST = "sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e"
+
+
 def run_fixture(run_id: int, path: str, *, cloud: bool) -> dict:
     return {
         "id": run_id,
@@ -47,11 +51,29 @@ def artifact_fixture() -> dict:
     }
 
 
-def paid_fixture(package: str) -> dict:
+def job_fixture(job_id: int, run_id: int, name: str) -> dict:
+    return {
+        "id": job_id,
+        "run_id": run_id,
+        "head_sha": hb.SOURCE_COMMIT,
+        "conclusion": "success",
+        "name": name,
+        "run_url": f"https://api.github.com/repos/{hb.REPOSITORY}/actions/runs/{run_id}",
+    }
+
+
+def publication_log(package: str, digest: str) -> str:
+    return (
+        "2026-08-31T22:00:00Z #20 pushing manifest for "
+        f"{package}:{hb.SOURCE_COMMIT}@{digest} 1.4s done\n"
+    )
+
+
+def paid_fixture(package: str, digest: str) -> dict:
     return {
         "package": package,
         "tag": f"{package}:{hb.SOURCE_COMMIT}",
-        "digest": "sha256:" + "b" * 64,
+        "digest": digest,
         "labels": {
             "org.opencontainers.image.source": f"https://github.com/{hb.REPOSITORY}",
             "org.opencontainers.image.revision": hb.SOURCE_COMMIT,
@@ -172,21 +194,91 @@ class HistoricalBaselineTests(unittest.TestCase):
 
     def test_paid_tag_digest_and_oci_revision_are_strict(self) -> None:
         package = "ghcr.io/trinyxai/trinyx-backend"
-        result = hb.paid_manifest(paid_fixture(package), name="paid-backend",
+        result = hb.paid_manifest(
+                                  paid_fixture(package, BACKEND_HISTORICAL_DIGEST),
+                                  historical_digest=BACKEND_HISTORICAL_DIGEST,
+                                  name="paid-backend",
                                   service="livecontext", environment="BACKEND_IMAGE",
                                   package=package)
         self.assertEqual(hb.SOURCE_COMMIT, result["commit"])
         for key, value in (("tag", package + ":latest"), ("digest", "mutable")):
-            item = paid_fixture(package)
+            item = paid_fixture(package, BACKEND_HISTORICAL_DIGEST)
             item[key] = value
             with self.assertRaises(ValueError):
-                hb.paid_manifest(item, name="paid-backend", service="livecontext",
+                hb.paid_manifest(item, historical_digest=BACKEND_HISTORICAL_DIGEST,
+                                 name="paid-backend", service="livecontext",
                                  environment="BACKEND_IMAGE", package=package)
-        item = paid_fixture(package)
+        item = paid_fixture(package, BACKEND_HISTORICAL_DIGEST)
         item["labels"]["org.opencontainers.image.revision"] = "f" * 40
         with self.assertRaises(ValueError):
-            hb.paid_manifest(item, name="paid-backend", service="livecontext",
+            hb.paid_manifest(item, historical_digest=BACKEND_HISTORICAL_DIGEST,
+                             name="paid-backend", service="livecontext",
                              environment="BACKEND_IMAGE", package=package)
+
+    def test_paid_digest_is_rooted_in_exact_authenticated_historical_job_logs(self) -> None:
+        backend_job = job_fixture(hb.BACKEND_PUBLISH_JOB_ID, hb.BACKEND_RUN_ID, "publish")
+        frontend_job = job_fixture(
+            hb.FRONTEND_PUBLISH_JOB_ID, hb.FRONTEND_RUN_ID, "build-and-push"
+        )
+        hb.validate_job(
+            backend_job, job_id=hb.BACKEND_PUBLISH_JOB_ID,
+            run_id=hb.BACKEND_RUN_ID, name="publish",
+        )
+        hb.validate_job(
+            frontend_job, job_id=hb.FRONTEND_PUBLISH_JOB_ID,
+            run_id=hb.FRONTEND_RUN_ID, name="build-and-push",
+        )
+        backend = hb.historical_paid_digest(
+            publication_log("ghcr.io/trinyxai/trinyx-backend", BACKEND_HISTORICAL_DIGEST),
+            package="ghcr.io/trinyxai/trinyx-backend",
+        )
+        frontend = hb.historical_paid_digest(
+            publication_log("ghcr.io/trinyxai/trinyx-frontend", FRONTEND_HISTORICAL_DIGEST),
+            package="ghcr.io/trinyxai/trinyx-frontend",
+        )
+        self.assertEqual(BACKEND_HISTORICAL_DIGEST, backend)
+        self.assertEqual(FRONTEND_HISTORICAL_DIGEST, frontend)
+
+        moved = paid_fixture("ghcr.io/trinyxai/trinyx-backend", "sha256:" + "f" * 64)
+        with self.assertRaisesRegex(ValueError, "tag moved"):
+            hb.paid_manifest(
+                moved, historical_digest=backend, name="paid-backend",
+                service="livecontext", environment="BACKEND_IMAGE",
+                package="ghcr.io/trinyxai/trinyx-backend",
+            )
+        spoofed = paid_fixture("ghcr.io/trinyxai/trinyx-backend", "sha256:" + "f" * 64)
+        spoofed["labels"]["org.opencontainers.image.revision"] = hb.SOURCE_COMMIT
+        with self.assertRaises(ValueError):
+            hb.paid_manifest(
+                spoofed, historical_digest=backend, name="paid-backend",
+                service="livecontext", environment="BACKEND_IMAGE",
+                package="ghcr.io/trinyxai/trinyx-backend",
+            )
+
+        for key, value in (
+            ("id", hb.BACKEND_PUBLISH_JOB_ID + 1),
+            ("run_id", hb.BACKEND_RUN_ID + 1),
+            ("head_sha", "f" * 40),
+            ("conclusion", "failure"),
+            ("run_url", "https://api.github.com/repos/other/repo/actions/runs/1"),
+        ):
+            drift = copy.deepcopy(backend_job)
+            drift[key] = value
+            with self.assertRaises(ValueError):
+                hb.validate_job(
+                    drift, job_id=hb.BACKEND_PUBLISH_JOB_ID,
+                    run_id=hb.BACKEND_RUN_ID, name="publish",
+                )
+
+        ambiguous = publication_log(
+            "ghcr.io/trinyxai/trinyx-backend", BACKEND_HISTORICAL_DIGEST
+        ) + publication_log(
+            "ghcr.io/trinyxai/trinyx-backend", "sha256:" + "e" * 64
+        )
+        with self.assertRaises(ValueError):
+            hb.historical_paid_digest(
+                ambiguous, package="ghcr.io/trinyxai/trinyx-backend"
+            )
 
     def test_workflow_is_metadata_only_and_release_id_is_not_supplied(self) -> None:
         wrapper = (ROOT / ".github/workflows/build-historical-staging-baseline.yml").read_text()
@@ -201,6 +293,10 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("docker buildx imagetools inspect", workflow)
         self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)
         self.assertIn("sha256sum --check --strict", workflow)
+        self.assertIn(f"actions/jobs/{hb.BACKEND_PUBLISH_JOB_ID}/logs", workflow)
+        self.assertIn(f"actions/jobs/{hb.FRONTEND_PUBLISH_JOB_ID}/logs", workflow)
+        self.assertIn("--backend-log historical-input/backend-publish.log", workflow)
+        self.assertIn("--frontend-log historical-input/frontend-publish.log", workflow)
         self.assertIn(hb.CLOUD_ARTIFACT_DIGEST.removeprefix("sha256:"), workflow)
         self.assertIn("actions: read", wrapper)
         self.assertIn("actions: read", workflow)

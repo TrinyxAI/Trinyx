@@ -256,8 +256,15 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
 release for source commit `aeb2a447ea7ce0436a60549713636225dfe1a2c1`
 without rebuilding or publishing application images. It authenticates the
 exact historical backend/Cloud and frontend workflow runs, downloads Cloud
-manifest artifact `9777989306` by ID, proves the immutable Paid full-SHA tags
-and OCI revision, then combines those inputs with the reviewed static
+manifest artifact `9777989306` by ID, derives the original Paid manifest
+digests from the exact authenticated historical publication job logs, and then
+requires the present GHCR full-SHA tags plus OCI revision to match that
+historical evidence. The registry tags are consistency checks, not the
+historical source of truth. The authenticated job-log evidence is pinned to
+backend publish job `99660712771` and frontend build job `99659777935`; it yields
+backend `sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e`
+and frontend `sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e`.
+The builder combines those inputs with the reviewed static
 third-party inventory. The trusted current packaging tools build the bundle
 from the exact historical source tree as data and `release.py` computes the
 content-derived release ID. The four canonical files receive GitHub build
@@ -275,6 +282,9 @@ before extraction.
 
 This is not baseline observation and it never imports identities from EC2.
 Live runtime evidence cannot replace missing historical publication provenance.
+The resulting baseline means historical aeb2 first-party source/images plus
+the currently reviewed immutable third-party inventory; it is not represented
+as a byte-for-byte snapshot of every legacy container.
 The workflow has read-only package access, performs only manifest inspection,
 and contains no image build, push, registration or AWS operation. Do not run it
 until its repository change is independently reviewed.
@@ -326,8 +336,20 @@ never resolved or trusted. Content matches only when the expected canonical
 `repository@sha256` occurs in the exact object's `RepoDigests`; a matching
 object behind a tag is reported separately as a non-canonical configured
 reference requiring bounded recreation. Missing object evidence fails closed.
-The workflow also fails when more than three service hashes differ or when the
-exact service inventory or report SHA cannot be authenticated.
+Compose hash drift is not qualified by a count. The planner hashes the canonical
+rendered model and a second structured model that reintroduces only the observed
+legacy image reference and approved `/srv/trinyx/pr25-*` bind sources while
+leaving command, environment, ports, networks, restart policy, healthcheck,
+mount targets/options and every other field canonical. A current label must
+match one of those exact hashes. Any single unexplained effective change returns
+`compatibility=stop`. This keeps Compose hashes as authenticated supplementary
+evidence without treating a fixed mismatch threshold as a trust boundary.
+
+Before approving normalization, require every one of the 12 third-party service
+records to prove `image_match=yes`: the exact running Docker object's
+`RepoDigests` must contain the corresponding immutable reference from
+`platform/release/third-party-images.json`. This read-only preflight does not
+turn observed tags into baseline identity.
 
 Review the authenticated bounded normalization protocol independently; verify its final recomputed `report_sha256` and exact 8/20 service inventory. The expected initial legacy delta is at
 least Paid `paid-edge` because its effective container may still mount the
@@ -363,8 +385,9 @@ never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
 under the SSM `StandardOutputContent` limit. Every report is bound to the
 baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
-SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
-returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+SHA-256 of the emitted protocol. Explained canonicalization drift is counted
+separately from unexplained effective configuration drift; one unexplained
+change returns `compatibility=stop`. No bulk recreation is inferred or authorized.
 PLAN performs no pull, build, push, start or recreate. A proven content
 mismatch remains visible for separate human review; APPLY is never implied and
 must remain release/bundle/config/service bounded under the global lock.

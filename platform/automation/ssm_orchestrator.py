@@ -332,9 +332,9 @@ def validate_normalization_protocol(
     header_keys = {
         "role", "release_id", "bundle_digest", "deployment_id", "config_revision",
         "config_digest", "control_plane_commit", "observed_at", "compose_version",
-        "service_count", "hash_matches", "hash_mismatches", "hash_limit",
+        "service_count", "canonical_matches", "explained_drift", "unexplained_drift",
     }
-    header = _normalization_fields(lines[0], "LEGACY_NORMALIZATION_REPORT_V2", header_keys)
+    header = _normalization_fields(lines[0], "LEGACY_NORMALIZATION_REPORT_V3", header_keys)
     require(
         header["role"] == role
         and header["release_id"] == release_id
@@ -352,13 +352,18 @@ def validate_normalization_protocol(
                          header["compose_version"]) is not None,
             "invalid normalization Compose version")
     service_count = _normalization_int(header["service_count"], "normalization service count")
-    hash_matches = _normalization_int(header["hash_matches"], "normalization hash match count")
-    hash_mismatches = _normalization_int(header["hash_mismatches"], "normalization hash mismatch count")
-    hash_limit = _normalization_int(header["hash_limit"], "normalization hash limit")
+    canonical_matches = _normalization_int(
+        header["canonical_matches"], "normalization canonical match count"
+    )
+    explained_drift = _normalization_int(
+        header["explained_drift"], "normalization explained drift count"
+    )
+    unexplained_drift = _normalization_int(
+        header["unexplained_drift"], "normalization unexplained drift count"
+    )
     require(
         service_count == len(expected_services)
-        and hash_matches + hash_mismatches == service_count
-        and hash_limit == 3,
+        and canonical_matches + explained_drift + unexplained_drift == service_count,
         "normalization header count invariant failed",
     )
 
@@ -366,18 +371,22 @@ def validate_normalization_protocol(
         "role", "service", "recreate", "reasons", "image_match", "container_id",
         "image_object", "configured_image_canonical", "configured_image_sha256",
         "expected_image_digest",
-        "repo_digests_sha256", "current_config_hash", "expected_config_hash",
+        "repo_digests_sha256", "compose_drift", "current_config_hash",
+        "expected_config_hash",
         "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
         "mutable_checkout",
     }
     allowed_reasons = {
         "IMAGE_REFERENCE_NON_CANONICAL", "IMAGE_OBJECT_DIGEST_MISMATCH",
-        "COMPOSE_CONFIG_HASH_MISMATCH", "BIND_MOUNT_MISMATCH",
+        "COMPOSE_CONFIG_DRIFT_EXPLAINED", "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
+        "BIND_MOUNT_MISMATCH",
         "MUTABLE_CHECKOUT_MOUNT",
     }
     seen: set[str] = set()
     recreate_count = 0
-    calculated_hash_mismatches = 0
+    calculated_canonical_matches = 0
+    calculated_explained_drift = 0
+    calculated_unexplained_drift = 0
     all_images_match = True
     for line in lines[1:-1]:
         fields = _normalization_fields(line, "NORMALIZATION", service_keys)
@@ -388,7 +397,8 @@ def validate_normalization_protocol(
         require(fields["recreate"] in {"yes", "no"}
             and fields["image_match"] in {"yes", "no"}
             and fields["configured_image_canonical"] in {"yes", "no"}
-                and fields["mutable_checkout"] in {"yes", "no"},
+            and fields["mutable_checkout"] in {"yes", "no"}
+            and fields["compose_drift"] in {"matched", "explained", "unexplained"},
                 "invalid normalization boolean field")
         reasons = [] if fields["reasons"] == "none" else fields["reasons"].split(",")
         require(
@@ -398,7 +408,9 @@ def validate_normalization_protocol(
             and (fields["mutable_checkout"] == "yes") == ("MUTABLE_CHECKOUT_MOUNT" in reasons),
             "normalization reasons/recreate invariant failed",
         )
-        for key in ("container_id", "current_config_hash", "expected_config_hash"):
+        for key in (
+            "container_id", "current_config_hash", "expected_config_hash",
+        ):
             require(re.fullmatch(r"[0-9a-f]{64}", fields[key]) is not None,
                     f"invalid normalization {key}")
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", fields["image_object"]) is not None,
@@ -418,15 +430,41 @@ def validate_normalization_protocol(
         )
         if not image_matches:
             all_images_match = False
-        if fields["current_config_hash"] != fields["expected_config_hash"]:
-            calculated_hash_mismatches += 1
+        compose_drift = fields["compose_drift"]
+        current_hash = fields["current_config_hash"]
+        expected_hash = fields["expected_config_hash"]
+        if compose_drift == "matched":
+            require(
+                current_hash == expected_hash
+                and "COMPOSE_CONFIG_DRIFT_EXPLAINED" not in reasons
+                and "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" not in reasons,
+                "normalization matched Compose evidence is inconsistent",
+            )
+            calculated_canonical_matches += 1
+        elif compose_drift == "explained":
+            require(
+                current_hash != expected_hash
+                and "COMPOSE_CONFIG_DRIFT_EXPLAINED" in reasons
+                and "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" not in reasons,
+                "normalization explained Compose evidence is inconsistent",
+            )
+            calculated_explained_drift += 1
+        else:
+            require(
+                current_hash != expected_hash
+                and "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" in reasons
+                and "COMPOSE_CONFIG_DRIFT_EXPLAINED" not in reasons,
+                "normalization unexplained Compose evidence is inconsistent",
+            )
+            calculated_unexplained_drift += 1
         if fields["recreate"] == "yes":
             recreate_count += 1
     require(seen == expected_services, "normalization service inventory is incomplete")
     require(
-        calculated_hash_mismatches == hash_mismatches
-        and service_count - calculated_hash_mismatches == hash_matches,
-        "normalization hash summary differs from service lines",
+        calculated_canonical_matches == canonical_matches
+        and calculated_explained_drift == explained_drift
+        and calculated_unexplained_drift == unexplained_drift,
+        "normalization Compose drift summary differs from service lines",
     )
 
     marker_keys = {
@@ -436,7 +474,7 @@ def validate_normalization_protocol(
     marker = _normalization_fields(
         lines[-1], "LEGACY_NORMALIZATION_PLAN_COMPLETE", marker_keys
     )
-    compatibility = "review" if hash_mismatches <= hash_limit else "stop"
+    compatibility = "review" if unexplained_drift == 0 else "stop"
     images = "matched" if all_images_match else "mismatch"
     require(
         marker["role"] == role
@@ -541,7 +579,7 @@ class StagingSaga:
                 print(output.rstrip())
                 require(
                     report["compatibility"] == "review",
-                    f"{role} Compose config-hash drift exceeds the review threshold",
+                    f"{role} normalization contains unexplained Compose drift",
                 )
                 # A proven object mismatch is reviewable PLAN output and yields a
                 # bounded recreate reason.  Unprovable identity already fails in

@@ -28,25 +28,42 @@ from ssm_orchestrator import (
 )
 
 
-def normalization_protocol(request: Request, hash_mismatches: int = 0) -> str:
+def normalization_protocol(
+    request: Request,
+    *,
+    explained_drift: int = 0,
+    unexplained_drift: int = 0,
+) -> str:
     services = sorted(SERVICES[request.role])
+    canonical_matches = len(services) - explained_drift - unexplained_drift
     lines = [
         (
-            f"LEGACY_NORMALIZATION_REPORT_V2 role={request.role} "
+            f"LEGACY_NORMALIZATION_REPORT_V3 role={request.role} "
             f"release_id={request.release_id} bundle_digest={request.bundle_digest} "
             f"deployment_id={request.deployment_id} config_revision={request.config_revision} "
             f"config_digest=sha256:{'7' * 64} "
             f"control_plane_commit={request.control_plane_commit} "
             "observed_at=2026-09-02T00:00:00Z compose_version=v2.40.3 "
-            f"service_count={len(services)} hash_matches={len(services) - hash_mismatches} "
-            f"hash_mismatches={hash_mismatches} hash_limit=3"
+            f"service_count={len(services)} canonical_matches={canonical_matches} "
+            f"explained_drift={explained_drift} unexplained_drift={unexplained_drift}"
         )
     ]
     for index, service in enumerate(services, start=1):
-        mismatch = index <= hash_mismatches
-        current_hash = "f" * 64 if mismatch else f"{index:064x}"
+        explained = index <= explained_drift
+        unexplained = explained_drift < index <= explained_drift + unexplained_drift
+        mismatch = explained or unexplained
+        current_hash = ("e" if explained else "f") * 64 if mismatch else f"{index:064x}"
         expected_hash = f"{index:064x}"
-        reasons = "COMPOSE_CONFIG_HASH_MISMATCH" if mismatch else "none"
+        compose_drift = (
+            "explained" if explained
+            else "unexplained" if unexplained
+            else "matched"
+        )
+        reasons = (
+            "COMPOSE_CONFIG_DRIFT_EXPLAINED" if explained
+            else "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" if unexplained
+            else "none"
+        )
         lines.append(
             f"NORMALIZATION role={request.role} service={service} "
             f"recreate={'yes' if mismatch else 'no'} reasons={reasons} image_match=yes "
@@ -55,18 +72,19 @@ def normalization_protocol(request: Request, hash_mismatches: int = 0) -> str:
             f"configured_image_sha256=sha256:{index + 2500:064x} "
             f"expected_image_digest=sha256:{index:064x} "
             f"repo_digests_sha256=sha256:{index + 3000:064x} "
-            f"current_config_hash={current_hash} expected_config_hash={expected_hash} "
+            f"compose_drift={compose_drift} current_config_hash={current_hash} "
+            f"expected_config_hash={expected_hash} "
             f"current_bind_mounts_sha256=sha256:{index + 4000:064x} "
             f"expected_bind_mounts_sha256=sha256:{index + 4000:064x} "
             "mutable_checkout=no"
         )
     payload = "\n".join(lines) + "\n"
     report_sha = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    compatibility = "review" if hash_mismatches <= 3 else "stop"
+    compatibility = "review" if unexplained_drift == 0 else "stop"
     lines.append(
         f"LEGACY_NORMALIZATION_PLAN_COMPLETE role={request.role} "
         f"release_id={request.release_id} services={len(services)} "
-        f"recreate_count={hash_mismatches} compose_version=v2.40.3 "
+        f"recreate_count={explained_drift + unexplained_drift} compose_version=v2.40.3 "
         f"compatibility={compatibility} images=matched report_sha256={report_sha}"
     )
     return "\n".join(lines) + "\n"
@@ -300,13 +318,13 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(1, len(set(transport.deployment_ids)))
         self.assertFalse(any(mode in {"apply", "adopt", "rollback", "install"} for mode, _, _ in transport.calls))
 
-    def test_legacy_normalization_plan_fails_closed_on_unqualified_hash_semantics(self) -> None:
+    def test_legacy_normalization_plan_fails_closed_on_one_unexplained_change(self) -> None:
         class UnqualifiedTransport(FakeTransport):
             def execute(self, request: Request) -> str:
                 if request.mode == "normalize-plan":
-                    return normalization_protocol(request, hash_mismatches=4)
+                    return normalization_protocol(request, unexplained_drift=1)
                 return super().execute(request)
-        with self.assertRaisesRegex(InvariantError, "exceeds the review threshold"):
+        with self.assertRaisesRegex(InvariantError, "unexplained Compose drift"):
             self.saga(UnqualifiedTransport()).legacy_normalization_plan(
                 "rel-v1-" + "2" * 32, "sha256:" + "3" * 64
             )

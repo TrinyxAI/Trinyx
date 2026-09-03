@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import json
 import re
@@ -49,7 +50,6 @@ DEPLOYMENT_RE = re.compile(r"^dep-[0-9a-f]{32}$")
 CONFIG_REVISION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 COMPOSE_VERSION_RE = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 SSM_STDOUT_MAX_BYTES = 20_000
-COMPOSE_HASH_MISMATCH_LIMIT = 3
 
 
 def docker_json(argv: list[str], timeout: int = 60) -> Any:
@@ -103,6 +103,71 @@ def bind_mounts(mounts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for item in mounts if item["type"] == "bind"]
 
 
+def explained_compose_model(
+    role: str,
+    containers: list[dict[str, Any]],
+    rendered_model: dict[str, Any],
+) -> dict[str, Any]:
+    """Reintroduce only explicitly approved legacy fields into the canonical model.
+
+    A current container config hash is review-qualified only when Compose hashes
+    this structured variant to the same value. Any command, environment, port,
+    network, restart, healthcheck, mount target/options, or other effective
+    service change remains absent from the variant and therefore fails closed.
+    """
+    require(role in SERVICES, "invalid normalization role")
+    _, runtime = compose_runtime_state(role, containers, reject_mutable_checkout=False)
+    model = copy.deepcopy(rendered_model)
+    services = model.get("services")
+    require(isinstance(services, dict) and set(SERVICES[role]).issubset(services),
+            "rendered Compose service inventory mismatch")
+    containers_by_service: dict[str, dict[str, Any]] = {}
+    for container in containers:
+        if not isinstance(container, dict) or not isinstance(container.get("Config"), dict):
+            continue
+        labels = container["Config"].get("Labels") or {}
+        service = labels.get("com.docker.compose.service") if isinstance(labels, dict) else None
+        if service in SERVICES[role]:
+            require(service not in containers_by_service, "duplicate Docker Compose service")
+            containers_by_service[str(service)] = container
+    require(set(containers_by_service) == SERVICES[role], "runtime inventory mismatch")
+
+    for service in sorted(SERVICES[role]):
+        service_model = services[service]
+        require(isinstance(service_model, dict), "invalid rendered Compose service")
+        config = containers_by_service[service]["Config"]
+        configured_image = str(config.get("Image", ""))
+        require(CONFIGURED_IMAGE_RE.fullmatch(configured_image) is not None,
+                "legacy configured image observation is invalid")
+        if configured_image != str(service_model.get("image", "")):
+            service_model["image"] = configured_image
+
+        observed_binds = {
+            item["destination"]: item for item in bind_mounts(runtime[service]["mounts"])
+        }
+        require(len(observed_binds) == len(bind_mounts(runtime[service]["mounts"])),
+                "duplicate observed bind mount target")
+        volumes = service_model.get("volumes") or []
+        require(isinstance(volumes, list), "invalid rendered Compose mount inventory")
+        for volume in volumes:
+            require(isinstance(volume, dict), "rendered Compose mount is not normalized")
+            if str(volume.get("type", "")) != "bind":
+                continue
+            target = str(volume.get("target", ""))
+            observed = observed_binds.get(target)
+            if observed is None:
+                continue
+            expected_read_only = volume.get("read_only", False)
+            require(isinstance(expected_read_only, bool), "invalid rendered Compose bind mode")
+            if (
+                observed["source"] != str(volume.get("source", ""))
+                and FORBIDDEN_MUTABLE_CHECKOUT in observed["source"]
+                and observed["readOnly"] == expected_read_only
+            ):
+                volume["source"] = observed["source"]
+    return model
+
+
 def build_normalization_plan(
     role: str,
     baseline_release_id: str,
@@ -110,6 +175,7 @@ def build_normalization_plan(
     image_inspections: list[dict[str, Any]],
     rendered_model: dict[str, Any],
     expected_hashes: dict[str, str],
+    explained_hashes: dict[str, str],
     version: str,
     observed_at: str,
     *,
@@ -134,6 +200,8 @@ def build_normalization_plan(
         role, containers, reject_mutable_checkout=False,
     )
     require(set(expected_hashes) == SERVICES[role], "expected Compose config-hash inventory mismatch")
+    require(set(explained_hashes) == SERVICES[role],
+            "explained Compose config-hash inventory mismatch")
     models = rendered_model.get("services")
     require(isinstance(models, dict) and set(SERVICES[role]).issubset(models),
             "rendered Compose service inventory mismatch")
@@ -158,6 +226,8 @@ def build_normalization_plan(
 
     services: dict[str, dict[str, Any]] = {}
     hash_matches = 0
+    explained_hash_mismatches = 0
+    unexplained_hash_mismatches = 0
     image_matches = 0
     for service in sorted(SERVICES[role]):
         state = runtime[service]
@@ -182,6 +252,7 @@ def build_normalization_plan(
         mutable_checkout = any(FORBIDDEN_MUTABLE_CHECKOUT in item["source"] for item in current_mounts)
         current_hash = state["composeConfigHash"]
         expected_hash = expected_hashes[service]
+        explained_hash = explained_hashes[service]
         reasons: list[str] = []
         configured_image_is_digest = IMAGE_RE.fullmatch(current_configured_image) is not None
         configured_image_canonical = current_configured_image == expected_image
@@ -197,10 +268,17 @@ def build_normalization_plan(
             reasons.append("IMAGE_OBJECT_DIGEST_MISMATCH")
         if image_content_matches:
             image_matches += 1
-        if current_hash != expected_hash:
-            reasons.append("COMPOSE_CONFIG_HASH_MISMATCH")
-        else:
+        if current_hash == expected_hash:
+            compose_drift = "MATCHED"
             hash_matches += 1
+        elif explained_hash != expected_hash and current_hash == explained_hash:
+            compose_drift = "EXPLAINED_NORMALIZATION"
+            explained_hash_mismatches += 1
+            reasons.append("COMPOSE_CONFIG_DRIFT_EXPLAINED")
+        else:
+            compose_drift = "UNEXPLAINED"
+            unexplained_hash_mismatches += 1
+            reasons.append("UNEXPLAINED_COMPOSE_CONFIG_DRIFT")
         if bind_mounts(current_mounts) != bind_mounts(wanted_mounts):
             reasons.append("BIND_MOUNT_MISMATCH")
         if mutable_checkout:
@@ -216,6 +294,8 @@ def build_normalization_plan(
             "imageContentMatches": image_content_matches,
             "currentComposeConfigHash": current_hash,
             "expectedComposeConfigHash": expected_hash,
+            "explainedComposeConfigHash": explained_hash,
+            "composeDriftClassification": compose_drift,
             "currentMounts": current_mounts,
             "expectedMounts": wanted_mounts,
             "mutableCheckoutMounted": mutable_checkout,
@@ -224,10 +304,9 @@ def build_normalization_plan(
         }
 
     service_count = len(SERVICES[role])
-    mismatch_count = service_count - hash_matches
     recreate = [name for name, item in services.items() if item["recreateRequired"]]
     return {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "environment": "staging",
         "role": role,
         "baselineReleaseId": baseline_release_id,
@@ -239,16 +318,15 @@ def build_normalization_plan(
         "observedAt": observed_at,
         "composeProject": compose_project,
         "composeVersion": version,
-        "composeHashCapability": "SUPPORTED",
-        "composeHashCompatibility": (
-            "QUALIFIED_REVIEW"
-            if mismatch_count <= COMPOSE_HASH_MISMATCH_LIMIT
-            else "UNQUALIFIED_EXCESSIVE_DRIFT"
+        "composeHashCapability": "STRUCTURED_EXPLAINED_VARIANT",
+        "composeDriftCompatibility": (
+            "QUALIFIED_EXPLAINED_DRIFT"
+            if unexplained_hash_mismatches == 0
+            else "UNQUALIFIED_UNEXPLAINED_DRIFT"
         ),
-        "composeHashCalibrationMatches": hash_matches,
-        "composeHashCalibrationTotal": service_count,
-        "composeHashMismatchCount": mismatch_count,
-        "composeHashMismatchLimit": COMPOSE_HASH_MISMATCH_LIMIT,
+        "composeCanonicalMatchCount": hash_matches,
+        "composeExplainedDriftCount": explained_hash_mismatches,
+        "composeUnexplainedDriftCount": unexplained_hash_mismatches,
         "imageCompatibility": "MATCHED" if image_matches == service_count else "MISMATCH",
         "serviceCount": service_count,
         "recreateServices": recreate,
@@ -263,19 +341,19 @@ def _image_digest(image_ref: str) -> str:
 
 def render_ssm_protocol(record: dict[str, Any]) -> str:
     """Render a bounded, marker-last protocol safe for SSM's 24k stdout field."""
-    require(record.get("schemaVersion") == 3, "unsupported normalization report")
+    require(record.get("schemaVersion") == 4, "unsupported normalization report")
     role = str(record["role"])
     release_id = str(record["baselineReleaseId"])
     header = (
-        "LEGACY_NORMALIZATION_REPORT_V2 "
+        "LEGACY_NORMALIZATION_REPORT_V3 "
         f"role={role} release_id={release_id} bundle_digest={record['bundleDigest']} "
         f"deployment_id={record['deploymentId']} config_revision={record['environmentConfigRevision']} "
         f"config_digest={record['environmentConfigDigest']} "
         f"control_plane_commit={record['controlPlaneCommit']} observed_at={record['observedAt']} "
         f"compose_version={record['composeVersion']} service_count={record['serviceCount']} "
-        f"hash_matches={record['composeHashCalibrationMatches']} "
-        f"hash_mismatches={record['composeHashMismatchCount']} "
-        f"hash_limit={record['composeHashMismatchLimit']}"
+        f"canonical_matches={record['composeCanonicalMatchCount']} "
+        f"explained_drift={record['composeExplainedDriftCount']} "
+        f"unexplained_drift={record['composeUnexplainedDriftCount']}"
     )
     lines = [header]
     services = record["services"]
@@ -283,6 +361,11 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
     for service in sorted(services):
         item = services[service]
         reasons = ",".join(item["reasons"]) or "none"
+        compose_drift = {
+            "MATCHED": "matched",
+            "EXPLAINED_NORMALIZATION": "explained",
+            "UNEXPLAINED": "unexplained",
+        }[item["composeDriftClassification"]]
         lines.append(
             "NORMALIZATION "
             f"role={role} service={service} "
@@ -293,6 +376,7 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
             f"configured_image_sha256={sha256_bytes(item['currentConfiguredImage'].encode('utf-8'))} "
             f"expected_image_digest={_image_digest(item['expectedImageDigest'])} "
             f"repo_digests_sha256={sha256_bytes(canonical_json(item['currentRepoDigests']))} "
+            f"compose_drift={compose_drift} "
             f"current_config_hash={item['currentComposeConfigHash']} "
             f"expected_config_hash={item['expectedComposeConfigHash']} "
             f"current_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['currentMounts'])))} "
@@ -303,7 +387,7 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
     report_sha = sha256_bytes(payload.encode("utf-8"))
     compatibility = (
         "review"
-        if record["composeHashCompatibility"] == "QUALIFIED_REVIEW"
+        if record["composeDriftCompatibility"] == "QUALIFIED_EXPLAINED_DRIFT"
         else "stop"
     )
     images = "matched" if record["imageCompatibility"] == "MATCHED" else "mismatch"
@@ -381,6 +465,13 @@ def main() -> None:
     rendered_model = adapter.render_model(base, release_dir, plan)
     expected_hashes = adapter.compose_config_hashes(base, release_dir, plan)
     containers = inspect_containers()
+    roundtrip_hashes = adapter.compose_model_hashes(rendered_model, plan.services)
+    require(roundtrip_hashes == expected_hashes,
+            "Compose rendered-model hash round-trip mismatch")
+    explained_hashes = adapter.compose_model_hashes(
+        explained_compose_model(args.role, containers, rendered_model),
+        plan.services,
+    )
     record = build_normalization_plan(
         args.role,
         args.baseline_release,
@@ -388,6 +479,7 @@ def main() -> None:
         inspect_images(containers, args.role),
         rendered_model,
         expected_hashes,
+        explained_hashes,
         compose_version(),
         dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         bundle_digest=args.expected_bundle_digest,

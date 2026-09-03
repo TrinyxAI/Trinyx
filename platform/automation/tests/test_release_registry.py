@@ -228,6 +228,22 @@ class RegistryTests(unittest.TestCase):
                 self._fetch_destination("extra-key"),
             )
 
+    def test_fetch_registration_marker_root_must_be_object(self) -> None:
+        for index, root in enumerate((None, [], "registration", 1, True)):
+            with self.subTest(root=root):
+                registry, marker_key, _ = self._registered_marker()
+                registry.objects[marker_key] = json.dumps(root).encode() + b"\n"
+                with self.assertRaisesRegex(
+                    InvariantError,
+                    "registration marker schema mismatch",
+                ):
+                    fetch(
+                        registry,
+                        self.release_id,
+                        self.bundle_digest,
+                        self._fetch_destination(f"non-object-root-{index}"),
+                    )
+
     def test_fetch_registration_marker_version_and_environment_are_exact(self) -> None:
         for version in (2, 0, "1", True, None):
             with self.subTest(schemaVersion=version):

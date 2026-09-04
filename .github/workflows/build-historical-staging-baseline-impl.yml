@@ -131,15 +131,29 @@ jobs:
             --out release-images.json
           python3 platform/release/validate-runtime-images.py \
             --contract platform/release/runtime-inventory.json --images release-images.json
-      - name: Build deterministic bundle from exact historical source tree
+      - name: Build deterministic bundle from authenticated source origins
         shell: bash
         run: |
           set -euo pipefail
+          python3 platform/release/prepare-historical-bundle-source.py \
+            --historical-repo historical-source \
+            --trusted-repo . \
+            --source-contract platform/release/historical-deployment-bundle-sources.json \
+            --bundle-contract platform/release/deployment-bundle-files.json \
+            --out historical-bundle-source
           python3 platform/release/build-deployment-bundle.py \
-            --repo historical-source \
+            --repo historical-bundle-source \
             --contract platform/release/deployment-bundle-files.json \
             --out deployment-bundle.tar \
             --manifest-out deployment-bundle.json
+          jq -e '
+            .files
+            | length > 0
+            and all(
+              type == "object"
+              and (.mode == 420 or .mode == 493)
+            )
+          ' deployment-bundle.json >/dev/null
       - name: Create canonical release manifest
         env:
           TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}

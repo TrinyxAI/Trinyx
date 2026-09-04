@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "platform" / "release"))
 import historical_baseline as hb
 
 
-BACKEND_HISTORICAL_DIGEST = "sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e"
-FRONTEND_HISTORICAL_DIGEST = "sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e"
+BACKEND_HISTORICAL_DIGEST = hb.BACKEND_HISTORICAL_DIGEST
+FRONTEND_HISTORICAL_DIGEST = hb.FRONTEND_HISTORICAL_DIGEST
 
 
 def run_fixture(run_id: int, path: str, *, cloud: bool) -> dict:
@@ -66,10 +66,17 @@ def job_fixture(job_id: int, run_id: int, name: str) -> dict:
 
 
 def publication_log(package: str, digest: str) -> str:
-    return (
-        "2026-08-31T22:00:00Z #20 pushing manifest for "
-        f"{package}:{hb.SOURCE_COMMIT}@{digest} 1.4s done\n"
-    )
+    if package == hb.BACKEND_PACKAGE:
+        return (
+            "2026-08-31T22:10:08.8525199Z #1 0.723 pushing "
+            f"{digest} to {package}:{hb.SOURCE_COMMIT}\n"
+        )
+    if package == hb.FRONTEND_PACKAGE:
+        return (
+            "2026-08-31T22:05:30.1700278Z #20 pushing manifest for "
+            f"{package}:{hb.SOURCE_COMMIT}@{digest} 1.4s done\n"
+        )
+    raise AssertionError(f"unsupported test package: {package}")
 
 
 def paid_fixture(package: str, digest: str) -> dict:
@@ -323,30 +330,30 @@ class HistoricalBaselineTests(unittest.TestCase):
             run_id=hb.FRONTEND_RUN_ID, name="build-and-push",
         )
         backend = hb.historical_paid_digest(
-            publication_log("ghcr.io/trinyxai/trinyx-backend", BACKEND_HISTORICAL_DIGEST),
-            package="ghcr.io/trinyxai/trinyx-backend",
+            publication_log(hb.BACKEND_PACKAGE, BACKEND_HISTORICAL_DIGEST),
+            package=hb.BACKEND_PACKAGE,
         )
         frontend = hb.historical_paid_digest(
-            publication_log("ghcr.io/trinyxai/trinyx-frontend", FRONTEND_HISTORICAL_DIGEST),
-            package="ghcr.io/trinyxai/trinyx-frontend",
+            publication_log(hb.FRONTEND_PACKAGE, FRONTEND_HISTORICAL_DIGEST),
+            package=hb.FRONTEND_PACKAGE,
         )
         self.assertEqual(BACKEND_HISTORICAL_DIGEST, backend)
         self.assertEqual(FRONTEND_HISTORICAL_DIGEST, frontend)
 
-        moved = paid_fixture("ghcr.io/trinyxai/trinyx-backend", "sha256:" + "f" * 64)
+        moved = paid_fixture(hb.BACKEND_PACKAGE, "sha256:" + "f" * 64)
         with self.assertRaisesRegex(ValueError, "tag moved"):
             hb.paid_manifest(
                 moved, historical_digest=backend, name="paid-backend",
                 service="livecontext", environment="BACKEND_IMAGE",
-                package="ghcr.io/trinyxai/trinyx-backend",
+                package=hb.BACKEND_PACKAGE,
             )
-        spoofed = paid_fixture("ghcr.io/trinyxai/trinyx-backend", "sha256:" + "f" * 64)
+        spoofed = paid_fixture(hb.BACKEND_PACKAGE, "sha256:" + "f" * 64)
         spoofed["labels"]["org.opencontainers.image.revision"] = hb.SOURCE_COMMIT
         with self.assertRaises(ValueError):
             hb.paid_manifest(
                 spoofed, historical_digest=backend, name="paid-backend",
                 service="livecontext", environment="BACKEND_IMAGE",
-                package="ghcr.io/trinyxai/trinyx-backend",
+                package=hb.BACKEND_PACKAGE,
             )
 
         for key, value in (
@@ -364,42 +371,66 @@ class HistoricalBaselineTests(unittest.TestCase):
                     run_id=hb.BACKEND_RUN_ID, name="publish",
                 )
 
-        ambiguous = publication_log(
-            "ghcr.io/trinyxai/trinyx-backend", BACKEND_HISTORICAL_DIGEST
-        ) + publication_log(
-            "ghcr.io/trinyxai/trinyx-backend", "sha256:" + "e" * 64
+    def test_historical_paid_digest_uses_exact_package_specific_log_shapes(self) -> None:
+        backend_log = publication_log(hb.BACKEND_PACKAGE, BACKEND_HISTORICAL_DIGEST)
+        frontend_log = publication_log(hb.FRONTEND_PACKAGE, FRONTEND_HISTORICAL_DIGEST)
+
+        self.assertIn(
+            f"pushing {BACKEND_HISTORICAL_DIGEST} to "
+            f"{hb.BACKEND_PACKAGE}:{hb.SOURCE_COMMIT}",
+            backend_log,
         )
-        with self.assertRaises(ValueError):
+        self.assertIn(
+            f"pushing manifest for {hb.FRONTEND_PACKAGE}:{hb.SOURCE_COMMIT}"
+            f"@{FRONTEND_HISTORICAL_DIGEST}",
+            frontend_log,
+        )
+
+        backend_in_frontend_shape = (
+            "2026-08-31T22:10:08.8525199Z #1 pushing manifest for "
+            f"{hb.BACKEND_PACKAGE}:{hb.SOURCE_COMMIT}"
+            f"@{BACKEND_HISTORICAL_DIGEST} 1.2s done\n"
+        )
+        frontend_in_backend_shape = (
+            "2026-08-31T22:05:30.1700278Z #20 1.400 pushing "
+            f"{FRONTEND_HISTORICAL_DIGEST} to "
+            f"{hb.FRONTEND_PACKAGE}:{hb.SOURCE_COMMIT}\n"
+        )
+        with self.assertRaisesRegex(ValueError, "missing"):
             hb.historical_paid_digest(
-                ambiguous, package="ghcr.io/trinyxai/trinyx-backend"
+                backend_in_frontend_shape, package=hb.BACKEND_PACKAGE
+            )
+        with self.assertRaisesRegex(ValueError, "missing"):
+            hb.historical_paid_digest(
+                frontend_in_backend_shape, package=hb.FRONTEND_PACKAGE
             )
 
     def test_historical_paid_digest_normalizes_only_ansi_color_formatting(self) -> None:
-        package = "ghcr.io/trinyxai/trinyx-backend"
-        plain = publication_log(package, BACKEND_HISTORICAL_DIGEST)
-        variants = (
-            plain,
-            "\x1b[36m" + plain.rstrip("\n") + "\x1b[0m\n",
-            "\x1b[1;34m" + plain + "\x1b[0m",
-            plain.replace("pushing manifest", "\x1b[32mpushing manifest\x1b[0m"),
-        )
-        for log_text in variants:
-            with self.subTest(log_text=repr(log_text)):
-                self.assertEqual(
-                    BACKEND_HISTORICAL_DIGEST,
-                    hb.historical_paid_digest(log_text, package=package),
-                )
+        for package, digest in (
+            (hb.BACKEND_PACKAGE, BACKEND_HISTORICAL_DIGEST),
+            (hb.FRONTEND_PACKAGE, FRONTEND_HISTORICAL_DIGEST),
+        ):
+            plain = publication_log(package, digest)
+            variants = (
+                plain,
+                "\x1b[36m" + plain.rstrip("\n") + "\x1b[0m\n",
+                "\x1b[1;34m" + plain + "\x1b[0m",
+                plain.replace("pushing ", "\x1b[32mpushing\x1b[0m "),
+            )
+            for log_text in variants:
+                with self.subTest(package=package, log_text=repr(log_text)):
+                    self.assertEqual(
+                        digest,
+                        hb.historical_paid_digest(log_text, package=package),
+                    )
 
     def test_historical_paid_digest_rejects_invalid_or_ambiguous_evidence(self) -> None:
-        package = "ghcr.io/trinyxai/trinyx-backend"
+        package = hb.BACKEND_PACKAGE
+        valid = publication_log(package, BACKEND_HISTORICAL_DIGEST)
         cases = {
             "empty": "",
-            "wrong-package": publication_log(
-                "ghcr.io/trinyxai/other-backend", BACKEND_HISTORICAL_DIGEST
-            ),
-            "wrong-source": publication_log(package, BACKEND_HISTORICAL_DIGEST).replace(
-                hb.SOURCE_COMMIT, "f" * 40
-            ),
+            "wrong-package": valid.replace(package, "ghcr.io/trinyxai/other-backend"),
+            "wrong-source": valid.replace(hb.SOURCE_COMMIT, "f" * 40),
             "short-digest": publication_log(package, "sha256:" + "a" * 63),
             "uppercase-digest": publication_log(package, "sha256:" + "A" * 64),
         }
@@ -408,18 +439,29 @@ class HistoricalBaselineTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     hb.historical_paid_digest(log_text, package=package)
 
-        ambiguous = publication_log(package, BACKEND_HISTORICAL_DIGEST) + publication_log(
-            package, "sha256:" + "e" * 64
-        )
-        with self.assertRaises(ValueError):
+        ambiguous = valid + publication_log(package, "sha256:" + "e" * 64)
+        with self.assertRaisesRegex(ValueError, "mismatch"):
             hb.historical_paid_digest(ambiguous, package=package)
 
+        unrelated_digest = (
+            "2026-08-31T22:08:48Z #86 exporting manifest list "
+            + "sha256:" + "e" * 64 + " done\n"
+            + valid
+        )
+        self.assertEqual(
+            BACKEND_HISTORICAL_DIGEST,
+            hb.historical_paid_digest(unrelated_digest, package=package),
+        )
+
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            hb.historical_paid_digest(valid, package="ghcr.io/trinyxai/unknown")
+
     def test_terminal_controls_cannot_create_silent_provenance(self) -> None:
-        package = "ghcr.io/trinyxai/trinyx-backend"
+        package = hb.BACKEND_PACKAGE
         non_semantic_controls = (
             "\x1b[2J" + publication_log(package, BACKEND_HISTORICAL_DIGEST),
-            "\x1b]0;pushing manifest for "
-            + f"{package}:{hb.SOURCE_COMMIT}@{BACKEND_HISTORICAL_DIGEST}"
+            "\x1b]0;pushing "
+            + f"{BACKEND_HISTORICAL_DIGEST} to {package}:{hb.SOURCE_COMMIT}"
             + "\x07\n",
             publication_log(package, BACKEND_HISTORICAL_DIGEST).replace(
                 "trinyx-backend", "trinyx-\x08backend"

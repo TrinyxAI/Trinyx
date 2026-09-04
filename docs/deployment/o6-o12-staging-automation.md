@@ -284,6 +284,12 @@ built with this modern bundle schema while the active C3/W7 control plane is
 still installed: C3's installer accepts only the old three-field bundle entry
 schema. A later reviewed control-plane anchor must authorize this builder and
 consume the mode-bearing schema before the separately reviewed W8 activation.
+The bundle manifest deliberately keeps `schemaVersion: 1` for this compatibility
+release: modern entries are nevertheless closed to exactly `path`, `digest`,
+`sizeBytes` and `mode`, while only the exact frozen historical identity may
+use the legacy mode-less entry shape. A numeric schema migration would alter
+the release/registry identity contract and must be designed and reviewed as a
+separate control-plane change; it is not inferred from the presence of `mode`.
 Both historical runs must also report branch
 `codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
 before the builder may emit `release.sourceRef` as

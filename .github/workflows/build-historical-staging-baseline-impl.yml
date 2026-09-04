@@ -136,6 +136,8 @@ jobs:
           python3 platform/release/validate-runtime-images.py \
             --contract platform/release/runtime-inventory.json --images release-images.json
       - name: Prepare authenticated historical bundle source
+        env:
+          TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -144,40 +146,11 @@ jobs:
           python3 platform/release/prepare-historical-bundle-source.py \
             --historical-repo historical-source \
             --trusted-repo . \
+            --trusted-commit "$TRUSTED_BUILDER_COMMIT" \
+            --approved-environment-config platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml \
             --source-contract platform/release/historical-deployment-bundle-sources.json \
             --bundle-contract platform/release/deployment-bundle-files.json \
             --out historical-bundle-source
-      - name: Verify approved trusted Paid environment configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib
-          import os
-          import stat
-          from pathlib import Path
-
-          relative = "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml"
-          root = Path.cwd()
-          if root.is_symlink() or not root.is_dir():
-              raise SystemExit("ERROR: trusted builder root is unsafe")
-          path = root / relative
-          if path.is_symlink() or not path.exists():
-              raise SystemExit("ERROR: approved Paid environment configuration is missing or symlinked")
-          info = path.stat()
-          if not stat.S_ISREG(info.st_mode):
-              raise SystemExit("ERROR: approved Paid environment configuration is not a regular file")
-          resolved = path.resolve(strict=True)
-          try:
-              resolved.relative_to(root.resolve(strict=True))
-          except ValueError as exc:
-              raise SystemExit("ERROR: approved Paid environment configuration escapes trusted builder") from exc
-          digest = hashlib.sha256(path.read_bytes()).hexdigest()
-          print(
-              "HISTORICAL_PAID_TRUSTED_CONFIG_OK "
-              f"path={relative} sha256={digest}"
-          )
-          PY
       - name: Verify Paid runtime render from authenticated bundle origins
         shell: bash
         run: |

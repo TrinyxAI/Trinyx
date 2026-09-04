@@ -218,8 +218,9 @@ def verify_bundle_tree(bundle_dir: Path, bundle_manifest: dict[str, Any]) -> boo
             content = path.read_bytes()
             if len(content) != item["sizeBytes"] or sha256_bytes(content) != item["digest"]:
                 return False
-            mode = path.stat().st_mode & 0o777
-            if mode not in {0o444, 0o555}:
+            declared_mode = item.get("mode", 0o644)
+            expected_mode = 0o555 if declared_mode & 0o111 else 0o444
+            if (path.stat().st_mode & 0o777) != expected_mode:
                 return False
         for path in [bundle_dir, *[p for p in bundle_dir.rglob("*") if p.is_dir()]]:
             if (path.stat().st_mode & 0o777) != 0o555:

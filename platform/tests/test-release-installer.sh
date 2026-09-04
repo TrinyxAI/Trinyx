@@ -119,6 +119,16 @@ for ROLE in cloud paid; do
   printf '%s\n' "$POST" | grep -Fq "RELEASE_INSTALL_PLAN_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=0"
 done
 
+# An installed file's immutable mode must also match the authenticated bundle mode.
+TARGET="$FAKE/etc/trinyx/staging/paid/releases/$EXPECTED_RELEASE"
+MODE_DRIFT="$TARGET/bundle/docker-compose.yml"
+chmod 555 "$MODE_DRIFT"
+if do_install paid >/dev/null 2>&1; then
+  echo ERROR_IMMUTABLE_RELEASE_BUNDLE_MODE_DRIFT_ACCEPTED >&2
+  exit 1
+fi
+chmod 444 "$MODE_DRIFT"
+
 # Any drift inside the immutable extracted bundle must be rejected.
 TARGET="$FAKE/etc/trinyx/staging/cloud/releases/$EXPECTED_RELEASE"
 DRIFT="$TARGET/bundle/docker-compose.yml"

@@ -171,6 +171,7 @@ with tarfile.open(tar_path, "r") as tar:
     members = tar.getmembers()
     assert all(member.isfile() for member in members)
     assert [member.name for member in members] == paths
+    assert [member.mode for member in members] == [entry["mode"] for entry in manifest["files"]]
     assert all(not name.startswith("/") and ".." not in pathlib.PurePosixPath(name).parts for name in paths)
 print("DEPLOYMENT_BUNDLE_CONTENT_OK")
 PY

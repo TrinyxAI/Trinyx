@@ -13,4 +13,4 @@ jobs:
       packages: read
       id-token: write
       attestations: write
-    uses: TrinyxAI/Trinyx/.github/workflows/build-historical-staging-baseline-impl.yml@3e298c6b2903e5620a8522edcc55ec9c0a2bf9e0
+    uses: TrinyxAI/Trinyx/.github/workflows/build-historical-staging-baseline-impl.yml@fd54bf41376ca0a1f415650bcbf1b0201cca9604

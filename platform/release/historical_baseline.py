@@ -38,6 +38,12 @@ UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
 UTC_RFC3339_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 PACKAGE_RE = re.compile(r"^ghcr\.io/trinyxai/[a-z0-9][a-z0-9._/-]*$")
+HISTORICAL_CLOUD_INVENTORY_KEYS = frozenset({
+    "name", "service", "package", "environment", "context", "dockerfile",
+})
+HISTORICAL_CLOUD_IDENTITY_KEYS = frozenset({
+    "name", "service", "package", "environment",
+})
 
 
 def require(condition: bool, message: str) -> None:
@@ -229,6 +235,25 @@ def validate_utc_timestamp(value: Any, label: str) -> str:
     return value
 
 
+def validate_historical_cloud_source_path(value: Any) -> str:
+    require(
+        isinstance(value, str)
+        and value.startswith("./")
+        and "\\" not in value
+        and "\x00" not in value
+        and all(0x20 <= ord(character) <= 0x7e for character in value),
+        "historical Cloud inventory source path is invalid",
+    )
+    relative = value[2:]
+    components = relative.split("/")
+    require(
+        relative
+        and all(component not in {"", ".", ".."} for component in components),
+        "historical Cloud inventory source path is invalid",
+    )
+    return value
+
+
 def canonical_cloud_manifest(
     document: Any,
     inventory: Any,
@@ -297,14 +322,15 @@ def canonical_cloud_manifest(
 
     historical_by_name: dict[str, dict[str, str]] = {}
     for raw in historical_inventory["images"]:
-        required = {"name", "service", "package", "environment"}
         require(
             isinstance(raw, dict)
-            and set(raw) == required
-            and all(isinstance(raw[key], str) for key in required),
+            and set(raw) == HISTORICAL_CLOUD_INVENTORY_KEYS
+            and all(isinstance(raw[key], str) for key in HISTORICAL_CLOUD_INVENTORY_KEYS),
             "historical Cloud inventory entry is invalid",
         )
-        item = {key: raw[key] for key in required}
+        validate_historical_cloud_source_path(raw["context"])
+        validate_historical_cloud_source_path(raw["dockerfile"])
+        item = {key: raw[key] for key in HISTORICAL_CLOUD_IDENTITY_KEYS}
         require(item["name"] not in historical_by_name, "duplicate historical Cloud name")
         require(
             NAME_RE.fullmatch(item["name"]) is not None

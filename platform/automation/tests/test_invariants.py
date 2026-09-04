@@ -75,6 +75,11 @@ class InvariantTests(unittest.TestCase):
             validate_release_directory(release, "paid")
 
         manifest["schemaVersion"] = 1
+        manifest["createdAt"] = "2026-99-01T00:00:00Z"
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(InvariantError, "createdAt is invalid"):
+            validate_release_directory(release, "paid")
+        manifest["createdAt"] = "2026-09-01T00:00:00Z"
         write_json(manifest_path, manifest)
         bundle_manifest_path = release / "deployment-bundle.json"
         bundle_manifest = json.loads(bundle_manifest_path.read_text())
@@ -84,6 +89,11 @@ class InvariantTests(unittest.TestCase):
             validate_release_directory(release, "paid")
 
         bundle_manifest["schemaVersion"] = 1
+        bundle_manifest["files"][0]["path"] = "."
+        write_json(bundle_manifest_path, bundle_manifest)
+        with self.assertRaisesRegex(InvariantError, "unsafe bundle path"):
+            validate_release_directory(release, "paid")
+        bundle_manifest["files"][0]["path"] = "docker-compose.yml"
         write_json(bundle_manifest_path, bundle_manifest)
         bundle_root = release / "bundle"
         os.chmod(bundle_root, 0o755)

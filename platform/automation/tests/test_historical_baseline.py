@@ -927,6 +927,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             )
             self.assertTrue((root / "out" / "docker-compose.yml").is_file())
             self.assertEqual(config.read_bytes(), config_snapshot.read_bytes())
+            self.assertEqual(0o444, config_snapshot.stat().st_mode & 0o777)
 
             with self.assertRaisesRegex(SystemExit, "supplied together"):
                 helper.prepare(

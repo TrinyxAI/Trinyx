@@ -42,7 +42,12 @@ def load_release_module(path: Path):
 
 def validate_complete_runtime(contract_path: Path, manifest: dict[str, Any]) -> None:
     contract = load_json(contract_path)
-    if contract.get("schemaVersion") != 1 or not isinstance(contract.get("images"), list):
+    if (
+        not isinstance(contract, dict)
+        or type(contract.get("schemaVersion")) is not int
+        or contract["schemaVersion"] != 1
+        or not isinstance(contract.get("images"), list)
+    ):
         fail("invalid runtime inventory contract")
     expected: dict[str, tuple[str, str, str]] = {}
     for item in contract["images"]:
@@ -120,7 +125,11 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     required = {"schemaVersion", "format", "digest", "sizeBytes", "files"}
     if not isinstance(bundle_manifest, dict) or set(bundle_manifest) != required:
         fail("deployment bundle manifest keys do not match schema v1")
-    if bundle_manifest["schemaVersion"] != 1 or bundle_manifest["format"] != "tar":
+    if (
+        type(bundle_manifest.get("schemaVersion")) is not int
+        or bundle_manifest["schemaVersion"] != 1
+        or bundle_manifest["format"] != "tar"
+    ):
         fail("invalid deployment bundle manifest")
     if not isinstance(bundle_manifest["files"], list) or not bundle_manifest["files"]:
         fail("deployment bundle manifest contains no files")
@@ -160,9 +169,12 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
         name = item["path"]
         if not isinstance(name, str) or not name or name.startswith("/"):
             fail("unsafe deployment bundle path")
-        parts = PurePosixPath(name).parts
-        if "." in parts or ".." in parts:
+        if any(ord(char) < 0x20 or char == "\\" for char in name):
             fail(f"unsafe deployment bundle path: {name}")
+        parts = PurePosixPath(name).parts
+        normalized = PurePosixPath(name).as_posix()
+        if "." in parts or ".." in parts or normalized in {"", "."} or normalized != name:
+            fail(f"unsafe/non-canonical deployment bundle path: {name}")
         if name in seen:
             fail(f"duplicate deployment bundle path: {name}")
         seen.add(name)

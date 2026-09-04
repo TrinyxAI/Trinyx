@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import json
 import subprocess
 import sys
@@ -686,6 +687,27 @@ class HistoricalBaselineTests(unittest.TestCase):
             ], capture_output=True, text=True)
             self.assertNotEqual(0, result.returncode)
             self.assertIn("unapproved historical bundle trusted overlay", result.stderr)
+
+            source_contract.write_text(json.dumps({
+                "schemaVersion": 1,
+                "historicalSourceCommit": hb.SOURCE_COMMIT,
+                "historicalPaths": ["docker-compose.yml", "catalog-seeds"],
+                "trustedBuilderOverlays": ["docker/docker-compose.paid.runtime.yml"],
+            }))
+            (historical / "docker").rmdir()
+            outside = root / "outside"
+            outside.mkdir()
+            os.symlink(outside, historical / "docker")
+            result = subprocess.run([
+                sys.executable, str(script),
+                "--historical-repo", str(historical),
+                "--trusted-repo", str(trusted),
+                "--source-contract", str(source_contract),
+                "--bundle-contract", str(bundle_contract),
+                "--out", str(root / "symlink-output"),
+            ], capture_output=True, text=True)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("path traverses a symlink", result.stderr)
 
     def test_release_id_is_generated_and_validated_by_canonical_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

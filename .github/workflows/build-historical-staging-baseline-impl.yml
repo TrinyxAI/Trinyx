@@ -59,7 +59,11 @@ jobs:
           printf '%s  %s\n' \
             '8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0' \
             historical-input/cloud.zip | sha256sum --check --strict
+          python3 platform/release/validate-historical-artifact.py \
+            --zip historical-input/cloud.zip
           unzip -q historical-input/cloud.zip -d historical-input/cloud
+          python3 platform/release/validate-historical-artifact.py \
+            --extracted historical-input/cloud
           test -f historical-input/cloud/cloud-image-manifest.json
       - name: Authenticate to GHCR for read-only metadata inspection
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -81,7 +85,7 @@ jobs:
               .manifest.digest
               | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))
             ' <<<"$inspection")
-            image=$(jq -ce '.image | select(type == "object")' <<<"$inspection")
+            image=$(jq -ce '.image | select(type == "object" and (.config | type == "object"))' <<<"$inspection")
             platform=$(jq -ce '
               select(type == "object")
               | {os: .os, architecture: .architecture}
@@ -136,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C historical-source rev-parse HEAD)" = aeb2a447ea7ce0436a60549713636225dfe1a2c1
-          test -z "$(git -C historical-source status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C historical-source status --porcelain=v1 --untracked-files=all --ignored)"
           python3 platform/release/prepare-historical-bundle-source.py \
             --historical-repo historical-source \
             --trusted-repo . \
@@ -153,14 +157,29 @@ jobs:
           import sys
 
           images_path, output_path = sys.argv[1:]
-          document = json.load(open(images_path, encoding="utf-8"))
+          if not isinstance(document, dict) or not isinstance(document.get("images"), list):
+              raise SystemExit("ERROR: canonical Paid runtime inventory is not an object with images")
+          paid_items = [
+              item for item in document["images"]
+              if isinstance(item, dict) and item.get("role") == "paid"
+          ]
+          if len(paid_items) != 8:
+              raise SystemExit("ERROR: canonical Paid runtime inventory is not exactly eight services")
+          services = [item.get("service") for item in paid_items]
+          expected_services = {
+              "postgres", "redis", "minio", "minio-init",
+              "bridge", "livecontext", "frontend", "paid-edge",
+          }
+          if (
+              any(not isinstance(service, str) for service in services)
+              or len(set(services)) != 8
+              or set(services) != expected_services
+          ):
+              raise SystemExit("ERROR: canonical Paid runtime service bindings are not exactly eight unique services")
           expected = {
               item["service"]: (item["environment"], item["immutableRef"])
-              for item in document["images"]
-              if item["role"] == "paid"
+              for item in paid_items
           }
-          if len(expected) != 8:
-              raise SystemExit("ERROR: canonical Paid runtime inventory is not exactly eight services")
           if len({environment for environment, _ in expected.values()}) != len(expected):
               raise SystemExit("ERROR: canonical Paid runtime environment bindings are not unique")
           if any(
@@ -186,15 +205,29 @@ jobs:
           import sys
 
           images_path, rendered_path = sys.argv[1:]
-          images = json.load(open(images_path, encoding="utf-8"))["images"]
+          document = json.load(open(images_path, encoding="utf-8"))
+          images = document.get("images") if isinstance(document, dict) else None
           rendered = json.load(open(rendered_path, encoding="utf-8"))
+          expected_services = {
+              "postgres", "redis", "minio", "minio-init",
+              "bridge", "livecontext", "frontend", "paid-edge",
+          }
+          paid_items = [
+              item for item in (images or [])
+              if isinstance(item, dict) and item.get("role") == "paid"
+          ]
           expected = {
               item["service"]: item["immutableRef"]
-              for item in images
-              if item["role"] == "paid"
+              for item in paid_items
           }
           services = rendered.get("services")
-          if not isinstance(services, dict) or set(services) != set(expected):
+          if (
+              len(paid_items) != 8
+              or set(expected) != expected_services
+              or len(expected) != len(paid_items)
+              or not isinstance(services, dict)
+              or set(services) != expected_services
+          ):
               raise SystemExit("ERROR: canonical Paid runtime service inventory mismatch")
           for service, immutable_ref in expected.items():
               actual = services.get(service, {}).get("image")

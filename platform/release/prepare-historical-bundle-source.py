@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -49,6 +50,43 @@ def require_no_path_overlap(paths: list[str], label: str) -> None:
         for right in paths[index + 1:]:
             if left.startswith(right + "/") or right.startswith(left + "/"):
                 fail(f"{label} contains overlapping paths")
+
+
+def verify_historical_checkout(path: Path) -> Path:
+    if path.is_symlink():
+        fail("historical repository root may not be a symlink")
+    repo = path.resolve()
+    if not repo.is_dir():
+        fail("historical repository must be a directory")
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        fail(f"cannot verify historical repository checkout: {exc}")
+    if head != SOURCE_COMMIT:
+        fail("historical repository commit mismatch")
+    if status:
+        fail("historical repository is not clean")
+    return repo
+
+
+def verified_trusted_repo(path: Path) -> Path:
+    if path.is_symlink():
+        fail("trusted repository root may not be a symlink")
+    repo = path.resolve()
+    if not repo.is_dir():
+        fail("trusted repository must be a directory")
+    return repo
 
 
 def source_path(root: Path, relative: str) -> Path:
@@ -120,10 +158,8 @@ def prepare(
     if set(bundle_paths) != set(historical_paths) | set(trusted_overlays):
         fail("historical bundle source contract does not cover the deployment bundle contract")
 
-    historical_repo = historical_repo.resolve()
-    trusted_repo = trusted_repo.resolve()
-    if not historical_repo.is_dir() or not trusted_repo.is_dir():
-        fail("historical and trusted repositories must be directories")
+    historical_repo = verify_historical_checkout(historical_repo)
+    trusted_repo = verified_trusted_repo(trusted_repo)
     if destination.exists():
         fail("historical bundle destination already exists")
     destination.mkdir(parents=True, mode=0o755)

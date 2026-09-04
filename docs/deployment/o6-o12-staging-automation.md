@@ -156,7 +156,7 @@ observation-before-normalization sequence.
    controls, prevent force-push/deletion and prevent self-review when supported.
 2. Prepare and independently review AWS trust, registry and control-plane change
    sets in account `001634075617`, region `us-east-1`, pinned to privileged
-   workflow `98b5efd23c18c7ce6902d6f6279bd9dc57966b8f`. Keep `EnableS3GatewayEndpoint=false`.
+   workflow `a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae`. Keep `EnableS3GatewayEndpoint=false`.
 3. Execute only the reviewed AWS trust migration through the existing
    administrative path.
 4. Configure the repository OIDC subject with:
@@ -242,7 +242,7 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   template from encountering a direct job without `job_workflow_ref`.
 - The immutable identity chain is explicit: builder workflow `114a2613e8090f034925a1bcf148f055653c3a06`,
   executable control-plane code `bdbdc0068b08f818881fecc96d6cb0770b972ec4`, and privileged reusable workflow
-  `98b5efd23c18c7ce6902d6f6279bd9dc57966b8f`. The latter checks out the former by exact SHA and asserts HEAD before
+  `a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae`. The latter checks out the former by exact SHA and asserts HEAD before
   credentials. AWS IAM pins the privileged workflow plus exact caller branch ref.
 - Deployment/adoption records use `controlPlaneCommit`; release `sourceCommit`
   and builder `platformCommit` retain their distinct meanings.

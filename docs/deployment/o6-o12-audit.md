@@ -216,7 +216,7 @@ and incurs no AWS managed-CA monthly fee.
 
 - **SECURITY_CRITICAL — privileged code identity:** the reusable workflow YAML and
   its executable checkout are now separate immutable identities. AWS-privileged
-  workflows at `98b5efd23c18c7ce6902d6f6279bd9dc57966b8f` checkout `bdbdc0068b08f818881fecc96d6cb0770b972ec4`, assert `git rev-parse HEAD` before
+  workflows at `a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae` checkout `bdbdc0068b08f818881fecc96d6cb0770b972ec4`, assert `git rev-parse HEAD` before
   credentials, and write that code SHA as `controlPlaneCommit`. IAM also requires
   the exact caller branch ref. A mutable caller checkout cannot supply privileged
   Python.

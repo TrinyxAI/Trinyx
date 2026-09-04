@@ -9,10 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github" / "workflows" / "staging-legacy-adopt-impl.yml"
 BRIDGE = ROOT / ".github" / "workflows" / "build-trinyx-backend.yml"
+WRAPPER = ROOT / ".github" / "workflows" / "staging-legacy-adopt.yml"
 DISPATCHER = ROOT / "platform" / "host" / "common" / "staging-deploy.sh"
 INSTALLER = ROOT / "platform" / "install" / "install-release.py"
 SSM_TEMPLATE = ROOT / "platform" / "aws" / "staging" / "deploy-control-plane.json"
 C4 = "bdbdc0068b08f818881fecc96d6cb0770b972ec4"
+W9 = "a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae"
 
 
 class StagingReleaseInstallWorkflowTests(unittest.TestCase):
@@ -20,6 +22,7 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.bridge = BRIDGE.read_text(encoding="utf-8")
+        cls.wrapper = WRAPPER.read_text(encoding="utf-8")
         cls.dispatcher = DISPATCHER.read_text(encoding="utf-8")
         cls.installer = INSTALLER.read_text(encoding="utf-8")
         cls.template = json.loads(SSM_TEMPLATE.read_text(encoding="utf-8"))
@@ -92,13 +95,49 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         self.assertIn("active_after", self.installer)
         self.assertIn('fail("release installation changed active deployment")', self.installer)
 
-    def test_existing_actions_remain_separate_and_no_image_or_live_shortcut_exists(self) -> None:
+    def test_install_only_bridge_is_explicit_closed_and_isolated(self) -> None:
+        self.assertEqual(1, self.bridge.count("\n  staging_release_install:\n"))
+        block = self.bridge.split("\n  staging_release_install:\n", 1)[1].split(
+            "\n  staging_legacy_adopt:\n", 1
+        )[0]
+        self.assertIn("inputs.operation == 'staging-release-install'", block)
+        self.assertIn("github.event_name == 'workflow_dispatch'", block)
+        self.assertIn("github.ref == 'refs/heads/codex/platform-release-automation'", block)
+        self.assertIn(f"staging-legacy-adopt-impl.yml@{W9}", block)
+        self.assertIn("action: install", block)
+        with_block = block.split("\n    with:\n", 1)[1]
+        self.assertEqual(
+            {
+                "action",
+                "baseline_release_id",
+                "baseline_bundle_digest",
+                "environment_config_revision",
+                "registry_bucket",
+                "deploy_role_arn",
+                "document_version",
+            },
+            set(re.findall(r"^      ([a-z_]+):", with_block, re.M)),
+        )
+        self.assertNotIn("previous_cloud_release", block)
+        self.assertNotIn("previous_paid_release", block)
+        for forbidden in ("normalization-plan", "adopt", "health", "deploy", "apply", "rollback"):
+            self.assertNotIn(f"action: {forbidden}", block)
+        self.assertNotIn("environment: production", block)
+
+    def test_wrapper_exposes_three_separate_closed_actions(self) -> None:
+        self.assertIn("          - install", self.wrapper)
+        self.assertIn("          - normalization-plan", self.wrapper)
+        self.assertIn("          - adopt", self.wrapper)
+        self.assertIn(f"staging-legacy-adopt-impl.yml@{W9}", self.wrapper)
+        self.assertNotIn("previous_cloud_release", self.wrapper)
+        self.assertNotIn("previous_paid_release", self.wrapper)
+
+    def test_existing_actions_remain_separate_and_no_image_shortcut_exists(self) -> None:
         self.assertIn('if [ "$ACTION" = normalization-plan ]; then', self.workflow)
         self.assertIn("ssm_orchestrator.py adopt", self.workflow)
         self.assertNotIn("docker build", self.workflow.lower())
         self.assertNotIn("docker pull", self.workflow.lower())
         self.assertNotIn("docker push", self.workflow.lower())
-        self.assertNotIn("staging-release-install", self.bridge)
 
 
 if __name__ == "__main__":

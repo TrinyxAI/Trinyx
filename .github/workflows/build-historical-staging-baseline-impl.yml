@@ -177,7 +177,9 @@ jobs:
             -f historical-bundle-source/docker-compose.yml \
             -f platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml \
             -f historical-bundle-source/docker/docker-compose.paid.runtime.yml \
-            config --format json > historical-input/paid/rendered-compose.json
+            config --format json \
+            postgres redis minio minio-init bridge livecontext frontend paid-edge \
+            > historical-input/paid/rendered-compose.json
           python3 - release-images.json historical-input/paid/rendered-compose.json <<'PY'
           import json
           import re

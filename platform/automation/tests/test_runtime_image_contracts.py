@@ -103,6 +103,26 @@ class RuntimeImageContractTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "schema mismatch"):
             validator.validate_images(malformed_release)
 
+        # The bootstrap fixture shape is an explicit legacy image document,
+        # not a generic compatibility escape hatch. Its identity fields stay
+        # type-checked and an added root key remains rejected.
+        bootstrap_document = {
+            "schemaVersion": 1,
+            "sourceCommit": document["sourceCommit"],
+            "sourceRef": "codex/trinyx-cloud-gateway-v2",
+            "legacyReleaseId": "stg-bootstrap-001",
+            "images": copy.deepcopy(document["images"]),
+        }
+        self.assertEqual(28, len(validator.validate_images(bootstrap_document)))
+        bad_bootstrap = copy.deepcopy(bootstrap_document)
+        bad_bootstrap["legacyReleaseId"] = ""
+        with self.assertRaisesRegex(SystemExit, "identity mismatch"):
+            validator.validate_images(bad_bootstrap)
+        bad_bootstrap = copy.deepcopy(bootstrap_document)
+        bad_bootstrap["unexpected"] = True
+        with self.assertRaisesRegex(SystemExit, "schema mismatch"):
+            validator.validate_images(bad_bootstrap)
+
         invalid = copy.deepcopy(document)
         invalid["schemaVersion"] = True
         with self.assertRaisesRegex(SystemExit, "schema mismatch"):

@@ -89,11 +89,12 @@ class InvariantTests(unittest.TestCase):
             validate_release_directory(release, "paid")
 
         bundle_manifest["schemaVersion"] = 1
+        original_path = bundle_manifest["files"][0]["path"]
         bundle_manifest["files"][0]["path"] = "."
         write_json(bundle_manifest_path, bundle_manifest)
         with self.assertRaisesRegex(InvariantError, "unsafe bundle path"):
             validate_release_directory(release, "paid")
-        bundle_manifest["files"][0]["path"] = "docker-compose.yml"
+        bundle_manifest["files"][0]["path"] = original_path
         write_json(bundle_manifest_path, bundle_manifest)
         bundle_root = release / "bundle"
         os.chmod(bundle_root, 0o755)

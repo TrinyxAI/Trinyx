@@ -37,7 +37,7 @@ ANSI_SGR_RE = re.compile(r"\x1b\[[0-?]*[ -/]*m")
 UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 UTC_RFC3339_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
-PACKAGE_RE = re.compile(r"^ghcr\\.io/trinyxai/[a-z0-9][a-z0-9._/-]*$")
+PACKAGE_RE = re.compile(r"^ghcr\.io/trinyxai/[a-z0-9][a-z0-9._/-]*$")
 
 
 def require(condition: bool, message: str) -> None:

@@ -26,7 +26,7 @@ The historical aeb2 baseline uses `historical-deployment-bundle-sources.json` to
 
 The bundle SHA-256 is part of `releaseId`. Changing a Compose file, Keycloak realm, SearXNG settings, catalog seed, Caddyfile or other contracted deployment asset therefore creates a different release even when every container digest is unchanged.
 
-The deployment-bundle manifest intentionally remains `schemaVersion: 1) while modern file entries carry the authenticated `mode` field. This is a compatibility boundary, not an unversioned relaxation: every modern entry must contain exactly `path`, `digest`, `sizeBytes` and `mode`; only the exact frozen historical release is allowed its legacy mode-less shape. A schema-number bump would change the release/registry contract and requires a coordinated, separately reviewed control-plane migration, so no implicit v2 is introduced here.
+The deployment-bundle manifest intentionally remains `schemaVersion: 1` while modern file entries carry the authenticated `mode` field. This is a compatibility boundary, not an unversioned relaxation: every modern entry must contain exactly `path`, `digest`, `sizeBytes` and `mode`; only the exact frozen historical release is allowed its legacy mode-less shape. A schema-number bump would change the release/registry contract and requires a coordinated, separately reviewed control-plane migration, so no implicit v2 is introduced here.
 
 The bundle contains no environment inventory or runtime secret material. Environment overrides, private addresses, TLS/PKI paths and secret namespaces remain deployment state.
 

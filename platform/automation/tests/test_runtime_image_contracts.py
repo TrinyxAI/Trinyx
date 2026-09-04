@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[3]
+ASSEMBLER_PATH = ROOT / "platform" / "release" / "assemble-release-images.py"
+VALIDATOR_PATH = ROOT / "platform" / "release" / "validate-runtime-images.py"
+INVENTORY_PATH = ROOT / "platform" / "release" / "runtime-inventory.json"
+THIRD_PARTY_PATH = ROOT / "platform" / "release" / "third-party-images.json"
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def assembled_document(inventory: dict) -> dict:
+    images = []
+    for index, item in enumerate(inventory["images"]):
+        digest = "sha256:" + f"{index + 1:064x}"
+        package = f"ghcr.io/trinyxai/fixture-{item['name']}"
+        images.append(
+            {
+                "name": item["name"],
+                "role": item["role"],
+                "service": item["service"],
+                "package": package,
+                "environment": item["environment"],
+                "digest": digest,
+                "immutableRef": package + "@" + digest,
+            }
+        )
+    return {
+        "schemaVersion": 1,
+        "sourceCommit": "a" * 40,
+        "images": images,
+    }
+
+
+class RuntimeImageContractTests(unittest.TestCase):
+    def test_current_inventory_and_static_third_party_are_closed_valid_inputs(self) -> None:
+        assembler = load_module(ASSEMBLER_PATH, "trinyx_assembler")
+        inventory = json.loads(INVENTORY_PATH.read_text())
+        self.assertEqual(28, len(assembler.load_inventory(INVENTORY_PATH)))
+        images = assembler.load_input_manifest(THIRD_PARTY_PATH, "a" * 40)
+        self.assertEqual(12, len(images))
+
+    def test_assembler_rejects_boolean_schema_coercion_and_extra_fields(self) -> None:
+        assembler = load_module(ASSEMBLER_PATH, "trinyx_assembler_strict")
+        inventory = json.loads(INVENTORY_PATH.read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid_inventory = copy.deepcopy(inventory)
+            invalid_inventory["schemaVersion"] = True
+            path = root / "inventory.json"
+            path.write_text(json.dumps(invalid_inventory), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "invalid runtime inventory"):
+                assembler.load_inventory(path)
+
+            invalid_manifest = {
+                "schemaVersion": 1,
+                "commit": "a" * 40,
+                "images": [],
+                "unexpected": "x",
+            }
+            path.write_text(json.dumps(invalid_manifest), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "invalid image manifest schema"):
+                assembler.load_input_manifest(path, "a" * 40)
+
+    def test_runtime_validator_rejects_type_coercion_duplicate_keys_and_bad_schema(self) -> None:
+        validator = load_module(VALIDATOR_PATH, "trinyx_validator")
+        inventory = json.loads(INVENTORY_PATH.read_text())
+        self.assertEqual(28, len(validator.validate_inventory(inventory)))
+        document = assembled_document(inventory)
+        self.assertEqual(28, len(validator.validate_images(document)))
+
+        invalid = copy.deepcopy(document)
+        invalid["schemaVersion"] = True
+        with self.assertRaisesRegex(SystemExit, "schema mismatch"):
+            validator.validate_images(invalid)
+
+        invalid = copy.deepcopy(document)
+        invalid["images"][0]["package"] = 1
+        with self.assertRaisesRegex(SystemExit, "invalid runtime image entry"):
+            validator.validate_images(invalid)
+
+
+if __name__ == "__main__":
+    unittest.main()

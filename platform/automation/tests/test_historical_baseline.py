@@ -25,6 +25,7 @@ def run_fixture(run_id: int, path: str, *, cloud: bool) -> dict:
         "head_sha": hb.SOURCE_COMMIT,
         "head_branch": hb.SOURCE_BRANCH,
         "event": hb.HISTORICAL_EVENT,
+        "created_at": "2026-08-31T22:06:00Z",
         "run_attempt": hb.HISTORICAL_RUN_ATTEMPT,
         "conclusion": "success",
         "path": path,
@@ -108,6 +109,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             ("head_sha", "f" * 40),
             ("head_branch", "untrusted-branch"),
             ("event", "push"),
+            ("created_at", "2026-99-31T22:06:00Z"),
             ("run_attempt", 2),
             ("conclusion", "failure"),
             ("path", ".github/workflows/other.yml"),
@@ -566,6 +568,8 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn(f"SOURCE_REF: {hb.SOURCE_REF}", workflow)
         self.assertIn('--source-ref "$SOURCE_REF"', workflow)
         self.assertIn("platform/release/release.py create", workflow)
+        self.assertIn("created_at=$(jq -er", workflow)
+        self.assertIn("--created-at \"$created_at\"", workflow)
         self.assertIn("--repo historical-source", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)
 

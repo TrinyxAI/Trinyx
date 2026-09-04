@@ -1,19 +1,117 @@
 {
   "schemaVersion": 1,
   "images": [
-    {"name":"agent","service":"agent-service","package":"ghcr.io/trinyxai/trinyx-cloud-agent","environment":"TRINYX_CLOUD_AGENT_IMAGE"},
-    {"name":"auth","service":"auth-service","package":"ghcr.io/trinyxai/trinyx-cloud-auth","environment":"TRINYX_CLOUD_AUTH_IMAGE"},
-    {"name":"catalog","service":"catalog-service","package":"ghcr.io/trinyxai/trinyx-cloud-catalog","environment":"TRINYX_CLOUD_CATALOG_IMAGE"},
-    {"name":"conversation","service":"conversation-service","package":"ghcr.io/trinyxai/trinyx-cloud-conversation","environment":"TRINYX_CLOUD_CONVERSATION_IMAGE"},
-    {"name":"datasource","service":"datasource-service","package":"ghcr.io/trinyxai/trinyx-cloud-datasource","environment":"TRINYX_CLOUD_DATASOURCE_IMAGE"},
-    {"name":"gateway","service":"gateway-service","package":"ghcr.io/trinyxai/trinyx-cloud-gateway","environment":"TRINYX_CLOUD_GATEWAY_IMAGE"},
-    {"name":"interface","service":"interface-service","package":"ghcr.io/trinyxai/trinyx-cloud-interface","environment":"TRINYX_CLOUD_INTERFACE_IMAGE"},
-    {"name":"keycloak","service":"keycloak","package":"ghcr.io/trinyxai/trinyx-cloud-keycloak","environment":"TRINYX_CLOUD_KEYCLOAK_IMAGE"},
-    {"name":"migration","service":"migration-service","package":"ghcr.io/trinyxai/trinyx-cloud-migration","environment":"TRINYX_CLOUD_MIGRATION_IMAGE"},
-    {"name":"orchestrator","service":"orchestrator-service","package":"ghcr.io/trinyxai/trinyx-cloud-orchestrator","environment":"TRINYX_CLOUD_ORCHESTRATOR_IMAGE"},
-    {"name":"publication","service":"publication-service","package":"ghcr.io/trinyxai/trinyx-cloud-publication","environment":"TRINYX_CLOUD_PUBLICATION_IMAGE"},
-    {"name":"storage","service":"storage-service","package":"ghcr.io/trinyxai/trinyx-cloud-storage","environment":"TRINYX_CLOUD_STORAGE_IMAGE"},
-    {"name":"trigger","service":"trigger-service","package":"ghcr.io/trinyxai/trinyx-cloud-trigger","environment":"TRINYX_CLOUD_TRIGGER_IMAGE"},
-    {"name":"websearch","service":"websearch-service","package":"ghcr.io/trinyxai/trinyx-cloud-websearch","environment":"TRINYX_CLOUD_WEBSEARCH_IMAGE"}
+    {
+      "name": "agent",
+      "service": "agent-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-agent",
+      "environment": "TRINYX_CLOUD_AGENT_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/agent-service/Dockerfile"
+    },
+    {
+      "name": "auth",
+      "service": "auth-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-auth",
+      "environment": "TRINYX_CLOUD_AUTH_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/auth-service/Dockerfile"
+    },
+    {
+      "name": "catalog",
+      "service": "catalog-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-catalog",
+      "environment": "TRINYX_CLOUD_CATALOG_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/catalog-service/Dockerfile"
+    },
+    {
+      "name": "conversation",
+      "service": "conversation-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-conversation",
+      "environment": "TRINYX_CLOUD_CONVERSATION_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/conversation-service/Dockerfile"
+    },
+    {
+      "name": "datasource",
+      "service": "datasource-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-datasource",
+      "environment": "TRINYX_CLOUD_DATASOURCE_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/datasource-service/Dockerfile"
+    },
+    {
+      "name": "gateway",
+      "service": "gateway-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-gateway",
+      "environment": "TRINYX_CLOUD_GATEWAY_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/gateway-service/Dockerfile"
+    },
+    {
+      "name": "interface",
+      "service": "interface-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-interface",
+      "environment": "TRINYX_CLOUD_INTERFACE_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/interface-service/Dockerfile"
+    },
+    {
+      "name": "keycloak",
+      "service": "keycloak",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-keycloak",
+      "environment": "TRINYX_CLOUD_KEYCLOAK_IMAGE",
+      "context": "./docker/cloud/keycloak",
+      "dockerfile": "./docker/cloud/keycloak/Dockerfile"
+    },
+    {
+      "name": "migration",
+      "service": "migration-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-migration",
+      "environment": "TRINYX_CLOUD_MIGRATION_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/migration-service/Dockerfile"
+    },
+    {
+      "name": "orchestrator",
+      "service": "orchestrator-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-orchestrator",
+      "environment": "TRINYX_CLOUD_ORCHESTRATOR_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/orchestrator-service/Dockerfile"
+    },
+    {
+      "name": "publication",
+      "service": "publication-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-publication",
+      "environment": "TRINYX_CLOUD_PUBLICATION_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/publication-service/Dockerfile"
+    },
+    {
+      "name": "storage",
+      "service": "storage-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-storage",
+      "environment": "TRINYX_CLOUD_STORAGE_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/storage-service/Dockerfile"
+    },
+    {
+      "name": "trigger",
+      "service": "trigger-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-trigger",
+      "environment": "TRINYX_CLOUD_TRIGGER_IMAGE",
+      "context": "./backend",
+      "dockerfile": "./backend/trigger-service/Dockerfile"
+    },
+    {
+      "name": "websearch",
+      "service": "websearch-service",
+      "package": "ghcr.io/trinyxai/trinyx-cloud-websearch",
+      "environment": "TRINYX_CLOUD_WEBSEARCH_IMAGE",
+      "context": "./websearch-service",
+      "dockerfile": "./websearch-service/Dockerfile"
+    }
   ]
 }

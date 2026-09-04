@@ -14,6 +14,7 @@ import os
 import re
 import stat
 import tarfile
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
@@ -79,6 +80,17 @@ def canonical_json(value: Any) -> bytes:
 
 def sha256_bytes(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def require_utc_timestamp(value: Any, label: str) -> None:
+    require(
+        isinstance(value, str) and RFC3339_UTC_RE.fullmatch(value) is not None,
+        f"{label} is not strict UTC RFC3339",
+    )
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise InvariantError(f"{label} is invalid") from exc
 
 
 def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -165,6 +177,7 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
     require(isinstance(manifest["sourceCommit"], str) and SHA_RE.fullmatch(manifest["sourceCommit"]), "bad source commit")
     require(isinstance(manifest["platformCommit"], str) and SHA_RE.fullmatch(manifest["platformCommit"]), "bad platform commit")
     require(isinstance(manifest["sourceRef"], str) and 0 < len(manifest["sourceRef"]) <= 255, "bad source ref")
+    require_utc_timestamp(manifest["createdAt"], "release createdAt")
     bundle = manifest["deploymentBundle"]
     require(isinstance(bundle, dict) and set(bundle) == {"format", "digest", "sizeBytes", "fileCount"}, "bad bundle identity")
     require(bundle["format"] == "tar", "bundle must be tar")
@@ -221,7 +234,7 @@ def parse_images_env(path: Path) -> dict[str, str]:
 
 
 def _bundle_path_is_canonical(value: Any) -> bool:
-    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
+    if not isinstance(value, str) or not value or value == "." or value.startswith("/") or "\\" in value:
         return False
     if any(ord(char) < 0x20 for char in value):
         return False

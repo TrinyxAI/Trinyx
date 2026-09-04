@@ -246,6 +246,50 @@ class HistoricalBaselineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 hb.canonical_cloud_manifest(drift, inventory, historical_inventory)
 
+    def test_real_aeb2_historical_inventory_schema_is_exact_and_fail_closed(self) -> None:
+        inventory = json.loads((ROOT / "platform/release/runtime-inventory.json").read_text())
+        historical_inventory = json.loads(
+            (FIXTURES / "historical-cloud-images-aeb2.json").read_text()
+        )
+        manifest = json.loads(
+            (FIXTURES / "historical-cloud-manifest-aeb2.json").read_text()
+        )
+        expected_keys = {
+            "name", "service", "package", "environment", "context", "dockerfile",
+        }
+        self.assertEqual(14, len(historical_inventory["images"]))
+        for item in historical_inventory["images"]:
+            self.assertEqual(expected_keys, set(item))
+            self.assertTrue(all(isinstance(item[key], str) for key in expected_keys))
+
+        for key in ("context", "dockerfile"):
+            with self.subTest(missing=key):
+                drift = copy.deepcopy(historical_inventory)
+                del drift["images"][0][key]
+                with self.assertRaises(ValueError):
+                    hb.canonical_cloud_manifest(manifest, inventory, drift)
+
+        drift = copy.deepcopy(historical_inventory)
+        drift["images"][0]["unexpected"] = "value"
+        with self.assertRaises(ValueError):
+            hb.canonical_cloud_manifest(manifest, inventory, drift)
+
+        for key, value in (
+            ("context", 123),
+            ("dockerfile", None),
+            ("context", "../backend"),
+            ("dockerfile", "./backend/../agent-service/Dockerfile"),
+            ("name", "Agent"),
+            ("service", "Agent-service"),
+            ("package", "ghcr.io/trinyxai/trinyx-cloud-agent:latest"),
+            ("environment", "trinyx_cloud_agent_image"),
+        ):
+            with self.subTest(invalid_field=key, value=value):
+                drift = copy.deepcopy(historical_inventory)
+                drift["images"][0][key] = value
+                with self.assertRaises(ValueError):
+                    hb.canonical_cloud_manifest(manifest, inventory, drift)
+
     def test_artifact_digest_is_the_exact_real_github_value(self) -> None:
         self.assertEqual(
             "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0",

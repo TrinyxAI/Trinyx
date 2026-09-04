@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
-PINNED_CONTROL_PLANE_CODE_COMMIT = "bdbdc0068b08f818881fecc96d6cb0770b972ec4"
+PINNED_CONTROL_PLANE_CODE_COMMIT = "6b0951f52d8fb15ef28754c894a5405b5d21a263"
 PINNED_PRIVILEGED_WORKFLOW_COMMIT = "a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {

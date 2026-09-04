@@ -50,8 +50,8 @@ jobs:
           gh api /repos/TrinyxAI/Trinyx/actions/runs/33444302902 > historical-input/frontend-run.json
           gh api /repos/TrinyxAI/Trinyx/actions/jobs/99660712771 > historical-input/backend-publish-job.json
           gh api /repos/TrinyxAI/Trinyx/actions/jobs/99659777935 > historical-input/frontend-publish-job.json
-          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99660712771/logs > historical-input/backend-publish.log
-          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99659777935/logs > historical-input/frontend-publish.log
+          gh api --allow-escape-sequences /repos/TrinyxAI/Trinyx/actions/jobs/99660712771/logs > historical-input/backend-publish.log
+          gh api --allow-escape-sequences /repos/TrinyxAI/Trinyx/actions/jobs/99659777935/logs > historical-input/frontend-publish.log
           gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417/artifacts \
             --jq '.artifacts[] | select(.id == 9777989306)' > historical-input/artifact.json
           test "$(jq -r .id historical-input/artifact.json)" = 9777989306

@@ -282,9 +282,11 @@ overlays and incomplete bundle coverage, and never substitutes any other
 current application/deployment content. The one environment-specific input used
 only for the read-only Paid Compose render is separately allowlisted as
 `platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml`;
-it is required to be a regular non-symlinked file in that same trusted checkout
-and its SHA-256 is recorded in the job log. It is not copied into the baseline
-bundle and never claims historical aeb2 provenance. Modern bundle entries include
+it is required to be a regular non-symlinked file in that same trusted checkout,
+then copied once to a fresh read-only snapshot. The logged SHA-256 identifies the
+exact snapshot consumed by `docker compose config`; the mutable checkout path is
+never passed to Compose after verification. The snapshot is not copied into the
+baseline bundle and never claims historical aeb2 provenance. Modern bundle entries include
 their normalized mode. The four canonical files receive
 GitHub build provenance attestations. Do not register or install a baseline
 built with this modern bundle schema while the active C3/W7 control plane is

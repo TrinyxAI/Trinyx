@@ -611,7 +611,7 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("historical-deployment-bundle-sources.json", workflow)
         helper_source = (ROOT / "platform/release/prepare-historical-bundle-source.py").read_text()
         self.assertIn('["git", "-C", str(repo), "rev-parse", "HEAD"]', helper_source)
-        self.assertIn('["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"]', helper_source)
+        self.assertIn('["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all", "--ignored"]', helper_source)
         self.assertIn("repository root may not traverse a symlink", helper_source)
         self.assertIn("destination may not be inside the historical repository", helper_source)
         self.assertIn("Prepare authenticated historical bundle source", workflow)
@@ -776,6 +776,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             (historical / "catalog-seeds").mkdir(parents=True)
             (historical / "catalog-seeds" / "seed.json").write_text("{}\n")
             (historical / "docker-compose.yml").write_text("services: {}\n")
+            (historical / ".gitignore").write_text("ignored.txt\n")
             overlay = trusted / "docker" / "docker-compose.paid.runtime.yml"
             overlay.parent.mkdir(parents=True)
             overlay.write_text("services: {}\n")
@@ -832,6 +833,11 @@ class HistoricalBaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "historical repository is not clean"):
                 prepare("dirty")
             (historical / "dirty.txt").unlink()
+
+            (historical / "ignored.txt").write_text("ignored contamination\n")
+            with self.assertRaisesRegex(SystemExit, "historical repository is not clean"):
+                prepare("ignored")
+            (historical / "ignored.txt").unlink()
 
             source_document["historicalSourceCommit"] = "f" * 40
             helper.SOURCE_COMMIT = "f" * 40

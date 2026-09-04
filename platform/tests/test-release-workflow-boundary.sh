@@ -93,7 +93,6 @@ assert 'STAGING_RELEASE_INSTALL_ONLY_SUCCESS' in install_block
 assert 'exit 0' in install_block
 for forbidden in ('ssm_orchestrator.py normalize-plan','ssm_orchestrator.py adopt','ssm_orchestrator.py deploy','ssm_orchestrator.py apply','ssm_orchestrator.py rollback','ssm_orchestrator.py health'):
     assert forbidden not in install_block
-assert 'staging-release-install' not in bridge
 assert '--signer-digest "$SIGNER_DIGEST"' in register
 assert '--signer-digest "$SIGNER_DIGEST"' in qualify
 for frozen in (

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -862,6 +863,66 @@ class HistoricalBaselineTests(unittest.TestCase):
             helper.SOURCE_COMMIT = "f" * 40
             with self.assertRaisesRegex(SystemExit, "historical repository commit mismatch"):
                 prepare("wrong-commit")
+
+    def test_bundle_source_rechecks_authenticated_roots_and_trusted_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            historical = root / "historical"
+            trusted = root / "trusted"
+            (historical / "catalog-seeds").mkdir(parents=True)
+            (historical / "catalog-seeds" / "seed.json").write_text("{}\n")
+            (historical / "docker-compose.yml").write_text("services: {}\n")
+            (trusted / "docker").mkdir(parents=True)
+            (trusted / "docker" / "docker-compose.paid.runtime.yml").write_text("services: {}\n")
+            config_relative = (
+                "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml"
+            )
+            config = trusted / config_relative
+            config.parent.mkdir(parents=True)
+            config.write_text("services: {}\n")
+            historical_commit = clean_git_checkout(historical)
+            trusted_commit = clean_git_checkout(trusted)
+            helper = load_historical_bundle_source_helper()
+            helper.SOURCE_COMMIT = historical_commit
+            source = root / "sources.json"
+            source.write_text(json.dumps({
+                "schemaVersion": 1,
+                "historicalSourceCommit": historical_commit,
+                "historicalPaths": ["docker-compose.yml", "catalog-seeds"],
+                "trustedBuilderOverlays": ["docker/docker-compose.paid.runtime.yml"],
+            }))
+            bundle = root / "bundle.json"
+            bundle.write_text(json.dumps({
+                "schemaVersion": 1,
+                "paths": [
+                    "docker-compose.yml", "catalog-seeds",
+                    "docker/docker-compose.paid.runtime.yml",
+                ],
+            }))
+            helper.prepare(
+                historical, trusted, source, bundle, root / "out",
+                trusted_commit=trusted_commit,
+                approved_environment_config=config_relative,
+            )
+            self.assertTrue((root / "out" / "docker-compose.yml").is_file())
+
+            original_copy = helper.copy_safe
+            dirtied = False
+
+            def copy_then_dirty(source_path, destination_path):
+                nonlocal dirtied
+                original_copy(source_path, destination_path)
+                if not dirtied and source_path == historical / "docker-compose.yml":
+                    (historical / "docker-compose.yml").write_text("tampered\n")
+                    dirtied = True
+
+            with mock.patch.object(helper, "copy_safe", side_effect=copy_then_dirty):
+                with self.assertRaisesRegex(SystemExit, "historical repository is not clean"):
+                    helper.prepare(
+                        historical, trusted, source, bundle, root / "out-dirty",
+                        trusted_commit=trusted_commit,
+                        approved_environment_config=config_relative,
+                    )
 
     def test_release_id_is_generated_and_validated_by_canonical_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

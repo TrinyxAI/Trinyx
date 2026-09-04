@@ -464,58 +464,55 @@ jobs:
                   "REQUIRE_INTERNAL_ATTESTATIONS": "true",
               }
 
-          if __name__ == "__main__":
+          def main():
               for name in ("baseline", "candidate"):
-                  prefix = name.upper()
-                  policy = resolve_attestation_policy(os.environ, Path(name), prefix)
-                  Path(f"{name}-attestation-policy.json").write_text(
-                      json.dumps(policy, sort_keys=True, separators=(",", ":")) + "\n",
+                  policy = resolve_attestation_policy(os.environ, Path(name), name.upper())
+                  target = Path(f"{name}-attestation-policy.env")
+                  target.write_text(
+                      "".join(f"{key}={value}\n" for key, value in policy.items()),
                       encoding="utf-8",
                   )
+                  target.chmod(0o600)
+
+          if __name__ == "__main__":
+              main()
           # END STAGING_QUALIFICATION_ATTESTATION_COMPATIBILITY
           PY
           # BEGIN STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
-          verify_internal_attestations() {
-            local name="$1"
-            local policy_file="$name-attestation-policy.json"
-            local signer_workflow signer_digest source_digest compatibility require_internal
-            signer_workflow="$(jq -er '.SIGNER_WORKFLOW' "$policy_file")"
-            signer_digest="$(jq -er '.SIGNER_DIGEST' "$policy_file")"
-            source_digest="$(jq -er '.ATTESTATION_SOURCE_DIGEST' "$policy_file")"
-            compatibility="$(jq -er '.COMPATIBILITY' "$policy_file")"
-            require_internal="$(jq -er '.REQUIRE_INTERNAL_ATTESTATIONS' "$policy_file")"
-            test "$(jq -r 'keys | sort | join(",")' "$policy_file")" = \
-              'ATTESTATION_SOURCE_DIGEST,COMPATIBILITY,REQUIRE_INTERNAL_ATTESTATIONS,SIGNER_DIGEST,SIGNER_WORKFLOW'
-            case "$compatibility:$require_internal:$signer_workflow" in
+          for name in baseline candidate; do
+            upper=\${name^^}
+            source_var="\${upper}_SOURCE_COMMIT"
+            source "$name-attestation-policy.env"
+            case "$COMPATIBILITY:$REQUIRE_INTERNAL_ATTESTATIONS:$SIGNER_WORKFLOW" in
               frozen-historical-builder:false:build-release-candidate.yml)
-                test "$signer_digest" = 'f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47'
-                test "$source_digest" = "$signer_digest"
+                test "$SIGNER_DIGEST" = f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47
+                test "$ATTESTATION_SOURCE_DIGEST" = "$SIGNER_DIGEST"
                 ;;
               pinned-reusable-builder:true:build-release-candidate-impl.yml)
-                test "$signer_digest" = "$BUILDER_WORKFLOW_COMMIT"
+                test "$SIGNER_DIGEST" = "$BUILDER_WORKFLOW_COMMIT"
+                test "$ATTESTATION_SOURCE_DIGEST" = "\${!source_var}"
                 ;;
               pinned-reusable-builder:true:build-historical-staging-baseline-impl.yml)
                 test "$name" = baseline
-                test "$signer_digest" = '22f1e593c36eaf1d70197db91bd54e31844a7eef'
-                test "$source_digest" = 'b883685a513795e6224f4166fef65a72bc120a87'
+                test "$SIGNER_DIGEST" = 22f1e593c36eaf1d70197db91bd54e31844a7eef
+                test "$ATTESTATION_SOURCE_DIGEST" = b883685a513795e6224f4166fef65a72bc120a87
                 ;;
               *)
                 echo "ERROR_INVALID_ATTESTATION_POLICY:$name" >&2
-                return 1
+                exit 1
                 ;;
             esac
-            if test "$require_internal" = true; then
+            if test "$REQUIRE_INTERNAL_ATTESTATIONS" = true; then
               for subject in release.json release-images.json deployment-bundle.json deployment-bundle.tar; do
                 gh attestation verify "$name/$subject" \
                   --repo "$GITHUB_REPOSITORY" \
-                  --signer-workflow "$signer_workflow" \
-                  --signer-digest "$signer_digest" \
-                  --source-digest "$source_digest"
+                  --signer-workflow "TrinyxAI/Trinyx/.github/workflows/$SIGNER_WORKFLOW" \
+                  --signer-digest "$SIGNER_DIGEST" \
+                  --source-digest "$ATTESTATION_SOURCE_DIGEST" \
+                  --deny-self-hosted-runners
               done
             fi
-          }
-          verify_internal_attestations baseline
-          verify_internal_attestations candidate
+          done
           # END STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
           python3 - <<'PY'
           # BEGIN STAGING_QUALIFICATION_PROVENANCE_GENERATION
@@ -525,102 +522,110 @@ jobs:
           import re
           from pathlib import Path
 
-          POLICY_KEYS = {
+          EXPECTED_POLICY_KEYS = {
               "SIGNER_WORKFLOW",
               "SIGNER_DIGEST",
               "ATTESTATION_SOURCE_DIGEST",
               "COMPATIBILITY",
               "REQUIRE_INTERNAL_ATTESTATIONS",
           }
+          FROZEN = {
+              "sourceCommit": "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47",
+              "releaseId": "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4",
+              "bundleDigest": "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
+              "artifactId": "9791964215",
+              "runId": "33485509832",
+              "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
+          }
+          APPROVED_BASELINE = {
+              "sourceCommit": "aeb2a447ea7ce0436a60549713636225dfe1a2c1",
+              "releaseId": "rel-v1-61d902b8c3f36f7b23873cab31427243",
+              "bundleDigest": "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047",
+              "artifactId": "9931132603",
+              "runId": "33858423626",
+              "artifactDigest": "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
+          }
           UTC_RFC3339 = re.compile(
               r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]{1,6})?Z"
           )
-          FROZEN_SOURCE = "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47"
-          AEB2_SOURCE = "aeb2a447ea7ce0436a60549713636225dfe1a2c1"
-          AEB2_BUILDER = "22f1e593c36eaf1d70197db91bd54e31844a7eef"
-          AEB2_CALLER_HEAD = "b883685a513795e6224f4166fef65a72bc120a87"
 
-          def render_provenance(value):
-              return (
-                  json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
-              ).encode("utf-8")
+          def read_policy(path):
+              policy = {}
+              for line in path.read_text(encoding="utf-8").splitlines():
+                  if "=" not in line:
+                      raise SystemExit("invalid attestation policy record")
+                  key, value = line.split("=", 1)
+                  if key in policy:
+                      raise SystemExit("duplicate attestation policy key")
+                  policy[key] = value
+              if set(policy) != EXPECTED_POLICY_KEYS:
+                  raise SystemExit("invalid attestation policy keys")
+              if policy["REQUIRE_INTERNAL_ATTESTATIONS"] not in {"true", "false"}:
+                  raise SystemExit("invalid attestation policy value")
+              return policy
 
           def verified_build_created_at(name):
-              path = Path("artifacts", f"{name}-verified-build-created-at.txt")
-              lines = path.read_text(encoding="utf-8").splitlines()
-              if len(lines) != 1 or UTC_RFC3339.fullmatch(lines[0]) is None:
-                  raise SystemExit(f"invalid verified build timestamp:{name}")
+              value = Path(
+                  f"artifacts/{name}-verified-build-created-at.txt"
+              ).read_text(encoding="utf-8").strip()
+              if UTC_RFC3339.fullmatch(value) is None:
+                  raise SystemExit(f"invalid verified build created_at:{name}")
               try:
-                  parsed = dt.datetime.fromisoformat(lines[0][:-1] + "+00:00")
+                  parsed = dt.datetime.fromisoformat(value[:-1] + "+00:00")
               except ValueError as exc:
-                  raise SystemExit(f"invalid verified build timestamp:{name}") from exc
+                  raise SystemExit(f"invalid verified build created_at:{name}") from exc
               if parsed.tzinfo != dt.timezone.utc:
-                  raise SystemExit(f"verified build timestamp is not UTC:{name}")
-              return lines[0]
+                  raise SystemExit(f"verified build created_at is not UTC:{name}")
+              return value
+
+          def render_provenance(provenance):
+              return (
+                  json.dumps(provenance, sort_keys=True, separators=(",", ":")) + "\n"
+              ).encode("utf-8")
 
           for name in ("baseline", "candidate"):
               prefix = name.upper()
-              release = json.loads(
-                  Path(name, "release.json").read_text(encoding="utf-8")
-              )
-              policy = json.loads(
-                  Path(f"{name}-attestation-policy.json").read_text(encoding="utf-8")
-              )
-              if set(policy) != POLICY_KEYS:
-                  raise SystemExit(f"attestation policy schema mismatch:{name}")
+              release = json.loads(Path(name, "release.json").read_text(encoding="utf-8"))
               actual = {
+                  "sourceCommit": release["sourceCommit"],
+                  "releaseId": release["releaseId"],
+                  "bundleDigest": release["deploymentBundle"]["digest"],
                   "artifactId": os.environ[f"{prefix}_ARTIFACT_ID"],
                   "runId": os.environ[f"{prefix}_RUN_ID"],
                   "artifactDigest": os.environ[f"{prefix}_ARTIFACT_DIGEST"],
               }
-              source_commit = release.get("sourceCommit")
-              expected_policy = {
-                  "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
-                  "SIGNER_DIGEST": os.environ["BUILDER_WORKFLOW_COMMIT"],
-                  "ATTESTATION_SOURCE_DIGEST": source_commit,
-                  "COMPATIBILITY": "pinned-reusable-builder",
-                  "REQUIRE_INTERNAL_ATTESTATIONS": "true",
-              }
               if (
-                  source_commit == FROZEN_SOURCE
-                  and actual
-                  == {
-                      "artifactId": "9791964215",
-                      "runId": "33485509832",
-                      "artifactDigest": "sha256:755594078d9da7e19406e01187534132920a31f87804c1b33baa28fa96559152",
-                  }
-                  and release.get("releaseId") == "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4"
-                  and release.get("deploymentBundle", {}).get("digest")
-                  == "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892"
+                  actual["sourceCommit"] != os.environ[f"{prefix}_SOURCE_COMMIT"]
+                  or actual["releaseId"] != os.environ[f"{prefix}_RELEASE_ID"]
+                  or actual["bundleDigest"] != os.environ[f"{prefix}_BUNDLE_DIGEST"]
               ):
-                  expected_policy = {
+                  raise SystemExit(f"release/input identity mismatch:{name}")
+              policy = read_policy(Path(f"{name}-attestation-policy.env"))
+              if actual == FROZEN:
+                  expected = {
                       "SIGNER_WORKFLOW": "build-release-candidate.yml",
-                      "SIGNER_DIGEST": FROZEN_SOURCE,
-                      "ATTESTATION_SOURCE_DIGEST": FROZEN_SOURCE,
+                      "SIGNER_DIGEST": FROZEN["sourceCommit"],
+                      "ATTESTATION_SOURCE_DIGEST": FROZEN["sourceCommit"],
                       "COMPATIBILITY": "frozen-historical-builder",
                       "REQUIRE_INTERNAL_ATTESTATIONS": "false",
                   }
-              elif (
-                  name == "baseline"
-                  and source_commit == AEB2_SOURCE
-                  and actual
-                  == {
-                      "artifactId": "9931132603",
-                      "runId": "33858423626",
-                      "artifactDigest": "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
-                  }
-                  and release.get("releaseId") == "rel-v1-61d902b8c3f36f7b23873cab31427243"
-                  and release.get("deploymentBundle", {}).get("digest")
-                  == "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047"
-              ):
-                  expected_policy = {
+              elif name == "baseline" and actual == APPROVED_BASELINE:
+                  expected = {
                       "SIGNER_WORKFLOW": "build-historical-staging-baseline-impl.yml",
-                      "SIGNER_DIGEST": AEB2_BUILDER,
-                      "ATTESTATION_SOURCE_DIGEST": AEB2_CALLER_HEAD,
+                      "SIGNER_DIGEST": "22f1e593c36eaf1d70197db91bd54e31844a7eef",
+                      "ATTESTATION_SOURCE_DIGEST": "b883685a513795e6224f4166fef65a72bc120a87",
                       "COMPATIBILITY": "pinned-reusable-builder",
                       "REQUIRE_INTERNAL_ATTESTATIONS": "true",
                   }
-              if policy != expected_policy:
+              else:
+                  expected = {
+                      "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
+                      "SIGNER_DIGEST": os.environ["BUILDER_WORKFLOW_COMMIT"],
+                      "ATTESTATION_SOURCE_DIGEST": actual["sourceCommit"],
+                      "COMPATIBILITY": "pinned-reusable-builder",
+                      "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+                  }
+              if policy != expected:
                   raise SystemExit(f"attestation/provenance policy mismatch:{name}")
               provenance = {
                   "schemaVersion": 2,
@@ -628,7 +633,7 @@ jobs:
                   "signerWorkflow": policy["SIGNER_WORKFLOW"],
                   "signerDigest": policy["SIGNER_DIGEST"],
                   "compatibility": policy["COMPATIBILITY"],
-                  "sourceCommit": source_commit,
+                  "sourceCommit": release["sourceCommit"],
                   "artifactId": actual["artifactId"],
                   "runId": actual["runId"],
                   "artifactDigest": actual["artifactDigest"],

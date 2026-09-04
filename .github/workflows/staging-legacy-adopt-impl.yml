@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       action:
-        description: 'normalization-plan is read-only; adopt performs the separately approved pointer transition'
+        description: 'install is install-only; normalization-plan is read-only; adopt performs the separately approved pointer transition'
         required: true
         type: string
       baseline_release_id:
@@ -24,6 +24,16 @@ on:
         type: string
       document_version:
         required: true
+        type: string
+      previous_cloud_release:
+        description: Exact Cloud active release observed before install; required only for install
+        required: false
+        default: ''
+        type: string
+      previous_paid_release:
+        description: Exact Paid active release observed before install; required only for install
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -63,18 +73,27 @@ jobs:
           REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
           DEPLOY_ROLE_ARN: ${{ inputs.deploy_role_arn }}
           DOCUMENT_VERSION: ${{ inputs.document_version }}
+          PREVIOUS_CLOUD_RELEASE: ${{ inputs.previous_cloud_release }}
+          PREVIOUS_PAID_RELEASE: ${{ inputs.previous_paid_release }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = TrinyxAI/Trinyx
           test "$GITHUB_REPOSITORY_ID" = 1342032975
           test "$GITHUB_REPOSITORY_OWNER_ID" = 319253481
-          [[ "$ACTION" =~ ^(normalization-plan|adopt)$ ]]
+          [[ "$ACTION" =~ ^(install|normalization-plan|adopt)$ ]]
           [[ "$BASELINE_RELEASE_ID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
           [[ "$BASELINE_BUNDLE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$CONFIG_REVISION" =~ ^[A-Za-z0-9._-]{1,128}$ ]]
           [[ "$REGISTRY_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
           [[ "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::001634075617:role/TrinyxStagingDeployRole$ ]]
           [[ "$DOCUMENT_VERSION" =~ ^[1-9][0-9]*$ ]]
+          if [ "$ACTION" = install ]; then
+            [[ "$PREVIOUS_CLOUD_RELEASE" =~ ^rel-v1-[0-9a-f]{32}$ ]]
+            [[ "$PREVIOUS_PAID_RELEASE" =~ ^rel-v1-[0-9a-f]{32}$ ]]
+          else
+            test -z "$PREVIOUS_CLOUD_RELEASE"
+            test -z "$PREVIOUS_PAID_RELEASE"
+          fi
       - name: Assume deploy-only AWS role
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4, Node 24
         with:
@@ -90,12 +109,19 @@ jobs:
           CONFIG_REVISION: ${{ inputs.environment_config_revision }}
           REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
           DOCUMENT_VERSION: ${{ inputs.document_version }}
+          PREVIOUS_CLOUD_RELEASE: ${{ inputs.previous_cloud_release }}
+          PREVIOUS_PAID_RELEASE: ${{ inputs.previous_paid_release }}
         run: |
           set -euo pipefail
           common=(--document-version "$DOCUMENT_VERSION" --registry-bucket "$REGISTRY_BUCKET" --config-revision "$CONFIG_REVISION" --control-plane-commit "$CONTROL_PLANE_COMMIT")
           if [ "$ACTION" = normalization-plan ]; then
             python3 platform/automation/ssm_orchestrator.py normalize-plan "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
             echo LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS
+            exit 0
+          fi
+          if [ "$ACTION" = install ]; then
+            python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$PREVIOUS_CLOUD_RELEASE" --previous-paid "$PREVIOUS_PAID_RELEASE"
+            echo STAGING_RELEASE_INSTALL_ONLY_SUCCESS
             exit 0
           fi
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"

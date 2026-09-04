@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import tarfile
 import tempfile
 import unittest
@@ -184,8 +185,50 @@ class InstallReleaseModeTests(unittest.TestCase):
             self.assertEqual(0o444, (bundle_dir / "plain.txt").stat().st_mode & 0o777)
             self.assertEqual(0o555, (bundle_dir / "bin" / "run.sh").stat().st_mode & 0o777)
             self.assertTrue(installer.verify_bundle_tree(bundle_dir, bundle))
+            os.chmod(bundle_dir, 0o755)
+            (bundle_dir / "unexpected-empty-directory").mkdir()
+            os.chmod(bundle_dir, 0o555)
+            self.assertFalse(installer.verify_bundle_tree(bundle_dir, bundle))
+            os.chmod(bundle_dir, 0o755)
+            (bundle_dir / "unexpected-empty-directory").rmdir()
+            os.chmod(bundle_dir, 0o555)
             (bundle_dir / "plain.txt").chmod(0o555)
             self.assertFalse(installer.verify_bundle_tree(bundle_dir, bundle))
+
+    @unittest.skipIf(os.name == "nt", "Windows runner lacks unprivileged symlink support; Linux CI executes this")
+    def test_immutable_tree_rejects_symlink_and_overlapping_manifest_paths(self) -> None:
+        installer = load_installer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest_path, tar_path, release = write_case(
+                root,
+                name="strict-tree",
+                release_id="rel-test-modern",
+                entries=[("dir/file.txt", b"content\n", 0o644)],
+                include_mode=True,
+            )
+            bundle, _ = installer.validate_bundle(release, manifest_path, tar_path)
+            extract = root / "extract"
+            extract.mkdir()
+            installer.install_bundle_tree(extract, tar_path, bundle)
+            bundle_dir = extract / "bundle"
+            os.chmod(bundle_dir / "dir", 0o755)
+            os.symlink(bundle_dir / "dir" / "file.txt", bundle_dir / "dir" / "link")
+            os.chmod(bundle_dir / "dir", 0o555)
+            self.assertFalse(installer.verify_bundle_tree(bundle_dir, bundle))
+
+            document = json.loads(manifest_path.read_text(encoding="utf-8"))
+            document["files"].append(
+                {
+                    "path": "dir",
+                    "digest": "sha256:" + "0" * 64,
+                    "sizeBytes": 0,
+                    "mode": 0o644,
+                }
+            )
+            manifest_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "overlapping"):
+                installer.validate_bundle(release, manifest_path, tar_path)
 
 
 if __name__ == "__main__":

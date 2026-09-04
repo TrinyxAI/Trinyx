@@ -266,9 +266,17 @@ backend `sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e
 and frontend `sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e`.
 The builder combines those inputs with the reviewed static
 third-party inventory. The trusted current packaging tools build the bundle
-from the exact historical source tree as data and `release.py` computes the
-content-derived release ID. The four canonical files receive GitHub build
-provenance attestations.
+from explicitly authenticated source origins and `release.py` computes the
+content-derived release ID. Nine contracted paths come byte-for-byte from the
+exact aeb2 tree. The exact tree predates
+`docker/docker-compose.paid.runtime.yml`, while the current Paid deployment
+plan requires that image-only override to bind all eight services to the
+canonical immutable image inventory. A closed source contract therefore admits
+that one file only from the exact trusted builder checkout, rejects historical
+shadowing, symlinks, unapproved overlays and incomplete bundle coverage, and
+never substitutes any other current application/deployment content. Modern
+bundle entries include their normalized mode. The four canonical files receive
+GitHub build provenance attestations.
 Both historical runs must also report branch
 `codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
 before the builder may emit `release.sourceRef` as

@@ -161,6 +161,21 @@ def safe_destination(destination: Path, historical_repo: Path) -> Path:
     fail("historical bundle destination may not be inside the historical repository")
 
 
+def safe_output_file(destination: Path, historical_repo: Path, label: str) -> Path:
+    """Reserve a fresh, non-symlinked output file outside the historical checkout."""
+    target = Path(os.path.abspath(destination))
+    reject_symlinked_repository_root(target.parent, label)
+    if target.is_symlink() or target.exists():
+        fail(f"{label} already exists or is a symlink")
+    parent = target.parent.resolve()
+    resolved = parent / target.name
+    try:
+        resolved.relative_to(historical_repo)
+    except ValueError:
+        return resolved
+    fail(f"{label} may not be inside the historical repository")
+
+
 def read_regular_file_no_follow(source: Path) -> tuple[bytes, int]:
     try:
         before = os.lstat(source)
@@ -235,6 +250,7 @@ def prepare(
     destination: Path,
     trusted_commit: str | None = None,
     approved_environment_config: str | None = None,
+    approved_environment_config_out: Path | None = None,
 ) -> None:
     source_doc = load_json(source_contract)
     required = {
@@ -274,15 +290,24 @@ def prepare(
 
     historical_repo = verify_historical_checkout(historical_repo)
     trusted_repo = verified_trusted_repo(trusted_repo, trusted_commit)
+    if (approved_environment_config is None) != (approved_environment_config_out is None):
+        fail("historical environment configuration and output must be supplied together")
     if approved_environment_config is not None:
         relative = normalized_relative(approved_environment_config)
         if relative not in APPROVED_ENVIRONMENT_CONFIGS:
             fail("unapproved historical environment configuration")
-        config = source_path(trusted_repo, relative)
-        content, _ = read_regular_file_no_follow(config)
+        config_source = source_path(trusted_repo, relative)
+        config_destination = safe_output_file(
+            approved_environment_config_out, historical_repo, "historical environment configuration output"
+        )
+        # Docker Compose consumes this fresh snapshot, never the mutable checkout path
+        # whose bytes were merely checked earlier in the job.
+        copy_safe(config_source, config_destination)
+        content, _ = read_regular_file_no_follow(config_destination)
         print(
             "HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK "
-            f"path={relative} sha256={hashlib.sha256(content).hexdigest()}"
+            f"path={relative} sha256={hashlib.sha256(content).hexdigest()} "
+            f"snapshot={config_destination}"
         )
     destination = safe_destination(destination, historical_repo)
     destination.mkdir(parents=True, mode=0o755)
@@ -322,6 +347,7 @@ def main() -> None:
     parser.add_argument("--bundle-contract", required=True, type=Path)
     parser.add_argument("--trusted-commit")
     parser.add_argument("--approved-environment-config")
+    parser.add_argument("--approved-environment-config-out", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     prepare(
@@ -332,6 +358,7 @@ def main() -> None:
         args.out,
         args.trusted_commit,
         args.approved_environment_config,
+        args.approved_environment_config_out,
     )
 
 

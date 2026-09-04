@@ -16,6 +16,17 @@ PACKAGE_RE = re.compile(
     r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
 )
 IMAGE_KEYS = {"name", "role", "service", "package", "environment", "digest", "immutableRef"}
+IMAGE_DOCUMENT_KEYS = {"schemaVersion", "sourceCommit", "images"}
+RELEASE_MANIFEST_KEYS = {
+    "schemaVersion",
+    "releaseId",
+    "sourceCommit",
+    "sourceRef",
+    "platformCommit",
+    "createdAt",
+    "deploymentBundle",
+    "images",
+}
 
 
 def fail(message: str) -> None:
@@ -73,10 +84,16 @@ def validate_inventory(contract: Any) -> dict[str, tuple[str, str, str]]:
 
 
 def validate_images(document: Any) -> dict[str, tuple[str, str, str]]:
+    # This validator is deliberately usable for both canonical release-images.json
+    # and the closed release.json schema emitted by release.py.  Do not accept an
+    # arbitrary wrapper merely because it happens to contain an images list.
+    if not isinstance(document, dict):
+        fail("image document schema mismatch")
+    keys = set(document)
+    if keys != IMAGE_DOCUMENT_KEYS and keys != RELEASE_MANIFEST_KEYS:
+        fail("image document schema mismatch")
     if (
-        not isinstance(document, dict)
-        or set(document) != {"schemaVersion", "sourceCommit", "images"}
-        or type(document["schemaVersion"]) is not int
+        type(document["schemaVersion"]) is not int
         or document["schemaVersion"] != 1
         or not isinstance(document["sourceCommit"], str)
         or not SHA_RE.fullmatch(document["sourceCommit"])

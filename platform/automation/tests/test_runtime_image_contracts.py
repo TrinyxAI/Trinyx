@@ -84,6 +84,25 @@ class RuntimeImageContractTests(unittest.TestCase):
         document = assembled_document(inventory)
         self.assertEqual(28, len(validator.validate_images(document)))
 
+        # The runtime lock also validates the images embedded in the closed
+        # canonical release manifest; accepting a free-form wrapper would
+        # weaken this boundary, so only that exact root shape is allowed.
+        release_document = {
+            "schemaVersion": 1,
+            "releaseId": "rel-v1-" + "b" * 32,
+            "sourceCommit": document["sourceCommit"],
+            "sourceRef": "refs/heads/fixture",
+            "platformCommit": "c" * 40,
+            "createdAt": "2026-09-01T00:00:00Z",
+            "deploymentBundle": {},
+            "images": copy.deepcopy(document["images"]),
+        }
+        self.assertEqual(28, len(validator.validate_images(release_document)))
+        malformed_release = copy.deepcopy(release_document)
+        malformed_release["unexpected"] = True
+        with self.assertRaisesRegex(SystemExit, "schema mismatch"):
+            validator.validate_images(malformed_release)
+
         invalid = copy.deepcopy(document)
         invalid["schemaVersion"] = True
         with self.assertRaisesRegex(SystemExit, "schema mismatch"):

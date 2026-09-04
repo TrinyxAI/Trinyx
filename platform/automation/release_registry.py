@@ -60,6 +60,19 @@ FROZEN_CANDIDATE = {
     "imageInventoryDigest": "sha256:fe1134c3920af0f2f9f0027082f25ec5adb1cbb6d41a1053bada7ef730f66a8a",
     "bundleManifestDigest": "sha256:b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
 }
+APPROVED_HISTORICAL_BASELINE = {
+    "sourceCommit": "aeb2a447ea7ce0436a60549713636225dfe1a2c1",
+    "releaseId": "rel-v1-61d902b8c3f36f7b23873cab31427243",
+    "bundleDigest": "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047",
+    "artifactId": "9931132603",
+    "runId": "33858423626",
+    "artifactDigest": "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
+    "builderCommit": "22f1e593c36eaf1d70197db91bd54e31844a7eef",
+    "releaseManifestDigest": "sha256:b8bc11965c29e5cdc85389fd9f5d232abe359c4d85ecaf5caad381272fdbbc12",
+    "imageInventoryDigest": "sha256:b8ec0fa73f5e1b5b0cab04d729f7c21618c5bcb2f805fa908963c2a2c31320d0",
+    "bundleManifestDigest": "sha256:16321b2ed8876fed4bd6a57c69d42c39199c36bf81432e36b34f291c31d8cf03",
+}
+
 
 
 @dataclass(frozen=True)
@@ -236,11 +249,36 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance["artifactDigest"])) is not None, "bad artifact provenance digest")
     signer = (provenance["signerWorkflow"], provenance["signerDigest"], provenance["compatibility"])
     historical_candidate = False
+    approved_historical_baseline = (
+        signer
+        == (
+            "build-historical-staging-baseline-impl.yml",
+            APPROVED_HISTORICAL_BASELINE["builderCommit"],
+            "pinned-reusable-builder",
+        )
+        and provenance["sourceCommit"] == APPROVED_HISTORICAL_BASELINE["sourceCommit"]
+        and manifest["releaseId"] == APPROVED_HISTORICAL_BASELINE["releaseId"]
+        and manifest["deploymentBundle"]["digest"]
+        == APPROVED_HISTORICAL_BASELINE["bundleDigest"]
+        and str(provenance["artifactId"])
+        == APPROVED_HISTORICAL_BASELINE["artifactId"]
+        and str(provenance["runId"]) == APPROVED_HISTORICAL_BASELINE["runId"]
+        and provenance["artifactDigest"]
+        == APPROVED_HISTORICAL_BASELINE["artifactDigest"]
+        and sha256_bytes(files["release.json"])
+        == APPROVED_HISTORICAL_BASELINE["releaseManifestDigest"]
+        and sha256_bytes(files["release-images.json"])
+        == APPROVED_HISTORICAL_BASELINE["imageInventoryDigest"]
+        and sha256_bytes(files["deployment-bundle.json"])
+        == APPROVED_HISTORICAL_BASELINE["bundleManifestDigest"]
+    )
     if signer == (
         "build-release-candidate-impl.yml",
         APPROVED_BUILDER_WORKFLOW_COMMIT,
         "pinned-reusable-builder",
     ):
+        pass
+    elif approved_historical_baseline:
         pass
     else:
         historical_candidate = (
@@ -261,7 +299,7 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
         )
         require(
             historical_candidate,
-            "historical builder compatibility is restricted to the frozen candidate",
+            "historical builder compatibility is restricted to exact approved identities",
         )
     assert_no_secret_material(provenance, "provenance")
     bundle_manifest = json.loads(files["deployment-bundle.json"])

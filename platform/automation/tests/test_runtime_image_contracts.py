@@ -78,6 +78,7 @@ class RuntimeImageContractTests(unittest.TestCase):
 
     def test_runtime_validator_rejects_type_coercion_duplicate_keys_and_bad_schema(self) -> None:
         validator = load_module(VALIDATOR_PATH, "trinyx_validator")
+        assembler = load_module(ASSEMBLER_PATH, "trinyx_assembler_tagged")
         inventory = json.loads(INVENTORY_PATH.read_text())
         self.assertEqual(28, len(validator.validate_inventory(inventory)))
         document = assembled_document(inventory)

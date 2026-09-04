@@ -11,6 +11,10 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 IMAGE_KEYS = {"name", "service", "package", "environment", "digest", "immutableRef"}
 IMAGE_KEYS_WITH_ROLE = IMAGE_KEYS | {"role"}
@@ -52,8 +56,8 @@ def require_image_identity(item: dict[str, Any], label: str) -> None:
         fail(f"invalid image environment in {label}")
     package = item["package"]
     digest = item["digest"]
-    if not package or "@" in package or any(char.isspace() for char in package):
-        fail(f"invalid package in {label}")
+    if not PACKAGE_RE.fullmatch(package):
+        fail(f"image repository must be canonical and tagless in {label}")
     if not DIGEST_RE.fullmatch(digest):
         fail(f"invalid digest in {label}")
     if item["immutableRef"] != package + "@" + digest:

@@ -6,7 +6,7 @@ python3 - "$ROOT/platform/aws/bootstrap/github-oidc-staging-bootstrap.json" <<'P
 import json,re,sys
 doc=json.load(open(sys.argv[1],encoding='utf-8'))
 resources=doc['Resources']
-assert doc['Parameters']['PlatformWorkflowRef']['Default']=='98b5efd23c18c7ce6902d6f6279bd9dc57966b8f'
+assert doc['Parameters']['PlatformWorkflowRef']['Default']=='a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae'
 assert doc['Parameters']['PlatformWorkflowRef']['AllowedPattern']=='^[0-9a-f]{40}$'
 provider=resources['GitHubActionsOidcProvider']
 assert provider['Type']=='AWS::IAM::OIDCProvider'

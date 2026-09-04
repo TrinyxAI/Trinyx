@@ -3,6 +3,7 @@ const ALLOWED_BACKEND_OIDC_JOBS = new Set([
   'staging_oidc_probe',
   'staging_release_register',
   'staging_legacy_normalization_plan',
+  'staging_release_install',
   'staging_legacy_adopt',
   'staging_qualification',
 ]);

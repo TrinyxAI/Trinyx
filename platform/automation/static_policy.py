@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 PINNED_BUILDER_WORKFLOW_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
 PINNED_CONTROL_PLANE_CODE_COMMIT = "bdbdc0068b08f818881fecc96d6cb0770b972ec4"
-PINNED_PRIVILEGED_WORKFLOW_COMMIT = "98b5efd23c18c7ce6902d6f6279bd9dc57966b8f"
+PINNED_PRIVILEGED_WORKFLOW_COMMIT = "a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae"
 ANY_USE = re.compile(r"^\s*uses:\s*([^\s@]+)@([^\s#]+)", re.M)
 APP_BUILDS = {
     "build-release-candidate.yml", "build-trinyx-backend.yml",
@@ -161,11 +161,37 @@ def check_workflows() -> None:
     for operation, target in (
         ("staging-oidc-probe", "staging-oidc-probe-impl.yml"),
         ("staging-release-register", "staging-release-register-impl.yml"),
+        ("staging-release-install", "staging-legacy-adopt-impl.yml"),
         ("staging-legacy-adopt", "staging-legacy-adopt-impl.yml"),
         ("staging-qualification", "staging-qualification-impl.yml"),
     ):
         require(f"inputs.operation == '{operation}'" in bridge and target in bridge,
                 f"missing narrow pre-merge bridge:{operation}")
+    require(
+        bridge.count("\n  staging_release_install:\n") == 1,
+        "install-only bridge job is missing or ambiguous",
+    )
+    install_bridge = bridge.split("\n  staging_release_install:\n", 1)[1].split("\n  staging_legacy_adopt:\n", 1)[0]
+    install_with = install_bridge.split("\n    with:\n", 1)[1]
+    install_inputs = set(re.findall(r"^      ([a-z_]+):", install_with, re.M))
+    require(
+        "inputs.operation == 'staging-release-install'" in install_bridge
+        and "github.event_name == 'workflow_dispatch'" in install_bridge
+        and "github.ref == 'refs/heads/codex/platform-release-automation'" in install_bridge
+        and f"staging-legacy-adopt-impl.yml@{PINNED_PRIVILEGED_WORKFLOW_COMMIT}" in install_bridge
+        and "action: install" in install_bridge
+        and install_inputs == {
+            "action", "baseline_release_id", "baseline_bundle_digest",
+            "environment_config_revision", "registry_bucket", "deploy_role_arn",
+            "document_version",
+        }
+        and "previous_cloud_release" not in install_bridge
+        and "previous_paid_release" not in install_bridge
+        and all(f"action: {mode}" not in install_bridge for mode in (
+            "normalization-plan", "adopt", "health", "deploy", "apply", "rollback"
+        )),
+        "install-only bridge is not closed and isolated",
+    )
     require(
         "inputs.operation == 'release-candidate'" in bridge
         and "build-release-candidate-impl.yml" in bridge,

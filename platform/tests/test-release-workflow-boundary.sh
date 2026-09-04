@@ -22,7 +22,7 @@ from pathlib import Path
 import re,sys
 BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
 CONTROL_PLANE_CODE="bdbdc0068b08f818881fecc96d6cb0770b972ec4"
-PRIVILEGED_WORKFLOW="98b5efd23c18c7ce6902d6f6279bd9dc57966b8f"
+PRIVILEGED_WORKFLOW="a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(
     Path(x).read_text(encoding='utf-8') for x in sys.argv[1:]
@@ -93,7 +93,6 @@ assert 'STAGING_RELEASE_INSTALL_ONLY_SUCCESS' in install_block
 assert 'exit 0' in install_block
 for forbidden in ('ssm_orchestrator.py normalize-plan','ssm_orchestrator.py adopt','ssm_orchestrator.py deploy','ssm_orchestrator.py apply','ssm_orchestrator.py rollback','ssm_orchestrator.py health'):
     assert forbidden not in install_block
-assert 'staging-release-install' not in bridge
 assert '--signer-digest "$SIGNER_DIGEST"' in register
 assert '--signer-digest "$SIGNER_DIGEST"' in qualify
 for frozen in (
@@ -115,6 +114,7 @@ for operation,target in (
     ('staging-oidc-probe','staging-oidc-probe-impl.yml'),
     ('staging-release-register','staging-release-register-impl.yml'),
     ('staging-legacy-normalization-plan','staging-legacy-adopt-impl.yml'),
+    ('staging-release-install','staging-legacy-adopt-impl.yml'),
     ('staging-legacy-adopt','staging-legacy-adopt-impl.yml'),
     ('staging-qualification','staging-qualification-impl.yml'),
 ):
@@ -122,6 +122,23 @@ for operation,target in (
     assert target in bridge
     expected=BUILDER if operation=='release-candidate' else PRIVILEGED_WORKFLOW
     assert f'{target}@{expected}' in bridge
+assert bridge.count('\n  staging_release_install:\n') == 1
+install_bridge=bridge.split('\n  staging_release_install:\n',1)[1].split('\n  staging_legacy_adopt:\n',1)[0]
+install_with=install_bridge.split('\n    with:\n',1)[1]
+install_inputs=set(re.findall(r'^      ([a-z_]+):',install_with,re.M))
+assert "inputs.operation == 'staging-release-install'" in install_bridge
+assert "github.event_name == 'workflow_dispatch'" in install_bridge
+assert "github.ref == 'refs/heads/codex/platform-release-automation'" in install_bridge
+assert f'staging-legacy-adopt-impl.yml@{PRIVILEGED_WORKFLOW}' in install_bridge
+assert 'action: install' in install_bridge
+assert install_inputs == {'action','baseline_release_id','baseline_bundle_digest','environment_config_revision','registry_bucket','deploy_role_arn','document_version'}
+assert 'previous_cloud_release' not in install_bridge
+assert 'previous_paid_release' not in install_bridge
+for forbidden_action in ('normalization-plan','adopt','health','deploy','apply','rollback'):
+    assert f'action: {forbidden_action}' not in install_bridge
+assert '          - install' in adopt_wrapper
+assert 'previous_cloud_release' not in adopt_wrapper
+assert 'previous_paid_release' not in adopt_wrapper
 assert 'action: normalization-plan' in bridge
 assert 'action: adopt' in bridge
 

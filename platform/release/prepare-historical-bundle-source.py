@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-import shutil
+import re
 import stat
 import subprocess
-import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -273,7 +273,7 @@ def prepare(
         content, _ = read_regular_file_no_follow(config)
         print(
             "HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK "
-            f"path={relative} sha256={__import__('hashlib').sha256(content).hexdigest()}"
+            f"path={relative} sha256={hashlib.sha256(content).hexdigest()}"
         )
     destination = safe_destination(destination, historical_repo)
     destination.mkdir(parents=True, mode=0o755)

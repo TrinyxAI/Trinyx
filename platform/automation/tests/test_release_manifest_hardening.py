@@ -96,6 +96,7 @@ class ReleaseManifestHardeningTests(unittest.TestCase):
             lambda doc: doc["files"][0].pop("mode"),
             lambda doc: doc["files"][0].__setitem__("mode", True),
             lambda doc: doc["files"][0].__setitem__("path", "../escape"),
+            lambda doc: doc["files"][0].__setitem__("path", "."),
             lambda doc: doc["files"].append(
                 {
                     "path": "docker-compose.yml/child",

@@ -148,6 +148,7 @@ jobs:
             --trusted-repo . \
             --trusted-commit "$TRUSTED_BUILDER_COMMIT" \
             --approved-environment-config platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml \
+            --approved-environment-config-out historical-input/paid/paid.override.yml \
             --source-contract platform/release/historical-deployment-bundle-sources.json \
             --bundle-contract platform/release/deployment-bundle-files.json \
             --out historical-bundle-source
@@ -215,7 +216,7 @@ jobs:
           PY
           docker compose --env-file historical-input/paid/images.env \
             -f historical-bundle-source/docker-compose.yml \
-            -f platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml \
+            -f historical-input/paid/paid.override.yml \
             -f historical-bundle-source/docker/docker-compose.paid.runtime.yml \
             config --format json \
             postgres redis minio minio-init bridge livecontext frontend paid-edge \
@@ -229,7 +230,9 @@ jobs:
           document = json.load(open(images_path, encoding="utf-8"))
           images = document.get("images") if isinstance(document, dict) else None
           rendered = json.load(open(rendered_path, encoding="utf-8"))
-          if not isinstance(rendered, dict) or set(rendered) != {"services"}:
+          # Docker Compose may include top-level project/network/volume metadata.
+          # The security boundary is the explicit eight-service projection below.
+          if not isinstance(rendered, dict) or not isinstance(rendered.get("services"), dict):
               raise SystemExit("ERROR: canonical Paid runtime render schema mismatch")
           expected_services = {
               "postgres", "redis", "minio", "minio-init",

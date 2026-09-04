@@ -165,13 +165,13 @@ jobs:
               raise SystemExit("ERROR: canonical Paid runtime environment bindings are not unique")
           if any(
               not re.fullmatch(r"[A-Z][A-Z0-9_]*", environment)
-              or not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", immutable_ref)
+              or not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", immutable_ref)
               for environment, immutable_ref in expected.values()
           ):
               raise SystemExit("ERROR: canonical Paid runtime image binding is invalid")
           with open(output_path, "w", encoding="utf-8") as output:
               for _, (environment, immutable_ref) in sorted(expected.items()):
-                  output.write(f"{environment}={immutable_ref}\\n")
+                  output.write(f"{environment}={immutable_ref}\n")
           PY
           docker compose --env-file historical-input/paid/images.env \
             -f historical-bundle-source/docker-compose.yml \
@@ -197,7 +197,7 @@ jobs:
           for service, immutable_ref in expected.items():
               actual = services.get(service, {}).get("image")
               if actual != immutable_ref or not re.fullmatch(
-                  r"[^@\\s]+@sha256:[0-9a-f]{64}", actual or ""
+                  r"[^@\s]+@sha256:[0-9a-f]{64}", actual or ""
               ):
                   raise SystemExit(
                       f"ERROR: canonical Paid runtime image render mismatch: {service}"

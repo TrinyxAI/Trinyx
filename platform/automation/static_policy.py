@@ -128,7 +128,7 @@ def check_workflows() -> None:
                         and "if [ \"$ACTION\" = normalization-plan ]" in text,
                         "legacy normalization plan is not a separate read-only workflow action",
                     )
-                    install_block = text.split('if [ "$ACTION" = install ]; then', 1)[-1].split("\n          fi", 1)[0]
+                    install_block = text.rsplit('if [ "$ACTION" = install ]; then', 1)[-1].split("\n          fi", 1)[0]
                     require(
                         'ssm_orchestrator.py install' in install_block
                         and "STAGING_RELEASE_INSTALL_ONLY_SUCCESS" in install_block

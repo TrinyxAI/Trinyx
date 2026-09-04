@@ -25,13 +25,13 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         cls.template = json.loads(SSM_TEMPLATE.read_text(encoding="utf-8"))
 
     def install_block(self) -> str:
-        match = re.search(
+        matches = re.findall(
             r'if \[ "\$ACTION" = install \]; then\n(?P<body>.*?)\n          fi',
             self.workflow,
             re.S,
         )
-        self.assertIsNotNone(match)
-        return match.group("body")
+        self.assertEqual(2, len(matches))
+        return matches[-1]
 
     def test_install_is_explicit_call_only_staging_action(self) -> None:
         head = self.workflow.split("\npermissions:", 1)[0]

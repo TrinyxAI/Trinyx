@@ -83,7 +83,7 @@ assert 'arn:aws:sts::001634075617:assumed-role/' in probe
 assert 'ssm_orchestrator.py normalize-plan' in adopt
 assert 'LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS' in adopt
 assert '[[ "$ACTION" =~ ^(install|normalization-plan|adopt)$ ]]' in adopt
-install_block=adopt.split('if [ "$ACTION" = install ]; then',1)[1].split('\n          fi',1)[0]
+install_block=adopt.rsplit('if [ "$ACTION" = install ]; then',1)[1].split('\n          fi',1)[0]
 assert 'ssm_orchestrator.py install' in install_block
 assert 'STAGING_RELEASE_INSTALL_ONLY_SUCCESS' in install_block
 assert 'exit 0' in install_block

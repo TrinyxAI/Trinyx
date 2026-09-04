@@ -152,8 +152,10 @@ class InstallReleaseModeTests(unittest.TestCase):
                 include_mode=True,
             )
             bundle, _ = installer.validate_bundle(release, manifest_path, tar_path)
-            installer.install_bundle_tree(root / "extract", tar_path, bundle)
-            bundle_dir = root / "extract" / "bundle"
+            extract = root / "extract"
+            extract.mkdir()
+            installer.install_bundle_tree(extract, tar_path, bundle)
+            bundle_dir = extract / "bundle"
             self.assertEqual(0o444, (bundle_dir / "plain.txt").stat().st_mode & 0o777)
             self.assertEqual(0o555, (bundle_dir / "bin" / "run.sh").stat().st_mode & 0o777)
             self.assertTrue(installer.verify_bundle_tree(bundle_dir, bundle))

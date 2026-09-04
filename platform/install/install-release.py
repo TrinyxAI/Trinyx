@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -175,8 +176,8 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
         normalized = PurePosixPath(name).as_posix()
         if "." in parts or ".." in parts or normalized in {"", "."} or normalized != name:
             fail(f"unsafe/non-canonical deployment bundle path: {name}")
-        if name in seen:
-            fail(f"duplicate deployment bundle path: {name}")
+        if name in seen or any(name.startswith(existing + "/") or existing.startswith(name + "/") for existing in seen):
+            fail(f"duplicate or overlapping deployment bundle path: {name}")
         seen.add(name)
         if not isinstance(item["digest"], str) or not DIGEST_RE.fullmatch(item["digest"]):
             fail(f"invalid deployment bundle file digest: {name}")
@@ -213,29 +214,62 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     return bundle_manifest, bundle_bytes
 
 
+def expected_bundle_directories(paths: set[str]) -> set[str]:
+    return {
+        parent.as_posix()
+        for name in paths
+        for parent in PurePosixPath(name).parents
+        if parent.as_posix() != "."
+    }
+
+
+def inspect_bundle_tree(bundle_dir: Path) -> tuple[set[str], set[str]] | None:
+    if bundle_dir.is_symlink() or not bundle_dir.is_dir():
+        return None
+    files: set[str] = set()
+    directories: set[str] = set()
+    try:
+        for path in bundle_dir.rglob("*"):
+            relative = path.relative_to(bundle_dir).as_posix()
+            info = os.lstat(path)
+            if stat.S_ISLNK(info.st_mode):
+                return None
+            if stat.S_ISREG(info.st_mode):
+                files.add(relative)
+            elif stat.S_ISDIR(info.st_mode):
+                directories.add(relative)
+            else:
+                return None
+    except OSError:
+        return None
+    return files, directories
+
+
 def verify_bundle_tree(bundle_dir: Path, bundle_manifest: dict[str, Any]) -> bool:
     expected_paths = {item["path"] for item in bundle_manifest["files"]}
+    inspected = inspect_bundle_tree(bundle_dir)
+    if inspected is None:
+        return False
+    actual_files, actual_directories = inspected
+    if actual_files != expected_paths or actual_directories != expected_bundle_directories(expected_paths):
+        return False
     try:
-        actual_files = {
-            path.relative_to(bundle_dir).as_posix()
-            for path in bundle_dir.rglob("*")
-            if path.is_file()
-        }
-        if actual_files != expected_paths:
-            return False
-        if any(path.is_symlink() for path in bundle_dir.rglob("*")):
-            return False
         for item in bundle_manifest["files"]:
             path = bundle_dir / item["path"]
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode):
+                return False
             content = path.read_bytes()
             if len(content) != item["sizeBytes"] or sha256_bytes(content) != item["digest"]:
                 return False
             declared_mode = item.get("mode", 0o644)
             expected_mode = 0o555 if declared_mode & 0o111 else 0o444
-            if (path.stat().st_mode & 0o777) != expected_mode:
+            if (info.st_mode & 0o777) != expected_mode:
                 return False
-        for path in [bundle_dir, *[p for p in bundle_dir.rglob("*") if p.is_dir()]]:
-            if (path.stat().st_mode & 0o777) != 0o555:
+        if (os.lstat(bundle_dir).st_mode & 0o777) != 0o555:
+            return False
+        for relative in actual_directories:
+            if (os.lstat(bundle_dir / relative).st_mode & 0o777) != 0o555:
                 return False
     except OSError:
         return False
@@ -255,9 +289,15 @@ def existing_matches(
         actual = {entry.name for entry in target.iterdir()}
     except OSError as exc:
         fail(f"cannot inspect installed release {target}: {exc}")
-    if actual != expected:
+    if actual != expected or target.is_symlink() or not target.is_dir():
         return False
     try:
+        files = ("manifest.json", "images.env", "deployment-bundle.json", "deployment-bundle.tar")
+        if any(
+            entry.is_symlink() or not stat.S_ISREG(os.lstat(entry).st_mode)
+            for entry in (target / name for name in files)
+        ):
+            return False
         return (
             target.joinpath("manifest.json").read_bytes() == manifest_bytes
             and target.joinpath("images.env").read_bytes() == images_bytes
@@ -333,8 +373,8 @@ def main() -> None:
     elif active.exists():
         active_before = "<non-symlink>"
 
-    if target.exists():
-        if not target.is_dir() or not existing_matches(
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or not target.is_dir() or not existing_matches(
             target, manifest_bytes, images_bytes, bundle_manifest_bytes, bundle_bytes, bundle_manifest
         ):
             fail(f"immutable release collision: {target}")

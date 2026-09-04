@@ -738,6 +738,10 @@ class HistoricalBaselineTests(unittest.TestCase):
                 helper.prepare(
                     parent_link / "historical", trusted, source, bundle, case_root / "out-parent"
                 )
+            trusted_link = case_root / "trusted-link"
+            os.symlink(trusted, trusted_link)
+            with self.assertRaisesRegex(SystemExit, "root may not traverse a symlink"):
+                helper.prepare(historical, trusted_link, source, bundle, case_root / "out-trusted")
 
     def test_historical_bundle_source_rejects_bool_versions_overlaps_and_dirty_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

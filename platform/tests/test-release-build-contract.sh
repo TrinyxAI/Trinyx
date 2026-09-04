@@ -12,6 +12,7 @@ FIXTURE="$ROOT/platform/tests/fixtures/staging-bootstrap-images.json"
 ASSEMBLER="$ROOT/platform/release/assemble-release-images.py"
 BUNDLE_BUILDER="$ROOT/platform/release/build-deployment-bundle.py"
 BUNDLE_CONTRACT="$ROOT/platform/release/deployment-bundle-files.json"
+HISTORICAL_SOURCE_CONTRACT="$ROOT/platform/release/historical-deployment-bundle-sources.json"
 HISTORICAL_WORKFLOW="$ROOT/.github/workflows/build-historical-staging-baseline-impl.yml"
 HISTORICAL_WRAPPER="$ROOT/.github/workflows/build-historical-staging-baseline.yml"
 
@@ -36,6 +37,34 @@ grep -Fq -- '--historical-repo historical-source' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--repo historical-bundle-source' "$HISTORICAL_WORKFLOW"
 grep -Fq 'historical-deployment-bundle-sources.json' "$HISTORICAL_WORKFLOW"
 grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
+grep -Fq 'git -C historical-source status --porcelain=v1 --untracked-files=all' "$HISTORICAL_WORKFLOW"
+
+python3 - "$HISTORICAL_SOURCE_CONTRACT" "$BUNDLE_CONTRACT" "$SOURCE" <<'PY'
+import json, sys
+source_contract, bundle_contract, source = sys.argv[1:]
+doc = json.load(open(source_contract, encoding="utf-8"))
+bundle = json.load(open(bundle_contract, encoding="utf-8"))
+assert set(doc) == {
+    "schemaVersion", "historicalSourceCommit", "historicalPaths",
+    "trustedBuilderOverlays",
+}
+assert doc["schemaVersion"] == 1
+assert doc["historicalSourceCommit"] == source
+assert set(doc["trustedBuilderOverlays"]) == {"docker/docker-compose.paid.runtime.yml"}
+assert set(doc["historicalPaths"]) == {
+    "docker-compose.yml",
+    "catalog-seeds",
+    "docker/docker-compose.cloud.yml",
+    "docker/docker-compose.cloud.runtime.yml",
+    "docker/cloud/Caddyfile",
+    "docker/cloud/postgres/00-keycloak-schema.sql",
+    "docker/cloud/keycloak/trinyx-realm.json",
+    "docker/cloud/searxng/settings.yml",
+    "docker/paid-monolith-internal/Caddyfile",
+}
+assert set(bundle["paths"]) == set(doc["historicalPaths"]) | set(doc["trustedBuilderOverlays"])
+print("HISTORICAL_BUNDLE_SOURCE_CONTRACT_OK")
+PY
 if grep -Eq 'docker build(x build)? |docker/build-push-action|docker pull|docker push|imagetools create|packages: write|--release-id' "$HISTORICAL_WORKFLOW"; then
   echo ERROR_HISTORICAL_BASELINE_IS_NOT_METADATA_ONLY >&2
   exit 1
@@ -123,6 +152,8 @@ assert manifest["sizeBytes"] > 0
 paths = [item["path"] for item in manifest["files"]]
 assert paths == sorted(paths)
 assert len(paths) == len(set(paths))
+assert all(set(entry) == {"path", "digest", "sizeBytes", "mode"} for entry in manifest["files"])
+assert all(entry["mode"] in {0o644, 0o755} for entry in manifest["files"])
 required = {
     "docker-compose.yml",
     "docker/docker-compose.cloud.yml",

@@ -241,6 +241,19 @@ class IacContractTests(unittest.TestCase):
                         field_type == "string" or isinstance(field_type, list) and "string" in field_type,
                         f"{path}:{name}",
                     )
+        normalization = self.load("platform/contracts/legacy-normalization-plan.schema.json")
+        service = normalization["properties"]["services"]["additionalProperties"]
+        self.assertTrue({
+            "legacyBindContentRequired",
+            "legacyBindContentVerified",
+            "currentLegacyBindContentDigest",
+            "expectedLegacyBindContentDigest",
+            "legacyBindEvidenceDigest",
+        }.issubset(set(service["required"])))
+        self.assertIn(
+            "LEGACY_BIND_CONTENT_MISMATCH",
+            service["properties"]["reasons"]["items"]["enum"],
+        )
 
 
 if __name__ == "__main__":

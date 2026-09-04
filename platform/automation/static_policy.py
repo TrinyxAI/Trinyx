@@ -291,6 +291,13 @@ def check_iac() -> None:
             and "MUTABLE_CHECKOUT_MOUNT" in normalizer
             and "recreateRequired" in normalizer and "compose_version" in normalizer,
             "legacy normalization plan lacks runtime/config/mount compatibility evidence")
+    require(
+        "legacy_bind_content_evidence" in normalizer
+        and "LEGACY_BIND_CONTENT_MISMATCH" in normalizer
+        and "LEGACY_BIND_MAX_ENTRIES" in normalizer
+        and "LEGACY_BIND_MAX_BYTES" in normalizer,
+        "legacy checkout bind content is not authenticated and bounded",
+    )
     require("SSM_STDOUT_MAX_BYTES = 20_000" in normalizer
             and "render_ssm_protocol" in normalizer
             and "UNQUALIFIED_UNEXPLAINED_DRIFT" in normalizer,

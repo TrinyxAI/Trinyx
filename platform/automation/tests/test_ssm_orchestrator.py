@@ -75,7 +75,7 @@ def normalization_protocol(
             f"expected_config_hash={expected_hash} "
             f"current_bind_mounts_sha256=sha256:{index + 4000:064x} "
             f"expected_bind_mounts_sha256=sha256:{index + 4000:064x} "
-            "mutable_checkout=no"
+            "bind_content=none bind_content_match=yes mutable_checkout=no"
         )
     payload = "\n".join(lines) + "\n"
     report_sha = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -305,6 +305,52 @@ class OrchestratorTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(InvariantError, "image evidence contradicts"):
             self.validate_protocol("\n".join(lines) + "\n", request)
+
+    def test_normalization_receiver_rejects_spoofed_bind_content_evidence(self) -> None:
+        request = self.normalization_request()
+        lines = normalization_protocol(request).rstrip("\n").split("\n")
+        lines[1] = lines[1].replace(
+            "bind_content=none bind_content_match=yes mutable_checkout=no",
+            "bind_content=sha256:" + "a" * 64
+            + " bind_content_match=no mutable_checkout=yes",
+        )
+        payload = "\n".join(lines[:-1]) + "\n"
+        lines[-1] = re.sub(
+            r"report_sha256=sha256:[0-9a-f]{64}$",
+            "report_sha256=sha256:" + hashlib.sha256(payload.encode()).hexdigest(),
+            lines[-1],
+        )
+        with self.assertRaisesRegex(InvariantError, "reasons/recreate invariant"):
+            self.validate_protocol("\n".join(lines) + "\n", request)
+
+    def test_normalization_receiver_accepts_verified_legacy_bind_content(self) -> None:
+        request = self.normalization_request()
+        lines = normalization_protocol(request).rstrip("\n").split("\n")
+        lines[0] = lines[0].replace(
+            "canonical_matches=8 explained_drift=0",
+            "canonical_matches=7 explained_drift=1",
+        )
+        lines[1] = lines[1].replace(
+            "recreate=no reasons=none",
+            "recreate=yes reasons=COMPOSE_CONFIG_DRIFT_EXPLAINED,BIND_MOUNT_MISMATCH,MUTABLE_CHECKOUT_MOUNT",
+        ).replace(
+            "compose_drift=matched current_config_hash=" + "1".zfill(64),
+            "compose_drift=explained current_config_hash=" + "e" * 64,
+        ).replace(
+            "bind_content=none bind_content_match=yes mutable_checkout=no",
+            "bind_content=sha256:" + "a" * 64
+            + " bind_content_match=yes mutable_checkout=yes",
+        )
+        marker = lines[-1].replace("recreate_count=0", "recreate_count=1")
+        payload = "\n".join(lines[:-1]) + "\n"
+        lines[-1] = re.sub(
+            r"report_sha256=sha256:[0-9a-f]{64}$",
+            "report_sha256=sha256:" + hashlib.sha256(payload.encode()).hexdigest(),
+            marker,
+        )
+        report = self.validate_protocol("\n".join(lines) + "\n", request)
+        self.assertEqual("review", report["compatibility"])
+        self.assertEqual(1, report["recreateCount"])
 
     def test_legacy_normalization_plan_is_paid_then_cloud_and_read_only(self) -> None:
         transport = FakeTransport()

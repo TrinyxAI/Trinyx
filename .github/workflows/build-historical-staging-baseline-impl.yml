@@ -128,12 +128,13 @@ jobs:
       - name: Create canonical release manifest
         env:
           TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
+          SOURCE_REF: refs/heads/codex/trinyx-cloud-gateway-v2
         shell: bash
         run: |
           set -euo pipefail
           python3 platform/release/release.py create \
             --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
-            --source-ref refs/heads/codex/trinyx-cloud-gateway-v2 \
+            --source-ref "$SOURCE_REF" \
             --platform-commit "$TRUSTED_BUILDER_COMMIT" \
             --images release-images.json \
             --bundle-manifest deployment-bundle.json \

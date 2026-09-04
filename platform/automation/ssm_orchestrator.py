@@ -374,12 +374,13 @@ def validate_normalization_protocol(
         "repo_digests_sha256", "compose_drift", "current_config_hash",
         "expected_config_hash",
         "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
-        "mutable_checkout",
+        "bind_content", "bind_content_match", "mutable_checkout",
     }
     allowed_reasons = {
         "IMAGE_REFERENCE_NON_CANONICAL", "IMAGE_OBJECT_DIGEST_MISMATCH",
         "COMPOSE_CONFIG_DRIFT_EXPLAINED", "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
         "BIND_MOUNT_MISMATCH",
+        "LEGACY_BIND_CONTENT_MISMATCH",
         "MUTABLE_CHECKOUT_MOUNT",
     }
     seen: set[str] = set()
@@ -397,6 +398,7 @@ def validate_normalization_protocol(
         require(fields["recreate"] in {"yes", "no"}
             and fields["image_match"] in {"yes", "no"}
             and fields["configured_image_canonical"] in {"yes", "no"}
+            and fields["bind_content_match"] in {"yes", "no"}
             and fields["mutable_checkout"] in {"yes", "no"}
             and fields["compose_drift"] in {"matched", "explained", "unexplained"},
                 "invalid normalization boolean field")
@@ -420,7 +422,28 @@ def validate_normalization_protocol(
             "current_bind_mounts_sha256", "expected_bind_mounts_sha256",
         ):
             require(DIGEST_RE.fullmatch(fields[key]) is not None,
-                    f"invalid normalization {key}")
+                f"invalid normalization {key}")
+        require(
+            fields["bind_content"] == "none"
+            or DIGEST_RE.fullmatch(fields["bind_content"]) is not None,
+            "invalid normalization bind content evidence",
+        )
+        bind_content_matches = fields["bind_content_match"] == "yes"
+        mutable_checkout = fields["mutable_checkout"] == "yes"
+        if mutable_checkout:
+            require(
+                fields["bind_content"] != "none"
+                and bind_content_matches
+                == ("LEGACY_BIND_CONTENT_MISMATCH" not in reasons),
+                "normalization bind content evidence contradicts reasons",
+            )
+        else:
+            require(
+                fields["bind_content"] == "none"
+                and bind_content_matches
+                and "LEGACY_BIND_CONTENT_MISMATCH" not in reasons,
+                "normalization bind content evidence contradicts reasons",
+            )
         image_matches = fields["image_match"] == "yes"
         configured_canonical = fields["configured_image_canonical"] == "yes"
         require(
@@ -451,7 +474,7 @@ def validate_normalization_protocol(
             calculated_explained_drift += 1
         else:
             require(
-                current_hash != expected_hash
+                (current_hash != expected_hash or not bind_content_matches)
                 and "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" in reasons
                 and "COMPOSE_CONFIG_DRIFT_EXPLAINED" not in reasons,
                 "normalization unexplained Compose evidence is inconsistent",

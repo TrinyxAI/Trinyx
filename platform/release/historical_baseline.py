@@ -13,6 +13,10 @@ REPOSITORY = "TrinyxAI/Trinyx"
 REPOSITORY_ID = 1342032975
 OWNER_ID = 319253481
 SOURCE_COMMIT = "aeb2a447ea7ce0436a60549713636225dfe1a2c1"
+SOURCE_BRANCH = "codex/trinyx-cloud-gateway-v2"
+SOURCE_REF = f"refs/heads/{SOURCE_BRANCH}"
+HISTORICAL_EVENT = "workflow_dispatch"
+HISTORICAL_RUN_ATTEMPT = 1
 BACKEND_RUN_ID = 33444272417
 FRONTEND_RUN_ID = 33444302902
 BACKEND_PUBLISH_JOB_ID = 99660712771
@@ -44,6 +48,13 @@ def validate_run(run: Any, *, run_id: int, workflow: str, cloud_reusable: bool) 
     head_repository = run.get("head_repository")
     require(run.get("id") == run_id, "historical run ID mismatch")
     require(run.get("head_sha") == SOURCE_COMMIT, "historical run source mismatch")
+    require(run.get("head_branch") == SOURCE_BRANCH, "historical run branch mismatch")
+    require(run.get("event") == HISTORICAL_EVENT, "historical run event mismatch")
+    require(
+        type(run.get("run_attempt")) is int
+        and run.get("run_attempt") == HISTORICAL_RUN_ATTEMPT,
+        "historical run attempt mismatch",
+    )
     require(run.get("conclusion") == "success", "historical run was not successful")
     require(run.get("path") == workflow, "historical workflow path mismatch")
     require(

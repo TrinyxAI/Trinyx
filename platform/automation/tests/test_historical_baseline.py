@@ -23,6 +23,9 @@ def run_fixture(run_id: int, path: str, *, cloud: bool) -> dict:
     return {
         "id": run_id,
         "head_sha": hb.SOURCE_COMMIT,
+        "head_branch": hb.SOURCE_BRANCH,
+        "event": hb.HISTORICAL_EVENT,
+        "run_attempt": hb.HISTORICAL_RUN_ATTEMPT,
         "conclusion": "success",
         "path": path,
         "repository": {"id": hb.REPOSITORY_ID, "full_name": hb.REPOSITORY,
@@ -95,6 +98,9 @@ class HistoricalBaselineTests(unittest.TestCase):
         mutations = [
             ("id", hb.BACKEND_RUN_ID + 1),
             ("head_sha", "f" * 40),
+            ("head_branch", "untrusted-branch"),
+            ("event", "push"),
+            ("run_attempt", 2),
             ("conclusion", "failure"),
             ("path", ".github/workflows/other.yml"),
         ]
@@ -303,6 +309,8 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("ref: ${{ job.workflow_sha }}", workflow)
         self.assertIn('--platform-commit "$TRUSTED_BUILDER_COMMIT"', workflow)
         self.assertNotIn('--platform-commit "$GITHUB_SHA"', workflow)
+        self.assertIn(f"SOURCE_REF: {hb.SOURCE_REF}", workflow)
+        self.assertIn('--source-ref "$SOURCE_REF"', workflow)
         self.assertIn("platform/release/release.py create", workflow)
         self.assertIn("--repo historical-source", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)
@@ -328,7 +336,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             script = ROOT / "platform/release/release.py"
             subprocess.run([
                 sys.executable, str(script), "create", "--source-commit", hb.SOURCE_COMMIT,
-                "--source-ref", "refs/heads/codex/trinyx-cloud-gateway-v2",
+                "--source-ref", hb.SOURCE_REF,
                 "--platform-commit", "e" * 40, "--images", str(root / "images.json"),
                 "--bundle-manifest", str(root / "bundle.json"), "--out", str(release),
             ], check=True, capture_output=True, text=True)

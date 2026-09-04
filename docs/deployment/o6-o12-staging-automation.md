@@ -269,6 +269,11 @@ third-party inventory. The trusted current packaging tools build the bundle
 from the exact historical source tree as data and `release.py` computes the
 content-derived release ID. The four canonical files receive GitHub build
 provenance attestations.
+Both historical runs must also report branch
+`codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
+before the builder may emit `release.sourceRef` as
+`refs/heads/codex/trinyx-cloud-gateway-v2`; the branch label is authenticated
+metadata and never substitutes for the exact aeb2 source commit.
 
 The exact historical Cloud artifact uses legacy logical names (`agent`,
 `auth`, ..., `websearch`). Those names are not prefixed heuristically. A
@@ -344,6 +349,17 @@ mount targets/options and every other field canonical. A current label must
 match one of those exact hashes. Any single unexplained effective change returns
 `compatibility=stop`. This keeps Compose hashes as authenticated supplementary
 evidence without treating a fixed mismatch threshold as a trust boundary.
+
+A legacy bind path is not content identity. Before such a source can enter the
+structured explained model, the planner compares the bytes actually reachable
+through it with the corresponding path in the installed immutable release
+bundle. Files are bound by type, mode, size and SHA-256. Directories use a
+bounded canonical tree identity over sorted relative paths, entry types, modes,
+sizes and file SHA-256 values. Symlinks, traversal outside either approved root,
+special files, duplicate targets, missing/extra entries and any byte difference
+fail closed as `LEGACY_BIND_CONTENT_MISMATCH`; a matching Git HEAD alone is not
+evidence because the checkout may be dirty. Only aggregate digests—not raw bind
+contents—are emitted in the bounded SSM protocol.
 
 Before approving normalization, require every one of the 12 third-party service
 records to prove `image_match=yes`: the exact running Docker object's

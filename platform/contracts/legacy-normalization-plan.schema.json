@@ -144,6 +144,11 @@
           "currentMounts",
           "expectedMounts",
           "mutableCheckoutMounted",
+          "legacyBindContentRequired",
+          "legacyBindContentVerified",
+          "currentLegacyBindContentDigest",
+          "expectedLegacyBindContentDigest",
+          "legacyBindEvidenceDigest",
           "recreateRequired",
           "reasons"
         ],
@@ -198,6 +203,24 @@
           "mutableCheckoutMounted": {
             "type": "boolean"
           },
+          "legacyBindContentRequired": {
+            "type": "boolean"
+          },
+          "legacyBindContentVerified": {
+            "type": "boolean"
+          },
+          "currentLegacyBindContentDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "expectedLegacyBindContentDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "legacyBindEvidenceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
           "recreateRequired": {
             "type": "boolean"
           },
@@ -211,6 +234,7 @@
                 "COMPOSE_CONFIG_DRIFT_EXPLAINED",
                 "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
                 "BIND_MOUNT_MISMATCH",
+                "LEGACY_BIND_CONTENT_MISMATCH",
                 "MUTABLE_CHECKOUT_MOUNT"
               ]
             }

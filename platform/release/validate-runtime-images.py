@@ -11,6 +11,10 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 IMAGE_KEYS = {"name", "role", "service", "package", "environment", "digest", "immutableRef"}
 
 
@@ -102,8 +106,8 @@ def validate_images(document: Any) -> dict[str, tuple[str, str, str]]:
             fail("duplicate/empty image name")
         if not DIGEST_RE.fullmatch(digest):
             fail(f"non-immutable digest for {name}")
-        if not package or "@" in package or any(char.isspace() for char in package):
-            fail(f"invalid package for {name}")
+        if not PACKAGE_RE.fullmatch(package):
+            fail(f"image repository must be canonical and tagless for {name}")
         if item["immutableRef"] != package + "@" + digest:
             fail(f"immutableRef mismatch for {name}")
         binding = (role, item["environment"])

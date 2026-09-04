@@ -286,6 +286,62 @@ class HistoricalBaselineTests(unittest.TestCase):
                 ambiguous, package="ghcr.io/trinyxai/trinyx-backend"
             )
 
+    def test_historical_paid_digest_normalizes_only_ansi_color_formatting(self) -> None:
+        package = "ghcr.io/trinyxai/trinyx-backend"
+        plain = publication_log(package, BACKEND_HISTORICAL_DIGEST)
+        variants = (
+            plain,
+            "\x1b[36m" + plain.rstrip("\n") + "\x1b[0m\n",
+            "\x1b[1;34m" + plain + "\x1b[0m",
+            plain.replace("pushing manifest", "\x1b[32mpushing manifest\x1b[0m"),
+        )
+        for log_text in variants:
+            with self.subTest(log_text=repr(log_text)):
+                self.assertEqual(
+                    BACKEND_HISTORICAL_DIGEST,
+                    hb.historical_paid_digest(log_text, package=package),
+                )
+
+    def test_historical_paid_digest_rejects_invalid_or_ambiguous_evidence(self) -> None:
+        package = "ghcr.io/trinyxai/trinyx-backend"
+        cases = {
+            "empty": "",
+            "wrong-package": publication_log(
+                "ghcr.io/trinyxai/other-backend", BACKEND_HISTORICAL_DIGEST
+            ),
+            "wrong-source": publication_log(package, BACKEND_HISTORICAL_DIGEST).replace(
+                hb.SOURCE_COMMIT, "f" * 40
+            ),
+            "short-digest": publication_log(package, "sha256:" + "a" * 63),
+            "uppercase-digest": publication_log(package, "sha256:" + "A" * 64),
+        }
+        for name, log_text in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    hb.historical_paid_digest(log_text, package=package)
+
+        ambiguous = publication_log(package, BACKEND_HISTORICAL_DIGEST) + publication_log(
+            package, "sha256:" + "e" * 64
+        )
+        with self.assertRaises(ValueError):
+            hb.historical_paid_digest(ambiguous, package=package)
+
+    def test_terminal_controls_cannot_create_silent_provenance(self) -> None:
+        package = "ghcr.io/trinyxai/trinyx-backend"
+        non_semantic_controls = (
+            "\x1b[2J" + publication_log(package, BACKEND_HISTORICAL_DIGEST),
+            "\x1b]0;pushing manifest for "
+            + f"{package}:{hb.SOURCE_COMMIT}@{BACKEND_HISTORICAL_DIGEST}"
+            + "\x07\n",
+            publication_log(package, BACKEND_HISTORICAL_DIGEST).replace(
+                "trinyx-backend", "trinyx-\x08backend"
+            ),
+        )
+        for log_text in non_semantic_controls:
+            with self.subTest(log_text=repr(log_text)):
+                with self.assertRaisesRegex(ValueError, "terminal"):
+                    hb.historical_paid_digest(log_text, package=package)
+
     def test_workflow_is_metadata_only_and_release_id_is_not_supplied(self) -> None:
         wrapper = (ROOT / ".github/workflows/build-historical-staging-baseline.yml").read_text()
         workflow = (ROOT / ".github/workflows/build-historical-staging-baseline-impl.yml").read_text()
@@ -299,8 +355,26 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("docker buildx imagetools inspect", workflow)
         self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)
         self.assertIn("sha256sum --check --strict", workflow)
-        self.assertIn(f"actions/jobs/{hb.BACKEND_PUBLISH_JOB_ID}/logs", workflow)
-        self.assertIn(f"actions/jobs/{hb.FRONTEND_PUBLISH_JOB_ID}/logs", workflow)
+        backend_log_download = (
+            f"gh api --allow-escape-sequences /repos/{hb.REPOSITORY}/actions/jobs/"
+            f"{hb.BACKEND_PUBLISH_JOB_ID}/logs > historical-input/backend-publish.log"
+        )
+        frontend_log_download = (
+            f"gh api --allow-escape-sequences /repos/{hb.REPOSITORY}/actions/jobs/"
+            f"{hb.FRONTEND_PUBLISH_JOB_ID}/logs > historical-input/frontend-publish.log"
+        )
+        self.assertIn(backend_log_download, workflow)
+        self.assertIn(frontend_log_download, workflow)
+        self.assertNotIn(
+            f"gh api /repos/{hb.REPOSITORY}/actions/jobs/"
+            f"{hb.BACKEND_PUBLISH_JOB_ID}/logs > historical-input/backend-publish.log",
+            workflow,
+        )
+        self.assertNotIn(
+            f"gh api /repos/{hb.REPOSITORY}/actions/jobs/"
+            f"{hb.FRONTEND_PUBLISH_JOB_ID}/logs > historical-input/frontend-publish.log",
+            workflow,
+        )
         self.assertIn("--backend-log historical-input/backend-publish.log", workflow)
         self.assertIn("--frontend-log historical-input/frontend-publish.log", workflow)
         self.assertIn(hb.CLOUD_ARTIFACT_DIGEST.removeprefix("sha256:"), workflow)

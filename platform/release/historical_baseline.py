@@ -28,6 +28,8 @@ BACKEND_WORKFLOW = ".github/workflows/build-trinyx-backend.yml"
 CLOUD_WORKFLOW = f"{REPOSITORY}/.github/workflows/build-trinyx-cloud-images.yml@{SOURCE_COMMIT}"
 FRONTEND_WORKFLOW = ".github/workflows/build-trinyx-frontend.yml"
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+ANSI_SGR_RE = re.compile(r"\x1b\[[0-?]*[ -/]*m")
+UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 def require(condition: bool, message: str) -> None:
@@ -127,13 +129,26 @@ def validate_job(job: Any, *, job_id: int, run_id: int, name: str) -> None:
     )
 
 
-def historical_paid_digest(log_text: str, *, package: str) -> str:
+def normalize_terminal_log(log_text: str) -> str:
+    """Remove terminal color formatting without interpreting terminal control semantics."""
     require(isinstance(log_text, str) and log_text, "historical publication log is empty")
+    normalized = log_text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = ANSI_SGR_RE.sub("", normalized)
+    require("\x1b" not in normalized, "unsupported terminal escape sequence in historical log")
+    require(
+        UNSAFE_TERMINAL_CONTROL_RE.search(normalized) is None,
+        "unsupported terminal control character in historical log",
+    )
+    return normalized
+
+
+def historical_paid_digest(log_text: str, *, package: str) -> str:
+    normalized_log = normalize_terminal_log(log_text)
     pattern = re.compile(
         rf"pushing manifest for {re.escape(package)}:{SOURCE_COMMIT}@"
         r"(sha256:[0-9a-f]{64})(?:\s|$)"
     )
-    digests = set(pattern.findall(log_text))
+    digests = set(pattern.findall(normalized_log))
     require(len(digests) == 1, "historical publication digest evidence is ambiguous or missing")
     return next(iter(digests))
 

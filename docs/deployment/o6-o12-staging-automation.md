@@ -270,13 +270,19 @@ from explicitly authenticated source origins and `release.py` computes the
 content-derived release ID. Nine contracted paths come byte-for-byte from the
 exact aeb2 tree. The exact tree predates
 `docker/docker-compose.paid.runtime.yml`, while the current Paid deployment
-plan requires that image-only override to bind all eight services to the
-canonical immutable image inventory. A closed source contract therefore admits
+plan requires that fixed trusted service-and-image overlay to bind all eight
+services to the canonical immutable image inventory. The `paid-edge` service
+definition remains approved environment configuration; the overlay supplies its
+immutable image binding and no other current release content. A closed source contract therefore admits
 that one file only from the exact trusted builder checkout, rejects historical
 shadowing, symlinks, unapproved overlays and incomplete bundle coverage, and
 never substitutes any other current application/deployment content. Modern
 bundle entries include their normalized mode. The four canonical files receive
-GitHub build provenance attestations.
+GitHub build provenance attestations. Do not register or install a baseline
+built with this modern bundle schema while the active C3/W7 control plane is
+still installed: C3's installer accepts only the old three-field bundle entry
+schema. A later reviewed control-plane anchor must authorize this builder and
+consume the mode-bearing schema before the separately reviewed W8 activation.
 Both historical runs must also report branch
 `codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
 before the builder may emit `release.sourceRef` as

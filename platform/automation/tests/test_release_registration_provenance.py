@@ -322,6 +322,20 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         policy = namespace["resolve_attestation_policy"](env, Path("candidate"))
         return policy, namespace
 
+    def test_exact_approved_baseline_requires_internal_attestations(self) -> None:
+        _, _, env = self.approved_baseline_fixture()
+        policy, _ = self.compatibility_policy(env, {})
+        self.assertEqual(
+            {
+                "SIGNER_WORKFLOW": "build-historical-staging-baseline-impl.yml",
+                "SIGNER_DIGEST": AEB2_BUILDER,
+                "ATTESTATION_SOURCE_DIGEST": AEB2_CALLER_HEAD,
+                "COMPATIBILITY": "pinned-reusable-builder",
+                "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+            },
+            policy,
+        )
+
     def test_exact_historical_tuple_accepts_only_exact_internal_hashes(self) -> None:
         _, _, env = self.historical_fixture()
         namespace = self.compatibility_namespace()

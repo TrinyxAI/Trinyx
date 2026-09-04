@@ -299,7 +299,7 @@ def validate_candidate(directory: Path) -> tuple[dict[str, Any], dict[str, bytes
         )
         require(
             historical_candidate,
-            "historical builder compatibility is restricted to exact approved identities",
+            "historical builder compatibility is restricted to the frozen candidate",
         )
     assert_no_secret_material(provenance, "provenance")
     bundle_manifest = json.loads(files["deployment-bundle.json"])

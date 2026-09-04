@@ -274,8 +274,9 @@ plan requires that fixed trusted service-and-image overlay to bind all eight
 services to the canonical immutable image inventory. The `paid-edge` service
 definition remains approved environment configuration; the overlay supplies its
 immutable image binding and no other current release content. A closed source contract therefore admits
-that one file only from the exact trusted builder checkout, rejects historical
-shadowing, symlinks, unapproved overlays and incomplete bundle coverage, and
+that one file only from the exact trusted builder checkout, independently
+rechecks historical Git HEAD/clean status, rejects root or descendant symlinks,
+historical shadowing, unapproved overlays and incomplete bundle coverage, and
 never substitutes any other current application/deployment content. Modern
 bundle entries include their normalized mode. The four canonical files receive
 GitHub build provenance attestations. Do not register or install a baseline

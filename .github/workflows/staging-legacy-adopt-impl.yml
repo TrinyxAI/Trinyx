@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       action:
-        description: 'normalization-plan is read-only; adopt performs the separately approved pointer transition'
+        description: 'install is install-only; normalization-plan is read-only; adopt performs the separately approved pointer transition'
         required: true
         type: string
       baseline_release_id:
@@ -68,7 +68,7 @@ jobs:
           test "$GITHUB_REPOSITORY" = TrinyxAI/Trinyx
           test "$GITHUB_REPOSITORY_ID" = 1342032975
           test "$GITHUB_REPOSITORY_OWNER_ID" = 319253481
-          [[ "$ACTION" =~ ^(normalization-plan|adopt)$ ]]
+          [[ "$ACTION" =~ ^(install|normalization-plan|adopt)$ ]]
           [[ "$BASELINE_RELEASE_ID" =~ ^rel-v1-[0-9a-f]{32}$ ]]
           [[ "$BASELINE_BUNDLE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$CONFIG_REVISION" =~ ^[A-Za-z0-9._-]{1,128}$ ]]
@@ -96,6 +96,13 @@ jobs:
           if [ "$ACTION" = normalization-plan ]; then
             python3 platform/automation/ssm_orchestrator.py normalize-plan "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST"
             echo LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS
+            exit 0
+          fi
+          if [ "$ACTION" = install ]; then
+            # C4 requires these closed protocol fields, but install does not treat them
+            # as active-release preconditions. The installer enforces active_before == active_after.
+            python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"
+            echo STAGING_RELEASE_INSTALL_ONLY_SUCCESS
             exit 0
           fi
           python3 platform/automation/ssm_orchestrator.py install "${common[@]}" --release-id "$BASELINE_RELEASE_ID" --bundle-digest "$BASELINE_BUNDLE_DIGEST" --previous-cloud "$BASELINE_RELEASE_ID" --previous-paid "$BASELINE_RELEASE_ID"

@@ -82,6 +82,18 @@ assert 'test "$ACCOUNT" = "001634075617"' in probe
 assert 'arn:aws:sts::001634075617:assumed-role/' in probe
 assert 'ssm_orchestrator.py normalize-plan' in adopt
 assert 'LEGACY_NORMALIZATION_PLAN_READ_ONLY_SUCCESS' in adopt
+assert '[[ "$ACTION" =~ ^(install|normalization-plan|adopt)$ ]]' in adopt
+assert adopt.count('if [ "$ACTION" = install ]; then') == 1
+install_block=adopt.split('if [ "$ACTION" = install ]; then',1)[1].split('\n          fi',1)[0]
+assert 'ssm_orchestrator.py install' in install_block
+assert '--previous-cloud "$BASELINE_RELEASE_ID"' in install_block
+assert '--previous-paid "$BASELINE_RELEASE_ID"' in install_block
+assert 'active-release preconditions' in install_block
+assert 'STAGING_RELEASE_INSTALL_ONLY_SUCCESS' in install_block
+assert 'exit 0' in install_block
+for forbidden in ('ssm_orchestrator.py normalize-plan','ssm_orchestrator.py adopt','ssm_orchestrator.py deploy','ssm_orchestrator.py apply','ssm_orchestrator.py rollback','ssm_orchestrator.py health'):
+    assert forbidden not in install_block
+assert 'staging-release-install' not in bridge
 assert '--signer-digest "$SIGNER_DIGEST"' in register
 assert '--signer-digest "$SIGNER_DIGEST"' in qualify
 for frozen in (

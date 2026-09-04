@@ -350,6 +350,21 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual("review", report["compatibility"])
         self.assertEqual(1, report["recreateCount"])
 
+    def test_install_is_paid_then_cloud_and_runs_no_later_saga_stage(self) -> None:
+        transport = FakeTransport()
+        release = "rel-v1-" + "2" * 32
+        self.saga(transport).install(
+            release,
+            "sha256:" + "3" * 64,
+            "rel-v1-" + "4" * 32,
+            "rel-v1-" + "5" * 32,
+        )
+        self.assertEqual(
+            [("install", "paid", release), ("install", "cloud", release)],
+            transport.calls,
+        )
+        self.assertFalse(any(mode in {"normalize-plan", "adopt", "plan", "apply", "rollback", "health"} for mode, _, _ in transport.calls))
+
     def test_legacy_normalization_plan_is_paid_then_cloud_and_read_only(self) -> None:
         transport = FakeTransport()
         release = "rel-v1-" + "2" * 32

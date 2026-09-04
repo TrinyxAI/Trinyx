@@ -128,6 +128,23 @@ def check_workflows() -> None:
                         and "if [ \"$ACTION\" = normalization-plan ]" in text,
                         "legacy normalization plan is not a separate read-only workflow action",
                     )
+                    require(
+                        text.count('if [ "$ACTION" = install ]; then') == 1,
+                        "staging install-only action has ambiguous branches",
+                    )
+                    install_block = text.split('if [ "$ACTION" = install ]; then', 1)[1].split("\n          fi", 1)[0]
+                    require(
+                        'ssm_orchestrator.py install' in install_block
+                        and '--previous-cloud "$BASELINE_RELEASE_ID"' in install_block
+                        and '--previous-paid "$BASELINE_RELEASE_ID"' in install_block
+                        and "active-release preconditions" in install_block
+                        and "STAGING_RELEASE_INSTALL_ONLY_SUCCESS" in install_block
+                        and "exit 0" in install_block
+                        and all(f"ssm_orchestrator.py {mode}" not in install_block for mode in (
+                            "normalize-plan", "adopt", "deploy", "apply", "rollback", "health"
+                        )),
+                        "staging install-only action is not isolated from later mutation stages",
+                    )
         if path.name == "platform-contracts.yml":
             lower = text.lower()
             for forbidden in ("configure-aws-credentials", "aws ssm", "aws sts",

@@ -271,14 +271,19 @@ jobs:
               if (
                   not isinstance(repository, dict)
                   or repository.get("full_name") != REPOSITORY
-                  or str(repository.get("id")) != REPOSITORY_ID
+              ):
+                  raise SystemExit(f"run repository mismatch:{name}")
+              if approved_baseline and (
+                  str(repository.get("id")) != REPOSITORY_ID
                   or not isinstance(repository.get("owner"), dict)
                   or str(repository["owner"].get("id")) != OWNER_ID
                   or not isinstance(head_repository, dict)
                   or head_repository.get("full_name") != REPOSITORY
                   or str(head_repository.get("id")) != REPOSITORY_ID
+                  or not isinstance(head_repository.get("owner"), dict)
+                  or str(head_repository["owner"].get("id")) != OWNER_ID
               ):
-                  raise SystemExit(f"run repository mismatch:{name}")
+                  raise SystemExit(f"historical baseline repository mismatch:{name}")
 
               referenced = run.get("referenced_workflows")
               if not isinstance(referenced, list):
@@ -405,6 +410,9 @@ jobs:
               "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
           }
 
+          HISTORICAL_IDENTITY = FROZEN_IDENTITY
+          HISTORICAL_INTERNAL_SHA256 = FROZEN_INTERNAL_SHA256
+
           def identity(env, prefix):
               return {
                   "GITHUB_REPOSITORY": env["GITHUB_REPOSITORY"],
@@ -480,8 +488,8 @@ jobs:
           PY
           # BEGIN STAGING_QUALIFICATION_INTERNAL_ATTESTATION_VERIFICATION
           for name in baseline candidate; do
-            upper=\${name^^}
-            source_var="\${upper}_SOURCE_COMMIT"
+            upper=${name^^}
+            source_var="${upper}_SOURCE_COMMIT"
             source "$name-attestation-policy.env"
             case "$COMPATIBILITY:$REQUIRE_INTERNAL_ATTESTATIONS:$SIGNER_WORKFLOW" in
               frozen-historical-builder:false:build-release-candidate.yml)
@@ -490,7 +498,7 @@ jobs:
                 ;;
               pinned-reusable-builder:true:build-release-candidate-impl.yml)
                 test "$SIGNER_DIGEST" = "$BUILDER_WORKFLOW_COMMIT"
-                test "$ATTESTATION_SOURCE_DIGEST" = "\${!source_var}"
+                test "$ATTESTATION_SOURCE_DIGEST" = "${!source_var}"
                 ;;
               pinned-reusable-builder:true:build-historical-staging-baseline-impl.yml)
                 test "$name" = baseline

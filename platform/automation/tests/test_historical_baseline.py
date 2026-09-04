@@ -640,6 +640,14 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK", helper_source)
         self.assertIn("--trusted-commit \"$TRUSTED_BUILDER_COMMIT\"", workflow)
         self.assertIn("--approved-environment-config", workflow)
+        self.assertIn("--approved-environment-config-out historical-input/paid/paid.override.yml", workflow)
+        self.assertIn("-f historical-input/paid/paid.override.yml", workflow)
+        self.assertNotIn(
+            "-f platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml",
+            workflow,
+        )
+        self.assertIn("safe_output_file", helper_source)
+        self.assertIn("Docker Compose consumes this fresh snapshot", helper_source)
         self.assertIn("Prepare authenticated historical bundle source", workflow)
         self.assertIn("git -C historical-source rev-parse HEAD", workflow)
         self.assertIn("git -C historical-source status --porcelain=v1 --untracked-files=all --ignored", workflow)
@@ -905,12 +913,22 @@ class HistoricalBaselineTests(unittest.TestCase):
                     "docker/docker-compose.paid.runtime.yml",
                 ],
             }))
+            config_snapshot = root / "paid.override.snapshot.yml"
             helper.prepare(
                 historical, trusted, source, bundle, root / "out",
                 trusted_commit=trusted_commit,
                 approved_environment_config=config_relative,
+                approved_environment_config_out=config_snapshot,
             )
             self.assertTrue((root / "out" / "docker-compose.yml").is_file())
+            self.assertEqual(config.read_bytes(), config_snapshot.read_bytes())
+
+            with self.assertRaisesRegex(SystemExit, "supplied together"):
+                helper.prepare(
+                    historical, trusted, source, bundle, root / "out-no-snapshot",
+                    trusted_commit=trusted_commit,
+                    approved_environment_config=config_relative,
+                )
 
             original_copy = helper.copy_safe
             dirtied = False
@@ -928,6 +946,7 @@ class HistoricalBaselineTests(unittest.TestCase):
                         historical, trusted, source, bundle, root / "out-dirty",
                         trusted_commit=trusted_commit,
                         approved_environment_config=config_relative,
+                        approved_environment_config_out=root / "paid.override.dirty.snapshot.yml",
                     )
 
     def test_release_id_is_generated_and_validated_by_canonical_tool(self) -> None:

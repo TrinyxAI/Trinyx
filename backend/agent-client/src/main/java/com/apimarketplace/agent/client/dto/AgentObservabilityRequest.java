@@ -96,6 +96,13 @@ public class AgentObservabilityRequest {
     // Source type override (e.g. "CHAT", "WEBHOOK") - when null, doRecordFromRequest defaults to "WORKFLOW"
     private String source;
 
+    /**
+     * True only when the provider call was protected and settled through the
+     * external paid-monolith reservation protocol. Agent-service must still
+     * persist observability, but must not issue a second local-wallet debit.
+     */
+    private boolean creditExternallyManaged;
+
     // Task linkage - populated when the execution is associated with an agent task.
     private UUID taskId;
 
@@ -264,6 +271,11 @@ public class AgentObservabilityRequest {
 
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
+
+    public boolean isCreditExternallyManaged() { return creditExternallyManaged; }
+    public void setCreditExternallyManaged(boolean creditExternallyManaged) {
+        this.creditExternallyManaged = creditExternallyManaged;
+    }
 
     public UUID getTaskId() { return taskId; }
     public void setTaskId(UUID taskId) { this.taskId = taskId; }

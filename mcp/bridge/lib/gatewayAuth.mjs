@@ -1,75 +1,22 @@
-// Gateway HMAC authentication headers - JS twin of the Java
-// `GatewayAuthenticationFilter` / `CreditConsumptionClient.computeGatewaySignature`.
-//
-// Backend services protect their internal endpoints with a shared-secret HMAC:
-// every non-public request must carry `X-Gateway-Secret` + `X-Gateway-Timestamp`
-// + `X-Provider-ID`, or the filter rejects it 401. A Node process that calls a
-// protected backend endpoint DIRECTLY (bypassing the gateway) - e.g. the bridge
-// refreshing the live tenant balance from auth-service - must therefore sign the
-// request itself, exactly the way the gateway / Java internal clients do.
-//
-// Signature MUST stay byte-identical to the Java side:
-//   data = providerId + "|" + userId + "|" + orgId + "|" + timestamp
-//   sig  = "gw_" + base64url-nopadding( HMAC_SHA256(secretKey, data) )
-// Node's `digest('base64url')` is unpadded URL-safe Base64 - matches Java's
-// `Base64.getUrlEncoder().withoutPadding()`. The parity is pinned by
-// `shared/contracts/gateway-signature-fixtures.json` (consumed by the JS twin
-// `gatewayAuth.test.mjs` AND the Java `GatewaySignatureParityTest`).
-//
-// IMPORTANT: the signature binds `userId` AND `orgId`, so the caller MUST send
-// the SAME X-User-ID / X-Organization-ID header values it passes here, or the
-// filter recomputes a different expected secret and rejects the request.
-
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 const SIGNATURE_PREFIX = 'gw_';
 
-/**
- * Build the gateway HMAC headers for a direct backend call.
- *
- * @param {object}  opts
- * @param {string}  opts.secretKey        shared HMAC secret (`gateway.filter.secret-key`,
- *                                         provisioned as the `GATEWAY_SECRET_KEY` env var).
- * @param {string}  opts.providerId       value echoed in `X-Provider-ID` and bound into the signature.
- * @param {string} [opts.userId='']       must equal the `X-User-ID` header the caller sends.
- * @param {string} [opts.organizationId=''] must equal the `X-Organization-ID` header the caller sends
- *                                         (empty string when no org header is sent).
- * @param {number} [opts.timestampMs]     epoch ms; defaults to now. The filter rejects a skew > 5 min.
- * @returns {Record<string,string>} headers to merge into the request. When `secretKey`
- *          is empty (dev/test where the backend filter is disabled), returns ONLY
- *          `X-Provider-ID` - mirrors the no-secret fallback so local runs don't break.
- */
 export function gatewaySignedHeaders({ secretKey, providerId, userId = '', organizationId = '', timestampMs } = {}) {
   const safeProvider = providerId == null ? '' : String(providerId);
-  if (!secretKey) {
-    return { 'X-Provider-ID': safeProvider };
-  }
+  if (!secretKey) return { 'X-Provider-ID': safeProvider };
   const timestamp = String(timestampMs == null ? Date.now() : timestampMs);
   const safeUser = userId == null ? '' : String(userId);
   const safeOrg = organizationId == null ? '' : String(organizationId);
   const data = `${safeProvider}|${safeUser}|${safeOrg}|${timestamp}`;
-  const signature = SIGNATURE_PREFIX
-    + createHmac('sha256', secretKey).update(data, 'utf8').digest('base64url');
   return {
     'X-Provider-ID': safeProvider,
     'X-Gateway-Timestamp': timestamp,
-    'X-Gateway-Secret': signature,
+    'X-Gateway-Secret': SIGNATURE_PREFIX
+      + createHmac('sha256', secretKey).update(data, 'utf8').digest('base64url'),
   };
 }
 
-/**
- * Full header set for a direct internal backend call that must satisfy the gateway
- * filter: the gateway-signed headers PLUS the `X-User-ID` / `X-Organization-ID` the
- * signature is BOUND to. Building both from one set of inputs makes a "sign one
- * identity, send another" mismatch - which silently 401s and is invisible to a
- * signer-only test - structurally impossible. `X-Organization-ID` is sent only when
- * a non-empty org is supplied (and the signature is computed over that same value,
- * empty string included), matching how the filter reads a missing header as "".
- *
- * @param {object}  opts                  same as {@link gatewaySignedHeaders}, plus:
- * @param {Record<string,string>} [opts.extra={}] extra headers to merge (e.g. Accept).
- * @returns {Record<string,string>} headers ready to pass to fetch().
- */
 export function internalSignedHeaders({ secretKey, providerId, userId = '', organizationId = '', timestampMs, extra = {} } = {}) {
   const safeOrg = organizationId == null ? '' : String(organizationId);
   const headers = {
@@ -79,4 +26,103 @@ export function internalSignedHeaders({ secretKey, providerId, userId = '', orga
   };
   if (safeOrg) headers['X-Organization-ID'] = safeOrg;
   return headers;
+}
+
+export function canonicalRoles(value = '') {
+  return [...new Set(String(value).split(',')
+    .map(role => role.trim().toUpperCase())
+    .filter(Boolean))]
+    .sort()
+    .join(',');
+}
+
+export function bodySha256(body = Buffer.alloc(0)) {
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+export function gatewayV2CanonicalPayload(context) {
+  const value = key => context[key] == null ? '' : String(context[key]);
+  return [
+    'TRINYX-HMAC-V2',
+    value('timestamp'),
+    value('nonce'),
+    value('method').toUpperCase(),
+    value('requestTarget'),
+    value('bodySha256').toLowerCase(),
+    value('providerId'),
+    value('userId'),
+    value('principalId'),
+    value('billingSubjectId'),
+    value('organizationId'),
+    canonicalRoles(value('organizationRole')),
+    canonicalRoles(value('userRoles')),
+    value('installId'),
+  ].join('\n');
+}
+
+/**
+ * Gateway HMAC v2 signer. requestTarget MUST be the exact downstream path
+ * (including the raw query string) after gateway route rewriting.
+ */
+export function gatewaySignedHeadersV2({
+  secretKey,
+  providerId,
+  userId = '',
+  principalId = '',
+  billingSubjectId = '',
+  organizationId = '',
+  organizationRole = '',
+  userRoles = '',
+  installId = '',
+  method,
+  requestTarget,
+  body = Buffer.alloc(0),
+  timestampMs = Date.now(),
+  nonce = randomUUID(),
+  extra = {},
+} = {}) {
+  if (!secretKey) throw new Error('gateway HMAC v2 secret is required');
+  if (!providerId || !method || !requestTarget) {
+    throw new Error('providerId, method and requestTarget are required');
+  }
+
+  const hash = bodySha256(body);
+  const context = {
+    timestamp: String(timestampMs),
+    nonce: String(nonce),
+    method,
+    requestTarget,
+    bodySha256: hash,
+    providerId: String(providerId),
+    userId: String(userId ?? ''),
+    principalId: String(principalId ?? ''),
+    billingSubjectId: String(billingSubjectId ?? ''),
+    organizationId: String(organizationId ?? ''),
+    organizationRole: canonicalRoles(organizationRole),
+    userRoles: canonicalRoles(userRoles),
+    installId: String(installId ?? ''),
+  };
+  const signature = SIGNATURE_PREFIX
+    + createHmac('sha256', secretKey)
+      .update(gatewayV2CanonicalPayload(context), 'utf8')
+      .digest('base64url');
+
+  const headers = {
+    ...extra,
+    'X-Gateway-Signature-Version': '2',
+    'X-Gateway-Timestamp': context.timestamp,
+    'X-Gateway-Nonce': context.nonce,
+    'X-Gateway-Body-SHA256': hash,
+    'X-Gateway-Secret': signature,
+    'X-Provider-ID': context.providerId,
+    'X-User-ID': context.userId,
+    'X-Principal-ID': context.principalId,
+    'X-Billing-Subject-ID': context.billingSubjectId,
+    'X-Organization-ID': context.organizationId,
+    'X-Organization-Role': context.organizationRole,
+    'X-User-Roles': context.userRoles,
+    'X-Install-ID': context.installId,
+  };
+  return Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== ''));
 }

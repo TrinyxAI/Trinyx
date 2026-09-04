@@ -45,6 +45,7 @@ class CeLinkServiceTest {
     @Mock private CeLinkActiveRowCache activeRowCache;
     @Mock private CeLinkActiveRowCachePublisher cachePublisher;
     @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+    @Mock private CloudIdentityBindingService cloudIdentityBindingService;
 
     private CeLinkService service;
 
@@ -61,6 +62,7 @@ class CeLinkServiceTest {
     void setUp() {
         service = new CeLinkService(repository, heartbeatRepository, userRepository,
                 auditService, activeRowCache, cachePublisher, eventPublisher);
+        service.setCloudIdentityBindingService(cloudIdentityBindingService);
     }
 
     // ===== register() =====
@@ -136,7 +138,7 @@ class CeLinkServiceTest {
 
             assertThat(response.registered()).isFalse();
             assertThat(response.error()).isEqualTo("ALREADY_BOUND");
-            assertThat(response.boundToEmail()).isEqualTo("ad***@gmail.com");
+            assertThat(response.boundToEmail()).isEqualTo("us***@example.com");
             verify(repository, never()).save(any());
             verifyNoInteractions(auditService);
         }
@@ -349,6 +351,25 @@ class CeLinkServiceTest {
         assertThat(service.userOwnsActiveLink(CALLER_ID, null)).isFalse();
     }
 
+    @Test
+    @DisplayName("signed member scope may use the owner's active installation")
+    void userOwnsActiveLinkAllowsExactDelegatedIdentityScope() {
+        when(repository.findByInstallIdAndUserId(INSTALL, OTHER_ID)).thenReturn(Optional.empty());
+        when(cloudIdentityBindingService.userMayUseActiveInstall(OTHER_ID, INSTALL)).thenReturn(true);
+
+        assertThat(service.userOwnsActiveLink(OTHER_ID, INSTALL)).isTrue();
+        verify(cloudIdentityBindingService).userMayUseActiveInstall(OTHER_ID, INSTALL);
+    }
+
+    @Test
+    @DisplayName("mismatched or revoked delegated identity scope remains denied")
+    void userOwnsActiveLinkRejectsInvalidDelegatedIdentityScope() {
+        when(repository.findByInstallIdAndUserId(INSTALL, OTHER_ID)).thenReturn(Optional.empty());
+        when(cloudIdentityBindingService.userMayUseActiveInstall(OTHER_ID, INSTALL)).thenReturn(false);
+
+        assertThat(service.userOwnsActiveLink(OTHER_ID, INSTALL)).isFalse();
+    }
+
     @Nested
     @DisplayName("maskEmail")
     class MaskEmail {
@@ -356,7 +377,7 @@ class CeLinkServiceTest {
         @Test
         @DisplayName("two-char local part is masked with 'xx***@domain' pattern")
         void typical_email() {
-            assertThat(CeLinkService.maskEmail("user@example.com")).isEqualTo("ad***@gmail.com");
+            assertThat(CeLinkService.maskEmail("user@example.com")).isEqualTo("us***@example.com");
         }
 
         @Test

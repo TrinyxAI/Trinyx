@@ -21,8 +21,11 @@ public class AuthClientConfig {
 
     @Bean
     public AuthClient authClient(
-            @Value("${services.auth-service.url:http://localhost:8083}") String authServiceUrl) {
-        return new AuthClient(authServiceUrl);
+            @Value("${services.auth-service.url:http://localhost:8083}") String authServiceUrl,
+            @Value("${spring.application.name:}") String serviceId,
+            @Value("${INTERNAL_S2S_SERVICE_SECRET:}") String serviceSecret) {
+        return new AuthClient(new org.springframework.web.client.RestTemplate(),
+                authServiceUrl, serviceId, serviceSecret);
     }
 
     /**

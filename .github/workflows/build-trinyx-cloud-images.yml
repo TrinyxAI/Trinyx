@@ -1,0 +1,240 @@
+name: Build Trinyx Cloud runtime images
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "websearch-service/**"
+      - "docker/cloud/keycloak/**"
+      - "docker/docker-compose.cloud.yml"
+      - "docker/docker-compose.cloud.runtime.yml"
+      - "docker/cloud-images.json"
+      - "scripts/validate-cloud-image-contract.mjs"
+      - ".github/workflows/build-trinyx-cloud-images.yml"
+      - ".github/workflows/build-trinyx-backend.yml"
+      - "scripts/validate-cloud-publisher-bootstrap.mjs"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish:
+        description: Publish the immutable Cloud image set for the caller commit
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('trinyx-cloud-images-pr-{0}', github.event.pull_request.number) || format('trinyx-cloud-images-publish-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - name: Verify exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Validate source inventory and bootstrap contract
+        run: |
+          node scripts/validate-cloud-image-contract.mjs
+          node scripts/validate-cloud-publisher-bootstrap.mjs
+      - name: Render development and immutable runtime Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file docker/.env.cloud.example \
+            -f docker/docker-compose.cloud.yml config --quiet
+          cp docker/.env.cloud.example /tmp/trinyx-cloud-runtime.env
+          node <<'NODE'
+          const fs = require('node:fs');
+          const inventory = JSON.parse(fs.readFileSync('docker/cloud-images.json', 'utf8'));
+          const lines = inventory.images.map((item, index) => {
+            const digest = (index + 1).toString(16).padStart(64, '0');
+            return item.environment + '=' + item.package + '@sha256:' + digest;
+          });
+          fs.appendFileSync('/tmp/trinyx-cloud-runtime.env', '\n' + lines.join('\n') + '\n');
+          NODE
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml config --quiet
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml \
+            config --format json > /tmp/trinyx-cloud-runtime.json
+          node scripts/validate-cloud-image-contract.mjs \
+            --rendered /tmp/trinyx-cloud-runtime.json
+      - name: Export build matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "matrix=$(jq -c '{include: [.images[] | {
+            name: .name, service: .service, context: .context,
+            file: .dockerfile, image: .package, environment: .environment
+          }]}' docker/cloud-images.json)" >> "${GITHUB_OUTPUT}"
+
+  build-pr:
+    if: github.event_name == 'pull_request'
+    needs: inventory
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.inventory.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Build ${{ matrix.name }} without publication
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          tags: ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=trinyx-cloud-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=trinyx-cloud-${{ matrix.name }}
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.publish)
+    needs: inventory
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.inventory.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - name: Verify publication commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.name }} by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=trinyx-cloud-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=trinyx-cloud-${{ matrix.name }}
+      - name: Create immutable full-SHA tag and record digest
+        shell: bash
+        env:
+          LOGICAL_NAME: ${{ matrix.name }}
+          SERVICE_NAME: ${{ matrix.service }}
+          IMAGE_PACKAGE: ${{ matrix.image }}
+          IMAGE_ENVIRONMENT: ${{ matrix.environment }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          sha_ref="${IMAGE_PACKAGE}:${GITHUB_SHA}"
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" 2>/dev/null |
+              awk '$1 == "Digest:" { print $2; exit }'
+          }
+          existing="$(inspect_digest "${sha_ref}" || true)"
+          if [[ -n "${existing}" && "${existing}" != "${IMAGE_DIGEST}" ]]; then
+            echo "Refusing to move immutable ${sha_ref}: ${existing} != ${IMAGE_DIGEST}" >&2
+            exit 1
+          fi
+          if [[ -z "${existing}" ]]; then
+            docker buildx imagetools create \
+              --tag "${sha_ref}" "${IMAGE_PACKAGE}@${IMAGE_DIGEST}"
+          fi
+          test "$(inspect_digest "${sha_ref}")" = "${IMAGE_DIGEST}"
+
+          mkdir -p cloud-image-digest
+          jq -n \
+            --arg name "${LOGICAL_NAME}" \
+            --arg service "${SERVICE_NAME}" \
+            --arg package "${IMAGE_PACKAGE}" \
+            --arg environment "${IMAGE_ENVIRONMENT}" \
+            --arg digest "${IMAGE_DIGEST}" \
+            --arg immutableRef "${IMAGE_PACKAGE}@${IMAGE_DIGEST}" \
+            '{name: $name, service: $service, package: $package,
+              environment: $environment, digest: $digest,
+              immutableRef: $immutableRef}' \
+            > "cloud-image-digest/${LOGICAL_NAME}.json"
+      - name: Upload ${{ matrix.name }} digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        with:
+          name: cloud-image-digest-${{ matrix.name }}-${{ github.sha }}
+          path: cloud-image-digest/${{ matrix.name }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  manifest:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.publish)
+    needs:
+      - inventory
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # actions/download-artifact v4
+        with:
+          pattern: cloud-image-digest-*-${{ github.sha }}
+          path: cloud-image-digests
+          merge-multiple: true
+      - name: Assemble immutable Cloud image manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find cloud-image-digests -maxdepth 1 -name '*.json' -type f | sort)
+          if [[ "${#files[@]}" -ne 14 ]]; then
+            echo "Expected 14 Cloud image digests, found ${#files[@]}" >&2
+            exit 1
+          fi
+          jq -s \
+            --arg commit "${GITHUB_SHA}" \
+            --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion: 1, commit: $commit, generatedAt: $generatedAt,
+              images: (sort_by(.name))}' \
+            "${files[@]}" > cloud-image-manifest.json
+          jq -e \
+            --arg commit "${GITHUB_SHA}" \
+            '.commit == $commit and (.images | length) == 14
+              and ([.images[].name] | unique | length) == 14
+              and ([.images[].package] | unique | length) == 14
+              and all(.images[];
+                (.digest | test("^sha256:[0-9a-f]{64}$"))
+                and .immutableRef == (.package + "@" + .digest))' \
+            cloud-image-manifest.json >/dev/null
+      - name: Upload immutable Cloud image manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact v4
+        with:
+          name: trinyx-cloud-image-manifest-${{ github.sha }}
+          path: cloud-image-manifest.json
+          if-no-files-found: error
+          retention-days: 365

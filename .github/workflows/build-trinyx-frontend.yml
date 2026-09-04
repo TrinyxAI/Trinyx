@@ -3,50 +3,58 @@ name: Build Trinyx Frontends
 on:
   push:
     branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/build-trinyx-frontend.yml'
+    paths: ['frontend/**', 'scripts/deploy/**', '.github/workflows/build-trinyx-frontend.yml']
+  pull_request:
+    paths: ['frontend/**', 'scripts/deploy/**', '.github/workflows/build-trinyx-frontend.yml']
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: Deploy the exact images built by this run to production
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 env:
-  APP_IMAGE: ghcr.io/eddinerabii/trinyx-frontend
-  LANDING_IMAGE: ghcr.io/eddinerabii/trinyx-landing
+  APP_IMAGE: ghcr.io/trinyxai/trinyx-frontend
+  LANDING_IMAGE: ghcr.io/trinyxai/trinyx-landing
   AWS_REGION: eu-north-1
   EC2_INSTANCE_ID: i-025faee9cb435ad89
 
 jobs:
   build-and-push:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      app_digest: ${{ steps.app.outputs.digest }}
+      landing_digest: ${{ steps.landing.outputs.digest }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Test remote deployment command rendering
+        shell: bash
+        run: bash scripts/deploy/test-render-frontend-ssm-command.sh
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Trinyx app
-        uses: docker/build-push-action@v6
+      - name: Build Trinyx app
+        id: app
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.APP_IMAGE }}:latest
-            ${{ env.APP_IMAGE }}:${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.APP_IMAGE }}:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_APP_EDITION=paid-monolith
             NEXT_PUBLIC_AUTH_MODE=embedded
@@ -54,17 +62,15 @@ jobs:
             NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
-
-      - name: Build and push Trinyx landing
-        uses: docker/build-push-action@v6
+      - name: Build Trinyx landing
+        id: landing
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.LANDING_IMAGE }}:latest
-            ${{ env.LANDING_IMAGE }}:${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.LANDING_IMAGE }}:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_APP_EDITION=cloud
             NEXT_PUBLIC_AUTH_MODE=oidc
@@ -72,58 +78,95 @@ jobs:
           cache-from: type=gha,scope=landing
           cache-to: type=gha,mode=max,scope=landing
 
-  deploy:
+  deploy-production:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.deploy_production == true
     needs: build-and-push
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      id-token: write
+    environment: production
+    concurrency:
+      group: trinyx-production-frontends
+      cancel-in-progress: false
     steps:
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - name: Validate immutable build outputs
+        shell: bash
+        env:
+          APP_DIGEST: ${{ needs.build-and-push.outputs.app_digest }}
+          LANDING_DIGEST: ${{ needs.build-and-push.outputs.landing_digest }}
+        run: |
+          set -euo pipefail
+          [[ "${APP_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${LANDING_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # aws-actions/configure-aws-credentials v4
         with:
           role-to-assume: arn:aws:iam::373468206405:role/TrinyxGitHubDeployRole
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy frontends via SSM
+      - name: Deploy exact digests via SSM
         shell: bash
+        env:
+          APP_DIGEST: ${{ needs.build-and-push.outputs.app_digest }}
+          LANDING_DIGEST: ${{ needs.build-and-push.outputs.landing_digest }}
         run: |
           set -euo pipefail
-
-          PARAMETERS=$(jq -n \
-            --arg command "sudo -u ubuntu -H bash -lc 'set -e; cd /home/ubuntu/Trinyx; docker compose --env-file docker/.env.ce pull frontend landing; docker compose --env-file docker/.env.ce up -d --no-deps frontend landing; docker compose ps frontend landing'" \
-            '{commands: [$command]}')
-
-          COMMAND_ID=$(aws ssm send-command \
-            --region "$AWS_REGION" \
-            --instance-ids "$EC2_INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --comment "Deploy Trinyx frontends from GitHub Actions" \
-            --parameters "$PARAMETERS" \
-            --query 'Command.CommandId' \
-            --output text)
-
-          echo "SSM command: $COMMAND_ID"
-
-          if ! aws ssm wait command-executed \
-            --region "$AWS_REGION" \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$EC2_INSTANCE_ID"; then
-            aws ssm get-command-invocation \
-              --region "$AWS_REGION" \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$EC2_INSTANCE_ID" \
-              --output json || true
+          app_ref="${APP_IMAGE}@${APP_DIGEST}"
+          landing_ref="${LANDING_IMAGE}@${LANDING_DIGEST}"
+          remote_command="$(bash scripts/deploy/render-frontend-ssm-command.sh \
+            "${app_ref}" "${landing_ref}")"
+          parameters=$(jq -n --arg command "${remote_command}" '{commands: [$command]}')
+          command_id=$(aws ssm send-command --region "${AWS_REGION}" --instance-ids "${EC2_INSTANCE_ID}"             --document-name AWS-RunShellScript --comment "Controlled Trinyx frontend digest deployment"             --parameters "${parameters}" --query 'Command.CommandId' --output text)
+          if ! aws ssm wait command-executed --region "${AWS_REGION}" --command-id "${command_id}"             --instance-id "${EC2_INSTANCE_ID}"; then
+            aws ssm get-command-invocation --region "${AWS_REGION}" --command-id "${command_id}"               --instance-id "${EC2_INSTANCE_ID}" --output json || true
             exit 1
           fi
-
-          aws ssm get-command-invocation \
-            --region "$AWS_REGION" \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$EC2_INSTANCE_ID" \
-            --query '{Status:Status,Output:StandardOutputContent,Errors:StandardErrorContent}' \
-            --output json
-
-      - name: Verify deployment
-        shell: bash
+      - name: Verify production URLs
         run: |
           curl --fail --silent --show-error --retry 10 --retry-delay 3 https://trinyx.fr/ > /dev/null
           curl --fail --silent --show-error --retry 10 --retry-delay 3 https://app.trinyx.fr/ > /dev/null
+
+
+  build-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Test remote deployment command rendering
+        shell: bash
+        run: bash scripts/deploy/test-render-frontend-ssm-command.sh
+      - name: Build Trinyx app without publication
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ env.APP_IMAGE }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=paid-monolith
+            NEXT_PUBLIC_AUTH_MODE=embedded
+            NEXT_PUBLIC_BILLING_ENABLED=true
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Build Trinyx landing without publication
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ env.LANDING_IMAGE }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_APP_EDITION=cloud
+            NEXT_PUBLIC_AUTH_MODE=oidc
+            NEXT_PUBLIC_SPRING_BASE_URL=http://livecontext-app:8080
+          cache-from: type=gha,scope=landing
+          cache-to: type=gha,mode=max,scope=landing

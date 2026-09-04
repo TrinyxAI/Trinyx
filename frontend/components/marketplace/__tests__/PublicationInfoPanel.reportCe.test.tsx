@@ -2,7 +2,7 @@
 /**
  * CE variant of the report-tab test: a cloud-linked CE renders CLOUD-hosted
  * publications, so the report link, the page URL embedded in the ticket, and the
- * Terms link must all point at the cloud origin (https://livecontext.ai) - never
+ * Terms link must all point at the cloud origin (https://app.trinyx.fr) - never
  * the local self-hosted install (localhost). The cloud-build (no-op) behaviour is
  * covered by PublicationInfoPanel.report.test.tsx; the rewriter logic itself by
  * lib/edition/__tests__/cloudWebUrl.test.ts.
@@ -22,7 +22,7 @@ vi.mock('@/lib/edition', () => ({
     if (!pathOrUrl) return pathOrUrl;
     try {
       const resolved = new URL(pathOrUrl, 'http://localhost:3000');
-      return `https://livecontext.ai${resolved.pathname}${resolved.search}${resolved.hash}`;
+      return `https://app.trinyx.fr${resolved.pathname}${resolved.search}${resolved.hash}`;
     } catch {
       return pathOrUrl;
     }
@@ -151,13 +151,13 @@ describe('PublicationInfoPanel report tab - CE points at the cloud, not localhos
 
     const link = await screen.findByRole('link', { name: /reportEmailButton/i });
     const href = link.getAttribute('href') ?? '';
-    expect(href.startsWith('https://livecontext.ai/contact?category=abuse&message=')).toBe(true);
+    expect(href.startsWith('https://app.trinyx.fr/contact?category=abuse&message=')).toBe(true);
     expect(href).not.toContain('localhost');
 
     // The page URL embedded in the prefilled ticket is the cloud URL of this
     // publication, not the local install's localhost URL.
     const encodedMessage = new URL(href).searchParams.get('message') ?? '';
-    expect(encodedMessage).toContain('URL: https://livecontext.ai/en/app/marketplace/pub-1/preview');
+    expect(encodedMessage).toContain('URL: https://app.trinyx.fr/en/app/marketplace/pub-1/preview');
     expect(encodedMessage).not.toContain('localhost');
   });
 
@@ -167,7 +167,7 @@ describe('PublicationInfoPanel report tab - CE points at the cloud, not localhos
     fireEvent.click(screen.getByRole('tab', { name: /reportTab/i }));
 
     const termsLink = await screen.findByRole('link', { name: /reportSeeTerms/i });
-    expect(termsLink.getAttribute('href')).toBe('https://livecontext.ai/legal/terms');
+    expect(termsLink.getAttribute('href')).toBe('https://app.trinyx.fr/legal/terms');
 
     await waitFor(() => {
       expect(publicationServiceMocks.getCommentCount).toHaveBeenCalledWith('pub-1');

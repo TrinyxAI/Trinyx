@@ -30,7 +30,7 @@ public class HttpReleaseFeedClient implements ReleaseFeedClient {
     private final ObjectProvider<CeInstallIdProvider> installId;
 
     public HttpReleaseFeedClient(
-            @Value("${ce.version-check.url:https://livecontext.ai/api/ce/releases/latest}") String feedUrl,
+            @Value("${ce.version-check.url:https://app.trinyx.fr/api/ce/releases/latest}") String feedUrl,
             @Value("${ce.version-check.timeout-ms:5000}") int timeoutMs,
             ObjectProvider<CeInstallIdProvider> installId) {
         this.feedUrl = feedUrl;

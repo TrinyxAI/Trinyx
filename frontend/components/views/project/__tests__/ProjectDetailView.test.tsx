@@ -206,7 +206,7 @@ describe('ProjectDetailView - Applications tab', () => {
   afterEach(() => cleanup());
 
   it('renders ApplicationCard carrying publisherId + visibility + status (card parity with /app/applications)', () => {
-    setup({ applications: [{ id: 'a1', title: 'My App', publisherId: 'user-42', publisherName: 'LiveContext', visibility: 'PUBLIC', status: 'PENDING_REVIEW' }] });
+    setup({ applications: [{ id: 'a1', title: 'My App', publisherId: 'user-42', publisherName: 'Trinyx', visibility: 'PUBLIC', status: 'PENDING_REVIEW' }] });
     render(<ProjectDetailView projectId="p1" />);
 
     openTabByLabel('project.tabs.applications');

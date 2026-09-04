@@ -14,7 +14,7 @@ function post(overrides: Partial<BlogPost>): BlogPost {
     title: 'Title',
     date: '2026-01-01',
     excerpt: 'Excerpt',
-    authors: ['LiveContext'],
+    authors: ['Trinyx'],
     tags: [],
     cover: '/blog/slug.jpg',
     coverAlt: 'Cover',

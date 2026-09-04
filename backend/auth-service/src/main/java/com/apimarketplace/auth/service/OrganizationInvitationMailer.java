@@ -41,8 +41,8 @@ public class OrganizationInvitationMailer {
 
     public OrganizationInvitationMailer(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:noreply@livecontext.ai}") String mailFrom,
-            @Value("${app.mail.from-name:LiveContext}") String mailFromName,
+            @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
+            @Value("${app.mail.from-name:Trinyx}") String mailFromName,
             // Aligns with the actual key used everywhere else (EmailVerificationService:49,
             // OAuth2Controller:36, OAuth2Service:119, application.yml:112). The earlier
             // draft used "app.frontend.url" which is undefined → mail would have sent
@@ -77,13 +77,13 @@ public class OrganizationInvitationMailer {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(email);
-            helper.setSubject("You've been invited to join " + safeOrgName + " on LiveContext");
+            helper.setSubject("You've been invited to join " + safeOrgName + " on Trinyx");
 
             String plain = String.format(
-                    "%s invited you to join the organization '%s' on LiveContext as %s.%n%n"
+                    "%s invited you to join the organization '%s' on Trinyx as %s.%n%n"
                             + "Accept here: %s%n%n"
                             + "If you weren't expecting this invitation, you can safely ignore this email.%n%n"
-                            + "- LiveContext",
+                            + "- Trinyx",
                     safeInviter, safeOrgName, safeRole, acceptUrl);
 
             String html = buildInvitationHtml(safeOrgName, safeInviter, safeRole, acceptUrl);
@@ -120,7 +120,7 @@ public class OrganizationInvitationMailer {
                 <meta name="viewport" content="width=device-width,initial-scale=1">
                 <title>You're invited</title></head>
                 <body style="margin:0;padding:0;">
-                <span style="display:none!important;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all;">You've been invited to join {{ORG}} on LiveContext</span>
+                <span style="display:none!important;font-size:1px;line-height:1px;color:#ffffff;mso-hide:all;">You've been invited to join {{ORG}} on Trinyx</span>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f5f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
                   <tr><td align="center" style="padding:40px 16px;">
                     <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;">
@@ -129,14 +129,14 @@ public class OrganizationInvitationMailer {
                       </td></tr>
                       <tr><td style="padding:32px 40px;font-size:15px;line-height:1.6;color:#111827;">
                         <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">You're invited</h1>
-                        <p style="margin:0 0 12px 0;"><strong>{{INVITER}}</strong> invited you to join the organization <strong>{{ORG}}</strong> on LiveContext as <strong>{{ROLE}}</strong>.</p>
+                        <p style="margin:0 0 12px 0;"><strong>{{INVITER}}</strong> invited you to join the organization <strong>{{ORG}}</strong> on Trinyx as <strong>{{ROLE}}</strong>.</p>
                         <p style="margin:24px 0;text-align:center;">
                           <a href="{{URL}}" style="display:inline-block;padding:12px 28px;background:#111827;color:#ffffff;border-radius:8px;font-size:15px;font-weight:600;text-decoration:none;">Accept invitation</a>
                         </p>
                         <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;">If the button doesn't work, copy and paste this link:<br><span style="word-break:break-all;color:#374151;">{{URL}}</span></p>
                       </td></tr>
                       <tr><td style="padding:24px 40px 32px 40px;border-top:1px solid #e7e5e4;font-size:12px;line-height:1.5;color:#6b7280;">
-                        If you weren't expecting this invitation, you can safely ignore this email - no account will be created.<br><br>&copy; LiveContext
+                        If you weren't expecting this invitation, you can safely ignore this email - no account will be created.<br><br>&copy; Trinyx
                       </td></tr>
                     </table>
                   </td></tr>

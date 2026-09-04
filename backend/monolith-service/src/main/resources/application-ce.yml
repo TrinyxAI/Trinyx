@@ -1,5 +1,5 @@
 # ============================================================
-# LiveContext Community Edition - Single JAR + PostgreSQL
+# Trinyx Community Edition - Single JAR + PostgreSQL
 # ============================================================
 # This profile activates when running the monolith.
 # All services share one port, one database, one JVM.
@@ -118,8 +118,8 @@ spring:
 app:
   edition: ${APP_EDITION:ce}
   mail:
-    from: ${MAIL_FROM:noreply@livecontext.local}
-    from-name: LiveContext
+    from: ${MAIL_FROM:noreply@trinyx.fr}
+    from-name: Trinyx
     console-fallback-enabled: ${MAIL_CONSOLE_FALLBACK_ENABLED:true}
   base-url: ${APP_BASE_URL:http://localhost:8080}
   # Public FRONTEND origin for opaque file URLs (PublicFileUrlBuilder). Distinct from base-url, which
@@ -190,8 +190,10 @@ storage:
     bucket: ${STORAGE_S3_BUCKET:workflow-files}
     path-style: true
 
-# Embedded code execution instead of Piston API
+# Preserve the existing self-hosted CE embedded executor. Cloud hard-disables
+# embedded execution and must explicitly opt into a separately operated Piston API.
 piston:
+  enabled: true
   embedded: true
 
 # WebSearch disabled in CE (requires external websearch-service + Redis)
@@ -209,7 +211,7 @@ generation:
 # Marketplace: remote mode fetches publications from cloud, clones locally
 marketplace:
   mode: ${MARKETPLACE_MODE:remote}
-  cloud-api-url: ${MARKETPLACE_CLOUD_API_URL:https://livecontext.ai/api}
+  cloud-api-url: ${MARKETPLACE_CLOUD_API_URL:https://cloud.trinyx.fr/api}
   # CE CONSUMES the cloud's /api/ce-marketplace/** endpoints (snapshot +
   # acquire-with-auth) - it never serves them. The cloud default (publication-
   # service application.yml) is true; pin OFF here so the CeDownloadController
@@ -223,10 +225,14 @@ marketplace:
 ce-catalog-relay:
   enabled: false
 
-# Cloud account linking (OAuth to LiveContext cloud for paid marketplace operations)
+# Cloud account linking to the operator-controlled Trinyx Cloud
 cloud-link:
-  keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.livecontext.ai/realms/livecontext}
-  client-id: ${CLOUD_LINK_CLIENT_ID:livecontext-frontend}
+  # Remote Marketplace always exposes the OAuth linking capability, as upstream does;
+  # no central account is required until a linked-cloud operation is requested.
+  # This switch is the independent Trinyx opt-in for local Marketplace (paid monolith).
+  enabled: ${CLOUD_LINK_ENABLED:false}
+  keycloak-url: ${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}
+  client-id: ${CLOUD_LINK_CLIENT_ID:trinyx-frontend}
   redirect-uri: ${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}
   encryption-key: ${CLOUD_LINK_ENCRYPTION_KEY:}
   ip-hash:
@@ -403,6 +409,10 @@ credit:
 # stay env-overridable for a CE operator who deliberately resells with a margin.
 billing:
   provider: ${BILLING_PROVIDER:none}
+  authority:
+    mode: ${BILLING_AUTHORITY_MODE:native}
+  external:
+    past-due-grace-hours: ${BILLING_PAST_DUE_GRACE_HOURS:72}
   llm:
     cloud-multiplier: ${BILLING_LLM_CLOUD_MULTIPLIER:1.0}
   stripe:
@@ -448,14 +458,14 @@ catalog:
       enabled: ${CATALOG_GENERATION_SEED_ENABLED:true}
   # Shared Ed25519 trust root for ALL signed bundles fetched from the cloud
   # (LLM model bundle AND API catalog bundle). Format: keyId=base64X509;...
-  # The cloud's PUBLIC key is baked as the default so a fresh CE / git clone
-  # trusts cloud-signed bundles out of the box (no manual config). This is a
-  # public key - the cloud serves the same value at /api/catalog-bundles/signing-key;
-  # it is NOT a secret. An empty default would make every sync tick record
-  # TRUST_UNCONFIGURED. Operators can override or extend (`;`-separated, e.g. for
-  # key rotation) via CATALOG_BUNDLE_TRUSTED_KEYS.
+  # Trust is provisioned explicitly from the Trinyx Cloud signing-key domain.
+  # Never inherit an upstream trust anchor after changing the bundle origin.
+  # Production must inject the matching Trinyx public ring. With no configured
+  # key, verification stays closed until the existing HTTPS signing-key bootstrap
+  # pins the first key from the configured Trinyx Cloud; no bundle is applied first.
+  # Multiple rotation keys are `;`-separated.
   bundle:
-    trusted-keys: ${CATALOG_BUNDLE_TRUSTED_KEYS:livecontext-prod-v1=MCowBQYDK2VwAyEAS0Q7EwzPEhGRu2hKzsMeHQqPfQJKpbK7ohjpvnDmmvM=}
+    trusted-keys: ${CATALOG_BUNDLE_TRUSTED_KEYS:}
     # LLM model-catalog bundle sync (cloud -> CE): keeps the CE model catalog (which
     # models exist + pricing) in step with the cloud's latest signed bundle, on a cron
     # plus once on startup. GATED behind an active cloud link: the scheduler authenticates
@@ -463,7 +473,7 @@ catalog:
     # install is not linked (records NOT_LINKED) - catalog freshness is a benefit of being
     # connected, never an anonymous fetch. Safe to enable for every CE: an unlinked install
     # simply keeps its seeded catalog. The cloud itself never runs this (default disabled).
-    cloud-url: ${CATALOG_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${CATALOG_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${CATALOG_BUNDLE_SYNC_ENABLED:true}
       cron: ${CATALOG_BUNDLE_SYNC_CRON:0 */15 * * * *}
@@ -475,7 +485,7 @@ catalog:
 # in the service itself (cloud never syncs); enabled here for CE installs.
 api-catalog:
   bundle:
-    cloud-url: ${API_CATALOG_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${API_CATALOG_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${API_CATALOG_BUNDLE_SYNC_ENABLED:true}
       cron: ${API_CATALOG_BUNDLE_SYNC_CRON:0 */15 * * * *}
@@ -490,7 +500,7 @@ api-catalog:
 # disabled in agent-service); enabled here for CE installs.
 skill:
   bundle:
-    cloud-url: ${SKILL_BUNDLE_CLOUD_URL:https://livecontext.ai}
+    cloud-url: ${SKILL_BUNDLE_CLOUD_URL:https://cloud.trinyx.fr}
     sync:
       enabled: ${SKILL_BUNDLE_SYNC_ENABLED:true}
       cron: ${SKILL_BUNDLE_SYNC_CRON:0 */15 * * * *}

@@ -157,7 +157,7 @@
       "description": "Ponte en contacto con Trinyx para soporte, avisos de seguridad, colaboraciones y prensa."
     },
     "layout": {
-      "copyright": "© {year} LiveContext. Todos los derechos reservados.",
+      "copyright": "© {year} Trinyx. Todos los derechos reservados.",
       "privacyPolicy": "Politica de privacidad",
       "termsOfService": "Terminos de servicio",
       "legalNotice": "Aviso legal",
@@ -1672,7 +1672,7 @@
     },
     "screening": {
       "attestationFooter": "Marques o no la casilla, tu decisión queda registrada (identificador de versión {version}) para que tengamos un registro de auditoría si alguna vez llega una notificación de retirada.",
-      "attestationLabel": "Confirmo que tengo todos los derechos necesarios para usar estos recursos en esta publicación, incluida la redistribución comercial a través del marketplace de LiveContext. Entiendo que soy el único responsable de cualquier reclamación por infracción derivada de este contenido (Términos §8).",
+      "attestationLabel": "Confirmo que tengo todos los derechos necesarios para usar estos recursos en esta publicación, incluida la redistribución comercial a través del marketplace de Trinyx. Entiendo que soy el único responsable de cualquier reclamación por infracción derivada de este contenido (Términos §8).",
       "attestationVerbatim": "El publicador declara conforme a los Términos §8(iii)+(iv): posee todos los derechos necesarios, incluidos los derechos de redistribución comercial, para cada recurso listado en esta publicación.",
       "cancel": "Volver",
       "close": "Cerrar",

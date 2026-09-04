@@ -22,7 +22,7 @@ vi.mock('next-intl/middleware', () => ({
 import { proxy } from '@/proxy';
 
 function request(path: string, headers: Record<string, string> = {}): NextRequest {
-  return new NextRequest(`https://livecontext.ai${path}`, { headers });
+  return new NextRequest(`https://trinyx.fr${path}`, { headers });
 }
 
 describe('proxy RSC cache poisoning guard', () => {
@@ -41,7 +41,7 @@ describe('proxy RSC cache poisoning guard', () => {
 
   it('applies the guard on redirects too (locale-stripping redirect)', () => {
     const response = proxy(request('/fr/about', { rsc: '1' })) as Response;
-    expect(response.headers.get('location')).toBe('https://livecontext.ai/about');
+    expect(response.headers.get('location')).toBe('https://trinyx.fr/about');
     expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 

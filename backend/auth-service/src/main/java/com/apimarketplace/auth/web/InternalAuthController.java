@@ -110,6 +110,8 @@ public class InternalAuthController {
             @RequestHeader("X-User-ID") Long userId,
             @PathVariable UUID installId) {
         // Cloud-only: in CE (auth.mode=embedded) CeLinkService is absent → no cloud link exists.
+        // "active" means authorized in the exact signed install/org/payer scope; it is not
+        // limited to the historical ce_link row owner.
         CeLinkService ceLinkService = ceLinkServiceProvider.getIfAvailable();
         boolean active = ceLinkService != null && ceLinkService.userOwnsActiveLink(userId, installId);
         return ResponseEntity.ok(Map.of(
@@ -118,14 +120,14 @@ public class InternalAuthController {
     }
 
     /**
-     * Subscription entitlements of the cloud account owning a CE link. Consumed by
+     * Actor-free subscription entitlements of the payer/workspace scope for a CE link. Consumed by
      * the cloud-side CE catalog relay ({@code AuthClient.ceLinkEntitlements}) to
      * gate relayed tool executions on an ACTIVE PAID subscription.
      *
      * <p>Always 200. Fail-closed shape ({@code planCode="__NONE__"},
      * {@code hasSubscription=false}) for: absent {@code CeLinkEntitlementsService}
      * (CE, {@code auth.mode=embedded}), unknown/foreign/revoked install, malformed
-     * user id, or malformed install id. Never 500 on bad input.
+     * user id, malformed install id, or a caller outside the signed scope. Never 500 on bad input.
      */
     @GetMapping("/ce-link/{installId}/entitlements")
     public ResponseEntity<Map<String, Object>> ceLinkEntitlements(

@@ -162,7 +162,7 @@ public class CeCatalogCloudRelay {
             log.warn("[CeCatalogCloudRelay] Cloud relay unreachable for tool {}/{}: {}",
                     apiSlug, toolSlug, e.getMessage());
             return Optional.of(failedResponse(context, requestId, start,
-                    "Cloud relay unreachable: the linked LiveContext Cloud could not be contacted "
+                    "Cloud relay unreachable: the linked Trinyx Cloud could not be contacted "
                             + "for this platform-credential call. Retry later, or configure a local "
                             + "credential for this integration."));
         }
@@ -200,14 +200,14 @@ public class CeCatalogCloudRelay {
      */
     private static String relayErrorMessage(String errorCode, boolean delinquent) {
         if (errorCode == null) {
-            return "Platform credentials via LiveContext Cloud are unavailable right now. "
+            return "Platform credentials via Trinyx Cloud are unavailable right now. "
                     + "Retry later, or configure a local credential for this integration.";
         }
         return switch (errorCode) {
-            case "SUBSCRIPTION_REQUIRED" -> "Platform credentials via LiveContext Cloud require an active "
+            case "SUBSCRIPTION_REQUIRED" -> "Platform credentials via Trinyx Cloud require an active "
                     + "subscription on the linked cloud account. Ask the install administrator to upgrade "
                     + "the linked account, or configure a local credential for this integration.";
-            case "INSUFFICIENT_CREDITS" -> "The linked LiveContext Cloud account does not have enough "
+            case "INSUFFICIENT_CREDITS" -> "The linked Trinyx Cloud account does not have enough "
                     + "credits for this platform-credential call"
                     + (delinquent ? " (the account also has an outstanding payment)" : "")
                     + ". Ask the install administrator to top up the linked cloud account, or configure "
@@ -216,16 +216,16 @@ public class CeCatalogCloudRelay {
                     + "administrator to reconnect the cloud account in settings, or configure a local "
                     + "credential for this integration.";
             case "OAUTH_NOT_RELAYABLE" -> "This integration requires a locally configured OAuth "
-                    + "credential and cannot run through LiveContext Cloud. Connect your own account "
+                    + "credential and cannot run through Trinyx Cloud. Connect your own account "
                     + "for this integration and switch the step to the user credential source.";
             case "PLATFORM_NOT_AVAILABLE" -> "Platform credentials are not offered for this integration "
-                    + "on LiveContext Cloud. Configure your own credential for this integration and "
+                    + "on Trinyx Cloud. Configure your own credential for this integration and "
                     + "switch the step to the user credential source.";
             case "TOOL_NOT_FOUND" -> "This tool is not available for platform-credential execution on "
-                    + "LiveContext Cloud. Configure a local credential for this integration.";
-            case "RATE_LIMITED" -> "LiveContext Cloud is rate limiting platform-credential calls for "
+                    + "Trinyx Cloud. Configure a local credential for this integration.";
+            case "RATE_LIMITED" -> "Trinyx Cloud is rate limiting platform-credential calls for "
                     + "this install. Retry later.";
-            default -> "Platform credentials via LiveContext Cloud rejected this call. Ask the install "
+            default -> "Platform credentials via Trinyx Cloud rejected this call. Ask the install "
                     + "administrator to reconnect the cloud account in settings, or configure a local "
                     + "credential for this integration.";
         };

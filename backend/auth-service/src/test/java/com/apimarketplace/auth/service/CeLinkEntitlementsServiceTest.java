@@ -137,4 +137,88 @@ class CeLinkEntitlementsServiceTest {
         verifyNoInteractions(ceLinkRepository);
         verifyNoInteractions(planResolutionService);
     }
+
+    @Test
+    @DisplayName("External authority serves the linked CE from the signed payer projection")
+    void externalAuthorityUsesProjectionInsteadOfLocalCloudSubscription() {
+        UUID installId = UUID.randomUUID();
+        CeLink link = new CeLink(installId, 7L, "paid-monolith install");
+        EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
+        when(ceLinkRepository.findById(installId)).thenReturn(Optional.of(link));
+        when(projections.activeCeEntitlement(7L, installId)).thenReturn(Optional.of(
+                new EntitlementProjectionService.ProjectedCeEntitlement(
+                        "TEAM", 3, "yearly", 12L, java.time.Instant.now().plusSeconds(600))));
+
+        CeLinkEntitlementsService external = new CeLinkEntitlementsService(
+                ceLinkRepository, planResolutionService, projections, "external-paid-monolith");
+        CeLinkEntitlements result = external.entitlementsForCaller(7L, installId);
+
+        assertThat(result.planCode()).isEqualTo("TEAM");
+        assertThat(result.userId()).isEqualTo(7L);
+        assertThat(result.creditTierIndex()).isEqualTo(3);
+        assertThat(result.cadence()).isEqualTo("yearly");
+        verifyNoInteractions(planResolutionService);
+    }
+
+    @Test
+    @DisplayName("Organization members share the payer projection through distinct actor bindings")
+    void externalAuthorityAllowsMemberInExactSignedPayerScope() {
+        UUID installId = UUID.randomUUID();
+        CeLink ownerLink = new CeLink(installId, 7L, "paid-monolith install");
+        EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
+        CloudIdentityBindingService bindings = mock(CloudIdentityBindingService.class);
+        when(ceLinkRepository.findById(installId)).thenReturn(Optional.of(ownerLink));
+        when(bindings.userMayUseActiveInstall(8L, installId)).thenReturn(true);
+        when(projections.activeCeEntitlement(8L, installId)).thenReturn(Optional.of(
+                new EntitlementProjectionService.ProjectedCeEntitlement(
+                        "TEAM", 3, "yearly", 12L, java.time.Instant.now().plusSeconds(600))));
+
+        CeLinkEntitlementsService external = new CeLinkEntitlementsService(
+                ceLinkRepository, planResolutionService, projections, bindings,
+                "external-paid-monolith");
+        CeLinkEntitlements result = external.entitlementsForCaller(8L, installId);
+
+        assertThat(result.planCode()).isEqualTo("TEAM");
+        assertThat(result.userId()).isEqualTo(8L);
+        assertThat(result.creditTierIndex()).isEqualTo(3);
+        assertThat(result.cadence()).isEqualTo("yearly");
+        verifyNoInteractions(planResolutionService);
+    }
+
+    @Test
+    @DisplayName("Cross-organization or cross-payer member scope cannot read a projection")
+    void externalAuthorityRejectsMemberOutsideSignedPayerScope() {
+        UUID installId = UUID.randomUUID();
+        CeLink ownerLink = new CeLink(installId, 7L, "paid-monolith install");
+        EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
+        CloudIdentityBindingService bindings = mock(CloudIdentityBindingService.class);
+        when(ceLinkRepository.findById(installId)).thenReturn(Optional.of(ownerLink));
+        when(bindings.userMayUseActiveInstall(8L, installId)).thenReturn(false);
+
+        CeLinkEntitlementsService external = new CeLinkEntitlementsService(
+                ceLinkRepository, planResolutionService, projections, bindings,
+                "external-paid-monolith");
+
+        assertThat(external.entitlementsForCaller(8L, installId).hasSubscription()).isFalse();
+        verifyNoInteractions(projections);
+        verifyNoInteractions(planResolutionService);
+    }
+
+    @Test
+    @DisplayName("External authority fails closed when the projection is expired, denied or missing")
+    void externalAuthorityNeverFallsBackToLocalCloudSubscription() {
+        UUID installId = UUID.randomUUID();
+        CeLink link = new CeLink(installId, 9L, "paid-monolith install");
+        EntitlementProjectionService projections = mock(EntitlementProjectionService.class);
+        when(ceLinkRepository.findById(installId)).thenReturn(Optional.of(link));
+        when(projections.activeCeEntitlement(9L, installId)).thenReturn(Optional.empty());
+
+        CeLinkEntitlementsService external = new CeLinkEntitlementsService(
+                ceLinkRepository, planResolutionService, projections, "external-paid-monolith");
+        CeLinkEntitlements result = external.entitlementsForCaller(9L, installId);
+
+        assertThat(result.hasSubscription()).isFalse();
+        assertThat(result.userId()).isNull();
+        verifyNoInteractions(planResolutionService);
+    }
 }

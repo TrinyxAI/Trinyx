@@ -14,7 +14,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const CE_API_BASE = 'https://livecontext.ai/api';
+const CE_API_BASE = process.env.NEXT_PUBLIC_TRINYX_CLOUD_API_URL?.replace(/\/$/, '');
+
+/**
+ * The production paid-monolith frontend must not acquire a Cloud network dependency
+ * merely because this code is merged. Remote categories are enabled only when the
+ * Cloud origin is explicitly provided at build time.
+ */
 
 interface CategoryFilterProps {
   selectedCategory?: string;
@@ -35,9 +41,12 @@ export function CategoryFilter({
   useEffect(() => {
     if (!IS_CE && isAuthLoading) return;
 
-    const fetchCategories = IS_CE
+    const fetchCategories = IS_CE && CE_API_BASE
       ? fetch(`${CE_API_BASE}/categories?activeOnly=true`)
-          .then(res => res.json())
+          .then(res => {
+            if (!res.ok) throw new Error(`Cloud categories returned ${res.status}`);
+            return res.json();
+          })
           .then(data => data as { categories?: WorkflowCategory[] })
       : orchestratorApi.getCategories(true);
 

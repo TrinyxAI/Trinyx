@@ -225,7 +225,7 @@ describe('MarketplacePage - CE cloud-parity gate', () => {
 
     // Explore data comes from the CE backend remote proxy - never from the local
     // orchestrator endpoint and never from a direct browser call to
-    // livecontext.ai. The refinements ride along so the CLOUD answers them; a
+    // cloud.trinyx.fr. The refinements ride along so the CLOUD answers them; a
     // linked CE filtering the page it received would only ever filter that page.
     await waitFor(() => {
       expect(publicationServiceMock.getRemoteMarketplacePublications).toHaveBeenCalledWith(

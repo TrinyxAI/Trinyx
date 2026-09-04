@@ -1,4 +1,4 @@
-# LiveContext Community Edition - Docker Setup
+# Trinyx Community Edition - Docker Setup
 
 CE ships as a single self-hosted monolith with embedded auth (no Keycloak). The cloud
 SaaS edition runs a different topology (microservices + Keycloak) and is deployed via
@@ -6,7 +6,8 @@ GitHub Actions, not via this directory.
 
 | Mode | File | Containers | Keycloak | Best for |
 |------|------|-----------|----------|----------|
-| **Monolith** | `docker-compose.yml` | 5 | No | Local dev, self-hosting |
+| **Monolith** | `cli/assets/docker-compose.yml` | 5 | No | New Trinyx CE installs |
+| Legacy compatibility | `docker-compose.yml` | existing topology | No | Existing deployments only |
 
 ---
 
@@ -14,16 +15,19 @@ GitHub Actions, not via this directory.
 
 - Docker Desktop 4.x+ (or Docker Engine 24+ with Compose v2)
 - 4 GB RAM minimum (8 GB recommended)
-- An LLM provider for agents: connect to LiveContext Cloud (recommended), or add your own OpenAI / Anthropic / Google key in the app
+- An LLM provider for agents: connect to Trinyx Cloud (recommended), or add your own OpenAI / Anthropic / Google key in the app
 
 ## Quick Start
 
-```bash
-# From the repo root. This PULLS the prebuilt images (no local build):
-docker compose up -d
+Use the canonical Trinyx-owned Compose bundle. The root `docker-compose.yml` remains
+untouched for legacy paid-monolith/development compatibility and is not the new-install path.
 
-# Wait ~2-3 minutes for the backend to initialize (Flyway migrations + tool registration)
-docker compose ps
+```bash
+# From the repo root. This pulls the release-pinned Trinyx images:
+docker compose -f cli/assets/docker-compose.yml up -d
+
+# Wait ~2-3 minutes for migrations and tool registration:
+docker compose -f cli/assets/docker-compose.yml ps
 # Wait until the "livecontext" service is "healthy" and "frontend" is up.
 
 # Open http://localhost:3000 and create an account (the first user becomes the admin)
@@ -39,7 +43,7 @@ docker compose ps
 > sure BOTH ports are published and reachable. If the backend is not at
 > `<the address you opened the app with>:BACKEND_PORT` (typically a reverse proxy serving
 > everything on one origin), set `GATEWAY_PUBLIC_URL` on the `frontend` service to the
-> browser-facing backend URL, e.g. `GATEWAY_PUBLIC_URL=https://livecontext.example.com`.
+> browser-facing backend URL, e.g. `GATEWAY_PUBLIC_URL=https://trinyx.example.com`.
 
 ## Architecture
 
@@ -64,9 +68,9 @@ Browser (:3000)
 | `livecontext-redis` | `redis:7-alpine` | 6379 (internal) | Cache, pub/sub, streaming |
 | `livecontext-minio` | `minio/minio` | 9000 (internal) | S3-compatible file storage |
 | `livecontext-minio-init` | `minio/mc` | - | Creates `workflow-files` bucket, then exits |
-| `livecontext-bridge` | `ghcr.io/livecontext-ai/livecontext-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
-| `livecontext-app` | `ghcr.io/livecontext-ai/livecontext-ce` | **8080** | All backend services in one JAR |
-| `livecontext-frontend` | `ghcr.io/livecontext-ai/livecontext-ce-frontend` | **3000** | Next.js app (embedded auth) |
+| `livecontext-bridge` | `ghcr.io/trinyxai/trinyx-ce-bridge` | 8093 (internal) | CLI adapters + MCP tools |
+| `livecontext-app` | `ghcr.io/trinyxai/trinyx-ce` | **8080** | All backend services in one JAR |
+| `livecontext-frontend` | `ghcr.io/trinyxai/trinyx-ce-frontend` | **3000** | Next.js app (embedded auth) |
 
 Only ports **3000** (frontend, the app) and **8080** (backend API) are exposed to the host.
 
@@ -159,7 +163,7 @@ anywhere other than localhost):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GATEWAY_PUBLIC_URL` | empty | Browser-facing backend origin. Empty means "derive it from the address the app was opened with, on `BACKEND_PORT`", which is what makes an install reachable by LAN IP or domain work unmodified. Set it when the backend is elsewhere, e.g. a reverse proxy on one origin: `https://livecontext.example.com`. |
+| `GATEWAY_PUBLIC_URL` | empty | Browser-facing backend origin. Empty means "derive it from the address the app was opened with, on `BACKEND_PORT`", which is what makes an install reachable by LAN IP or domain work unmodified. Set it when the backend is elsewhere, e.g. a reverse proxy on one origin: `https://trinyx.example.com`. |
 | `BACKEND_PORT` | `8080` | Port the backend is published on, used for that derivation. Keep it equal to the port mapping on the `livecontext` service. |
 
 ### next.config.mjs - `compress: false`
@@ -192,7 +196,7 @@ browser-agent module in the app):
 
 ```bash
 # First run builds the Chromium image (a few minutes); later runs reuse it.
-docker compose --env-file docker/.env.ce.browser-agent up -d
+docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.browser-agent up -d
 ```
 
 - **Model:** the agent node picks the model per AI provider
@@ -224,7 +228,7 @@ which starts the `screenshot-renderer` container (`renderer` Docker profile) and
 points the app at it (`SCREENSHOT_RENDERER_URL=http://screenshot-renderer:8094`):
 
 ```bash
-docker compose --env-file docker/.env.ce.renderer up -d
+docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.renderer up -d
 ```
 
 - **Best-effort when off:** with the renderer disabled the interface node still
@@ -233,10 +237,10 @@ docker compose --env-file docker/.env.ce.renderer up -d
 - Set only one half and it stays off (a container the app never calls, or the URL
   with no container) - always use the env file so they stay coupled.
 
-## Update check and anonymous install count
+## Update check and optional anonymous install count
 
 Once a day (and once shortly after startup) your install asks
-`https://livecontext.ai/api/ce/releases/latest` whether a newer release exists.
+`https://app.trinyx.fr/api/ce/releases/latest` whether a newer release exists.
 That is what puts the "Update available" badge on the Settings > Information
 card. The app never updates itself: the badge only shows you the
 `docker compose pull` commands.
@@ -246,30 +250,30 @@ default `User-Agent` naming the Java runtime, as any HTTP client sends)**:**
 
 ```
 GET /api/ce/releases/latest?current=0.2.13
-X-LiveContext-Anon-Install-Id: 8f2c1a44-...   # random UUID, generated once at first boot
+# No install-id header is sent by the Trinyx default configuration.
 ```
 
-The install id is a random UUID generated once and kept in your own database
-(`auth.ce_install`). It is derived from nothing: not your IP, not your hostname,
-not your licence, not any user account. It exists so the number of live
-self-hosted installs can be counted, so the cloud stores it too, alongside
-exactly three things: the version above and the dates it was first and last
-seen. That is the whole record. **No IP address is stored in it**, and it is
-deliberately not the cloud-link install id, so the record itself carries no link
-or account information. A build made from source reports itself as `dev` rather
-than by its commit id. Records not seen for 180 days are deleted.
+Trinyx disables persistent install-id transmission by default. Operators may
+explicitly opt in to the upstream-compatible anonymous fleet count with
+`CE_VERSIONCHECK_SENDINSTALLID=true`. When enabled, the install id is a random
+UUID generated once and kept in your own database (`auth.ce_install`). It is
+derived from nothing: not your IP, hostname, licence or user account. The fleet
+record contains only that UUID, the reported version, and first/last-seen dates;
+records not seen for 180 days are deleted. The compatibility header remains
+`X-LiveContext-Anon-Install-Id`; it is deliberately distinct from the
+tenant-bound CloudLink install id.
 
 To be precise about what that does and does not promise: like any HTTP request
 to any service, this one reaches our edge with your IP visible to the web server
-and its access log, exactly as your browser does when you open livecontext.ai.
+and its access log, exactly as your browser does when you open app.trinyx.fr.
 What the claim above is about is the fleet record itself, which is the only
 thing derived from this feature and the only thing it keeps.
 
-**Turning it off**, in `docker/.env.ce`:
+**Opting in or disabling the check**, in `docker/.env.ce`:
 
 ```bash
-# Keep the update check, stop identifying this install:
-CE_VERSIONCHECK_SENDINSTALLID=false
+# Optional: keep the update check and opt in to the anonymous fleet count:
+CE_VERSIONCHECK_SENDINSTALLID=true
 
 # Or drop the request entirely (no update badge either):
 CE_VERSIONCHECK_ENABLED=false
@@ -294,25 +298,25 @@ normally within seconds of startup but is delayed if the database is not up yet.
 
 ```bash
 # Start everything (pulls the prebuilt images)
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml up -d
 
 # Update to a newer release: the compose pins the image version, so pull the repo
 # (which carries the new pinned compose), then restart
 git pull
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml up -d
 
 # View backend / frontend logs
-docker compose logs -f livecontext
-docker compose logs -f frontend
+docker compose -f cli/assets/docker-compose.yml logs -f livecontext
+docker compose -f cli/assets/docker-compose.yml logs -f frontend
 
 # Stop everything
-docker compose down
+docker compose -f cli/assets/docker-compose.yml down
 
 # Stop and delete all data (fresh start)
-docker compose down -v
+docker compose -f cli/assets/docker-compose.yml down -v
 
 # Check health status
-docker compose ps
+docker compose -f cli/assets/docker-compose.yml ps
 ```
 
 ## Startup Order and Timing
@@ -361,7 +365,7 @@ services:
       NODE_EXTRA_CA_CERTS: /app/extra-ca/corp-root.pem
 ```
 
-4. `docker compose up -d livecontext bridge`. The app logs
+4. `docker compose -f cli/assets/docker-compose.yml up -d livecontext bridge`. The app logs
    `[CE-TLS] Imported extra CA ...` on boot and cloud syncs work again.
 
 ### Backend fails to start - Flyway errors
@@ -370,8 +374,8 @@ If you see `relation "..." already exists`, the DB volume has stale data from a 
 
 ```bash
 # Nuclear option: wipe everything and start fresh
-docker compose down -v
-docker compose up -d
+docker compose -f cli/assets/docker-compose.yml down -v
+docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 ### Backend fails - "Could not deserialize" tool registration error
@@ -382,7 +386,7 @@ If you see `Could not deserialize string to java type: java.util.List<java.lang.
 
 If `http://localhost:3000` shows a blank page or times out on Windows with Docker Desktop (WSL2 backend), the prebuilt image already ships with Next.js compression disabled (it conflicts with the WSL2 port proxy), so this should not happen. If it does, restart the frontend:
 ```bash
-docker compose restart frontend
+docker compose -f cli/assets/docker-compose.yml restart frontend
 ```
 
 ### Port conflicts
@@ -392,7 +396,7 @@ If ports 3000 or 8080 are already in use, change `FRONTEND_PORT` freely:
 ```bash
 # Move the app to another port (safe with the prebuilt image)
 FRONTEND_PORT=9870 \
-  docker compose up -d
+  docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 Then open `http://localhost:9870`. Changing `BACKEND_PORT` is also safe with the prebuilt
@@ -401,7 +405,7 @@ browser derives the backend origin from the address you opened the app with. Set
 they stay consistent, no rebuild:
 
 ```bash
-FRONTEND_PORT=9870 BACKEND_PORT=18080 docker compose up -d
+FRONTEND_PORT=9870 BACKEND_PORT=18080 docker compose -f cli/assets/docker-compose.yml up -d
 ```
 
 ### Backend out of memory
@@ -417,7 +421,7 @@ The backend has a 1.5 GB memory limit. If you see OOM errors:
 
 ```bash
 # Quick status
-docker compose ps
+docker compose -f cli/assets/docker-compose.yml ps
 
 # Backend health endpoint
 curl http://localhost:8080/actuator/health

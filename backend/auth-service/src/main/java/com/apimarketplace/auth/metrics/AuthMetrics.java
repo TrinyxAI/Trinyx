@@ -58,7 +58,8 @@ public class AuthMetrics {
         // For each event type we register the cartesian product of meaningful
         // tags. The recorder later increments the same counters in place.
         for (String provider : new String[]{"keycloak", "google", "github", "local"}) {
-            Counter.builder(LOGIN_TOTAL).tags("result","success","provider",provider).register(registry);
+            Counter.builder(LOGIN_TOTAL).tags(
+                    "result", "success", "provider", provider, "reason", "none").register(registry);
             for (String reason : new String[]{"invalid_credentials","rate_limited","disabled","internal_error","invalid_jwt","integrity_violation","provisioning_race","no_jwt","user_not_found"}) {
                 Counter.builder(LOGIN_TOTAL).tags("result","failure","provider",provider,"reason",reason).register(registry);
             }
@@ -82,7 +83,8 @@ public class AuthMetrics {
 
     public void loginSuccess(String provider) {
         Counter.builder(LOGIN_TOTAL)
-                .tags(Tags.of("result", "success", "provider", safe(provider)))
+                .tags(Tags.of(
+                        "result", "success", "provider", safe(provider), "reason", "none"))
                 .description("Total login attempts")
                 .register(registry)
                 .increment();

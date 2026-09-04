@@ -1,7 +1,10 @@
 package com.apimarketplace.agent.service;
 
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -43,8 +46,22 @@ public class AuthPricingSyncClient {
     /** Ceiling of {@code auth.model_pricing.input_rate/output_rate} (NUMERIC(10,6)). */
     private static final BigDecimal MAX_RATE = new BigDecimal("9999.999999");
 
-    public AuthPricingSyncClient(RestTemplate restTemplate,
-                                 @Value("${services.auth-service.url:http://localhost:8083}") String authServiceUrl) {
+    @Autowired
+    public AuthPricingSyncClient(
+            RestTemplateBuilder builder,
+            @Value("${services.auth-service.url:http://localhost:8083}") String authServiceUrl,
+            @Value("${spring.application.name:agent-service}") String serviceId,
+            @Value("${INTERNAL_S2S_SERVICE_SECRET:}") String serviceSecret) {
+        if (serviceSecret == null || serviceSecret.isBlank()) {
+            this.restTemplate = builder.build();
+        } else {
+            this.restTemplate = builder.additionalInterceptors(
+                    new ServiceRequestSigningInterceptor(serviceId, serviceSecret)).build();
+        }
+        this.authServiceUrl = authServiceUrl;
+    }
+
+    AuthPricingSyncClient(RestTemplate restTemplate, String authServiceUrl) {
         this.restTemplate = restTemplate;
         this.authServiceUrl = authServiceUrl;
     }

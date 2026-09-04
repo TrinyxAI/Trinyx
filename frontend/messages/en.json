@@ -165,7 +165,7 @@
       "description": "Get in touch with Trinyx for support, security disclosures, partnership and press inquiries."
     },
     "layout": {
-      "copyright": "© {year} LiveContext. All rights reserved.",
+      "copyright": "© {year} Trinyx. All rights reserved.",
       "privacyPolicy": "Privacy Policy",
       "termsOfService": "Terms of Service",
       "legalNotice": "Legal Notice",
@@ -1536,7 +1536,7 @@
       "title": "{count, plural, one {# media resource to review} other {# media resources to review}}",
       "subtitle": "Heads-up: we detected the following media references in your publication. Confirm you have the right to use each - even internally-hosted files may originate from third-party copyrighted content. This is a reminder, not a block.",
       "sourceHost": "from {host} · {source}",
-      "attestationLabel": "I confirm I have all necessary rights to use these resources in this publication, including for commercial redistribution via the LiveContext marketplace. I understand that I am solely responsible for any infringement claim arising from this content (Terms §8).",
+      "attestationLabel": "I confirm I have all necessary rights to use these resources in this publication, including for commercial redistribution via the Trinyx marketplace. I understand that I am solely responsible for any infringement claim arising from this content (Terms §8).",
       "attestationVerbatim": "Publisher attests under Terms §8(iii)+(iv): holds all necessary rights, including commercial redistribution rights, for every resource listed in this publication.",
       "attestationFooter": "Whether or not you tick the box, your decision is logged (version identifier {version}) so we have an audit trail if a takedown notice ever arrives.",
       "cancel": "Go back",

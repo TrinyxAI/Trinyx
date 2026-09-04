@@ -19,7 +19,7 @@ vi.mock('next-intl/middleware', () => ({
 import { proxy } from '@/proxy';
 
 function request(path: string): NextRequest {
-  return new NextRequest(`https://livecontext.ai${path}`);
+  return new NextRequest(`https://trinyx.fr${path}`);
 }
 
 function redirectLocation(response: Response | undefined): string | null {
@@ -34,19 +34,19 @@ describe('proxy /pricing redirect', () => {
 
   it('cloud: /pricing redirects to the landing pricing section', () => {
     const response = proxy(request('/pricing')) as Response;
-    expect(redirectLocation(response)).toBe('https://livecontext.ai/#pricing');
+    expect(redirectLocation(response)).toBe('https://trinyx.fr/#pricing');
   });
 
   it('cloud: localized /fr/pricing keeps the locale on the landing redirect', () => {
     const response = proxy(request('/fr/pricing')) as Response;
-    expect(redirectLocation(response)).toBe('https://livecontext.ai/fr#pricing');
+    expect(redirectLocation(response)).toBe('https://trinyx.fr/fr#pricing');
   });
 
   it('CE: /pricing redirects to the in-app pricing settings tab', () => {
     editionMock.IS_CE = true;
     const response = proxy(request('/pricing')) as Response;
     expect(redirectLocation(response)).toBe(
-      'https://livecontext.ai/app/settings/pricing',
+      'https://trinyx.fr/app/settings/pricing',
     );
   });
 
@@ -54,14 +54,14 @@ describe('proxy /pricing redirect', () => {
     editionMock.IS_CE = true;
     const response = proxy(request('/fr/pricing')) as Response;
     expect(redirectLocation(response)).toBe(
-      'https://livecontext.ai/fr/app/settings/pricing',
+      'https://trinyx.fr/fr/app/settings/pricing',
     );
   });
 
   it('preserves the query string through the redirect', () => {
     const response = proxy(request('/pricing?plan=team')) as Response;
     expect(redirectLocation(response)).toBe(
-      'https://livecontext.ai/?plan=team#pricing',
+      'https://trinyx.fr/?plan=team#pricing',
     );
   });
 });

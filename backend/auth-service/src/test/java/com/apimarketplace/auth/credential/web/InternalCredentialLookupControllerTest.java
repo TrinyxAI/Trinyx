@@ -5,6 +5,8 @@ import com.apimarketplace.auth.credential.domain.CredentialModels.CredentialEnvi
 import com.apimarketplace.auth.credential.domain.CredentialModels.CredentialStatus;
 import com.apimarketplace.auth.credential.domain.CredentialModels.CredentialType;
 import com.apimarketplace.auth.credential.repository.CredentialRepository;
+import com.apimarketplace.common.web.TenantDelegation;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,54 @@ class InternalCredentialLookupControllerTest {
     @BeforeEach
     void setUp() {
         controller = new InternalCredentialLookupController(credentialRepository);
+    }
+
+    @AfterEach
+    void clearRequestContext() {
+        org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    @DisplayName("Cloud discovery rejects a service-chosen tenant without edge delegation")
+    void cloudDiscoveryRequiresEdgeDelegation() {
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", "d".repeat(32));
+
+        var response = controller.getCredentialIdentities(OTHER_MEMBER, ORG);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        org.mockito.Mockito.verifyNoInteractions(credentialRepository);
+    }
+
+    @Test
+    @DisplayName("Cloud discovery accepts the exact edge-delegated tenant tuple")
+    void cloudDiscoveryAcceptsExactDelegation() {
+        String secret = "d".repeat(32);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", secret);
+        org.springframework.mock.web.MockHttpServletRequest request =
+                new org.springframework.mock.web.MockHttpServletRequest();
+        request.addHeader("X-Principal-ID", "principal");
+        request.addHeader("X-Billing-Subject-ID", "billing");
+        request.addHeader("X-Organization-ID", ORG);
+        request.addHeader("X-Install-ID", "install");
+        request.addHeader(TenantDelegation.HEADER, TenantDelegation.issue(
+                secret, OTHER_MEMBER, "principal", "billing", ORG, "install",
+                java.time.Instant.now()));
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+                new org.springframework.web.context.request.ServletRequestAttributes(request));
+        when(credentialRepository.findByOrganizationIdStrict(ORG, 1, 10_000))
+                .thenReturn(List.of(cred(11L, OTHER_MEMBER, ORG, "twitter",
+                        CredentialStatus.active, true)));
+
+        var response = controller.getCredentialIdentities(OTHER_MEMBER, ORG);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).extracting(
+                InternalCredentialLookupController.CredentialIdentity::id)
+                .containsExactly(11L);
     }
 
     // ===== GET /{id} =====
@@ -149,7 +199,9 @@ class InternalCredentialLookupControllerTest {
 
         ResponseEntity<List<Credential>> resp = controller.getAllCredentials(OTHER_MEMBER, ORG);
 
-        assertThat(resp.getBody()).containsExactly(a, b);
+        assertThat(resp.getBody()).extracting(Credential::id).containsExactly(1L, 2L);
+        assertThat(resp.getBody()).allSatisfy(item ->
+                assertThat(item.credentialData()).isEmpty());
         verify(credentialRepository, never()).findAllByTenantId(OTHER_MEMBER);
     }
 
@@ -161,7 +213,8 @@ class InternalCredentialLookupControllerTest {
 
         ResponseEntity<List<Credential>> resp = controller.getAllCredentials(OTHER_MEMBER, null);
 
-        assertThat(resp.getBody()).containsExactly(a);
+        assertThat(resp.getBody()).extracting(Credential::id).containsExactly(1L);
+        assertThat(resp.getBody().getFirst().credentialData()).isEmpty();
         verify(credentialRepository, never()).findByOrganizationIdStrict(ORG, 1, 10_000);
     }
 

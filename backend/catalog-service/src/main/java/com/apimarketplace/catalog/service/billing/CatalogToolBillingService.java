@@ -552,6 +552,34 @@ public class CatalogToolBillingService {
         }
     }
 
+    /**
+     * True only for the Trinyx external paid authority. Kept at the billing
+     * boundary so the catalog execution engine remains unchanged in native mode.
+     */
+    public boolean usesExternalAuthority() {
+        return creditClient.usesExternalAuthority();
+    }
+
+    /**
+     * Persist DISPATCHING before a platform provider call. False means the
+     * caller must fail before dispatch and let its existing finally block release.
+     */
+    public boolean markProviderDispatching(String sourceId) {
+        return sourceId == null
+                || creditClient.markExternalScopeProviderDispatching(sourceId);
+    }
+
+    /**
+     * Provider delivery is ambiguous after the external authority acknowledged
+     * DISPATCHING. Persist OUTCOME_UNKNOWN and retain the hold; callers must
+     * never replace this with a release.
+     */
+    public void recordProviderOutcomeUnknown(
+            String sourceId, String provider, String model, String reason) {
+        if (sourceId == null) return;
+        creditClient.recordExternalScopeOutcomeUnknown(sourceId, provider, model, reason);
+    }
+
     /** Integration a caller's own credential for this endpoint would be filed under. */
     private String integrationOf(BillingScope scope) {
         String toolSlug = scope.toolSlug();

@@ -31,7 +31,7 @@ describe('robots - cloud edition', () => {
     const disallow = rule?.disallow as string[];
 
     expect(rule?.allow).toBe('/');
-    expect(result.sitemap).toBe('https://livecontext.ai/sitemap.xml');
+    expect(result.sitemap).toBe('https://trinyx.fr/sitemap.xml');
     // Nothing may accidentally shadow the SEO pages.
     for (const publicPath of ['/compare', '/about', '/changelog', '/llms.txt']) {
       expect(disallow.some((d) => publicPath.startsWith(d))).toBe(false);

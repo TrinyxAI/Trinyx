@@ -53,13 +53,13 @@ import java.util.UUID;
  *       publisher's decisions to the audit log. Append-only; one row per
  *       flagged URL. Required for the LCEN / DSA safe-harbor evidence
  *       trail (the {@code KEPT_ATTESTED} branch is what stands between
- *       LiveContext and a takedown lawsuit when a publisher swore they
+ *       Trinyx and a takedown lawsuit when a publisher swore they
  *       had rights).</li>
  * </ol>
  *
  * <p>This controller does NOT modify publications and does NOT block any
  * publish - that is by design per the v3 audit on Wave 2a ("never
- * auto-block" - auto-blocking converts LiveContext from "hébergeur" to
+ * auto-block" - auto-blocking converts Trinyx from "hébergeur" to
  * "éditeur" and forfeits the LCEN safe harbor).
  */
 @RestController

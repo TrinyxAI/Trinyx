@@ -1,10 +1,10 @@
 {
-  "name": "livecontext",
+  "name": "trinyx",
   "version": "0.2.13",
-  "description": "One-command launcher for LiveContext Community Edition. Runs the self-hosted Docker stack (workflows, AI agents, apps) with a single npm command.",
+  "description": "One-command launcher for Trinyx Community Edition. Runs the self-hosted Docker stack (workflows, AI agents, apps) with a single npm command.",
   "type": "module",
   "bin": {
-    "livecontext": "bin/livecontext.mjs"
+    "trinyx": "bin/trinyx.mjs"
   },
   "files": [
     "bin",
@@ -14,7 +14,7 @@
     "node": ">=18"
   },
   "keywords": [
-    "livecontext",
+    "trinyx",
     "self-hosted",
     "ai-automation",
     "workflow-engine",
@@ -22,9 +22,9 @@
     "n8n-alternative"
   ],
   "license": "AGPL-3.0-only",
-  "homepage": "https://github.com/livecontext-ai/livecontext-ce",
+  "homepage": "https://github.com/TrinyxAI/Trinyx",
   "repository": {
     "type": "git",
-    "url": "https://github.com/livecontext-ai/livecontext-ce.git"
+    "url": "https://github.com/TrinyxAI/Trinyx.git"
   }
 }

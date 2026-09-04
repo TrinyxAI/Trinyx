@@ -26,8 +26,9 @@ import java.util.Map;
  * write runs in storage-service's own request transaction (commits) and {@code QuotaService}'s
  * {@code @CacheEvict} clears the local cache in the SAME JVM that serves the read.
  *
- * <p>No gateway auth (internal endpoint, bypasses the gateway filter on the private VLAN); disabled
- * in monolith mode (auth calls {@code QuotaService} in-process there - same JVM, no HTTP needed).
+ * <p>The shared Gateway filter authenticates auth-service and authorizes only the exact quota
+ * method/path templates before this controller runs. The endpoint is disabled in monolith mode
+ * because auth calls {@code QuotaService} in-process there (same JVM, no HTTP needed).
  */
 @RestController
 @RequestMapping("/api/internal/storage/quota")

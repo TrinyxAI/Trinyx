@@ -12,7 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '../../../messages/en.json';
 
 // CE edition: the modal renders (Cloud build returns null).
-vi.mock('@/lib/edition', () => ({ IS_CE: true, CLOUD_WEB_BASE_URL: 'https://livecontext.ai' }));
+vi.mock('@/lib/edition', () => ({ IS_CE: true, CLOUD_WEB_BASE_URL: 'https://app.trinyx.fr' }));
 
 import CeCloudCreditModal, { showCeCloudCreditModal } from '../CeCloudCreditModal';
 
@@ -34,7 +34,7 @@ describe('CeCloudCreditModal (CE edition)', () => {
     fireEvent(window, new CustomEvent('ceCloudCredit'));
 
     expect(screen.getByText('Cloud credits exhausted')).toBeTruthy();
-    expect(screen.getByText(/linked LiveContext Cloud account is out of credits/i)).toBeTruthy();
+    expect(screen.getByText(/linked Trinyx Cloud account is out of credits/i)).toBeTruthy();
   });
 
   it('opens the linked cloud account billing page in a new tab from the CTA', () => {
@@ -45,7 +45,7 @@ describe('CeCloudCreditModal (CE edition)', () => {
     fireEvent.click(screen.getByRole('button', { name: /open cloud billing/i }));
 
     expect(openSpy).toHaveBeenCalledWith(
-      'https://livecontext.ai/en/app/settings/pricing',
+      'https://app.trinyx.fr/en/app/settings/pricing',
       '_blank',
       'noopener,noreferrer',
     );

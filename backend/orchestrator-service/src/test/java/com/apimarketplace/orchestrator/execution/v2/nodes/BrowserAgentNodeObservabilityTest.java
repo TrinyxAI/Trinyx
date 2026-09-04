@@ -226,6 +226,31 @@ class BrowserAgentNodeObservabilityTest {
     }
 
     @Test
+    @DisplayName("workflow observability inherits external billing ownership from module metadata")
+    void propagatesExternalBillingOwnership() {
+        BrowserAgentNode node = new BrowserAgentNode(
+                "browser:external",
+                Map.of("task", "browse", "llm",
+                        Map.of("provider", "openai", "model", "gpt-4.1")));
+        node.acceptServices(registryWith(browserAgentModule, agentClient));
+        Map<String, Object> output = Map.of(
+                "stop_reason", "COMPLETED",
+                "steps", List.of(),
+                "cost", Map.of("tokens_in", 20, "tokens_out", 10, "llm_calls", 1));
+        when(browserAgentModule.execute(eq("agent_browse"), anyMap(), anyString(), any()))
+                .thenReturn(Optional.of(new ToolExecutionResult(
+                        true, output, null, null,
+                        Map.of("externalBillingManaged", true))));
+
+        node.execute(context);
+
+        ArgumentCaptor<AgentObservabilityRequest> captor =
+                ArgumentCaptor.forClass(AgentObservabilityRequest.class);
+        verify(agentClient).recordObservability(captor.capture());
+        assertThat(captor.getValue().isCreditExternallyManaged()).isTrue();
+    }
+
+    @Test
     @DisplayName("recordObservability still fires on failure path with mapped stop reason")
     void recordsObservabilityOnFailureWithMappedStopReason() {
         BrowserAgentNode node = new BrowserAgentNode("browser:test", Map.of("task", "x"));

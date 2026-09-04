@@ -36,6 +36,11 @@ public class RemoteMarketplaceService {
     private final RestTemplate restTemplate;
     private final SnapshotCloneService snapshotCloneService;
     private final PublicationReceiptRepository receiptRepository;
+    /**
+     * Optional: public/free remote Marketplace operations do not need a linked
+     * Trinyx Cloud account. Paid acquisition checks this dependency at the exact
+     * acquire-with-auth boundary.
+     */
     private final CloudLinkService cloudLinkService;
     private final ObjectMapper objectMapper;
     private final AuthClient authClient;
@@ -382,6 +387,11 @@ public class RemoteMarketplaceService {
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> acquireWithAuth(UUID publicationId, String tenantId) {
+        if (cloudLinkService == null) {
+            throw new CloudLinkService.CloudAccountNotLinkedException(
+                    "Connect your Trinyx Cloud account to acquire this paid publication.");
+        }
+
         // Get tenant ID as Long for CloudLinkService
         Long tenantIdLong;
         try {
@@ -424,9 +434,9 @@ public class RemoteMarketplaceService {
     }
 
     // =====================================================================
-    // Cloud-parity read proxies (linked CE marketplace UI)
+    // Cloud-parity read proxies (remote CE marketplace UI)
     //
-    // A cloud-linked CE renders the SAME marketplace UI as cloud. The cloud's
+    // A remote CE renders the SAME marketplace UI as cloud. The cloud's
     // listing/search/highlights read endpoints are public (anonymous), but the
     // CE frontend must not hardcode the cloud origin - `marketplace.cloud-api-url`
     // is the single source of the cloud URL - so the CE backend proxies these
@@ -444,7 +454,7 @@ public class RemoteMarketplaceService {
         try {
             return getCloudJson(cloudUri("/publications/marketplace", builder -> {
                 builder.queryParam("page", page).queryParam("size", size);
-                // The refinements are forwarded, not re-implemented: a linked CE
+                // The refinements are forwarded, not re-implemented: a remote CE
                 // renders the cloud's catalogue, so filtering the page it already
                 // received would reproduce the very bug this fix removes (a filter
                 // over an arbitrary window instead of over the catalogue).
@@ -495,14 +505,14 @@ public class RemoteMarketplaceService {
     }
 
     // =====================================================================
-    // Cloud-parity per-publication read proxies (linked CE marketplace UI)
+    // Cloud-parity per-publication read proxies (remote CE marketplace UI)
     //
     // The listing/search/highlights proxies above only populate the marketplace
     // GRID. Each rendered card (and the detail page reached by clicking one)
     // then reads PER-PUBLICATION public resources - the publication detail, the
     // landing-snapshot / showcase-render thumbnail, the agent fleet snapshot,
     // and the showcase run-state / aggregated-steps / per-epoch state - plus the
-    // publisher's avatar. On a cloud-linked CE these all carry CLOUD ids that do
+    // publisher's avatar. On a remote CE these all carry CLOUD ids that do
     // not exist in the local DB, so hitting the local `/publications/by-id/...`
     // endpoints 404s (broken thumbnails + a 404 detail page). These proxies
     // forward each read to the cloud public API via `marketplace.cloud-api-url`,
@@ -581,7 +591,7 @@ public class RemoteMarketplaceService {
 
     /**
      * Proxy the cloud's PUBLIC user profile ({@code GET /users/public/by-id/{userId}})
-     * so a cloud-linked CE can resolve a cloud publisher/reviewer's {@code @handle}
+     * so a remote CE can resolve a cloud publisher/reviewer's {@code @handle}
      * from the cloud user id - which is absent from the local auth DB, so the local
      * by-id read 404s. Used to deep-link "View profile" on a cloud-sourced card to
      * the cloud profile page. The JSON body is forwarded verbatim and the cloud's

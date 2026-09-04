@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
+import com.apimarketplace.common.web.StorageOperationCapability;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
@@ -25,15 +27,40 @@ public class StorageClient {
 
     private final RestTemplate restTemplate;
     private final String baseUrl;
+    private final String workspaceErasureSecret;
 
     public StorageClient(String storageServiceUrl) {
+        this(new RestTemplate(), storageServiceUrl);
+    }
+
+    public StorageClient(String storageServiceUrl, String serviceSecret, String serviceId) {
+        this(storageServiceUrl, serviceSecret, serviceId, "");
+    }
+
+    public StorageClient(
+            String storageServiceUrl, String serviceSecret, String serviceId,
+            String workspaceErasureSecret) {
         this.restTemplate = new RestTemplate();
         this.baseUrl = storageServiceUrl;
+        this.workspaceErasureSecret =
+                workspaceErasureSecret == null ? "" : workspaceErasureSecret;
+        if (serviceSecret != null && !serviceSecret.isBlank()) {
+            this.restTemplate.getInterceptors().add(
+                    new ServiceRequestSigningInterceptor(serviceId, serviceSecret));
+        }
     }
 
     public StorageClient(RestTemplate restTemplate, String storageServiceUrl) {
+        this(restTemplate, storageServiceUrl, "");
+    }
+
+    StorageClient(
+            RestTemplate restTemplate, String storageServiceUrl,
+            String workspaceErasureSecret) {
         this.restTemplate = restTemplate;
         this.baseUrl = storageServiceUrl;
+        this.workspaceErasureSecret =
+                workspaceErasureSecret == null ? "" : workspaceErasureSecret;
     }
 
     /**
@@ -331,6 +358,40 @@ public class StorageClient {
     }
 
     /**
+     * Delete one object claimed by the durable workspace-erasure outbox.
+     *
+     * <p>This deliberately does not depend on a servlet request or a two-minute
+     * browser delegation. Auth-service regenerates a short resource-scoped
+     * capability for each retry; storage verifies the exact outbox id,
+     * organization, tenant and key on its dedicated route.
+     */
+    public boolean deleteWorkspaceErasure(
+            java.util.UUID erasureId, String organizationId,
+            String tenantId, String key) {
+        URI url = UriComponentsBuilder.fromHttpUrl(baseUrl)
+            .path("/api/internal/storage/workspace-erasure")
+            .queryParam("erasureId", erasureId)
+            .queryParam("key", key)
+            .encode().build().toUri();
+
+        try {
+            HttpHeaders headers = buildHeaders(tenantId, organizationId);
+            headers.set(StorageOperationCapability.HEADER,
+                    StorageOperationCapability.issueWorkspaceErasure(
+                            workspaceErasureSecret, erasureId, organizationId,
+                            tenantId, key, java.time.Instant.now()));
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.DELETE, new HttpEntity<Void>(headers), Map.class);
+            return response.getBody() != null
+                    && Boolean.TRUE.equals(response.getBody().get("deleted"));
+        } catch (Exception e) {
+            log.error("Failed durable workspace erasure: id={}, key={}, error={}",
+                    erasureId, key, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Delete all files for a specific workflow run.
      */
     public int deleteRunFiles(String tenantId, String workflowId, String runId) {
@@ -343,8 +404,11 @@ public class StorageClient {
      * is empty, so organizationId must be passed explicitly.
      */
     public int deleteRunFiles(String tenantId, String workflowId, String runId, String organizationId) {
+        boolean asynchronousJob = organizationId != null && !organizationId.isBlank();
         String url = UriComponentsBuilder.fromHttpUrl(baseUrl)
-            .path("/api/internal/storage/delete-run-files")
+            .path(asynchronousJob
+                    ? "/api/internal/storage/delete-run-files-job"
+                    : "/api/internal/storage/delete-run-files")
             .queryParam("workflowId", workflowId)
             .queryParam("runId", runId)
             .toUriString();

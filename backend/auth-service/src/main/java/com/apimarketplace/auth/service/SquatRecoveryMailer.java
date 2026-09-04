@@ -39,8 +39,8 @@ public class SquatRecoveryMailer {
 
     public SquatRecoveryMailer(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:noreply@livecontext.ai}") String mailFrom,
-            @Value("${app.mail.from-name:LiveContext}") String mailFromName,
+            @Value("${app.mail.from:noreply@trinyx.fr}") String mailFrom,
+            @Value("${app.mail.from-name:Trinyx}") String mailFromName,
             @Value("${oauth2.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.mailSender = mailSender;
         this.mailFrom = mailFrom;
@@ -60,15 +60,15 @@ public class SquatRecoveryMailer {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(mailFrom, mailFromName);
             helper.setTo(victimEmail);
-            helper.setSubject("Action needed: someone tried to link your LiveContext install");
+            helper.setSubject("Action needed: someone tried to link your Trinyx install");
 
             String plain = "Hi,\n\n"
-                    + "Someone tried to register a CE install that's already linked to your LiveContext account.\n"
+                    + "Someone tried to register a CE install that's already linked to your Trinyx account.\n"
                     + "If this was you (you reinstalled, switched machines, or used a recovery image), no action is needed.\n\n"
                     + "If this was NOT you, click the link below to reset the link and force the other party out:\n"
                     + recoveryUrl + "\n\n"
                     + "The link expires in 60 minutes and can be used once.\n\n"
-                    + "- LiveContext\n";
+                    + "- Trinyx\n";
 
             String html = buildHtml(recoveryUrl);
             helper.setText(plain, html);
@@ -99,7 +99,7 @@ public class SquatRecoveryMailer {
         return "<!DOCTYPE html><html><body style=\"font-family:sans-serif;line-height:1.5\">"
                 + "<p>Hi,</p>"
                 + "<p>Someone tried to register a CE install that's already linked to your "
-                + "LiveContext account.</p>"
+                + "Trinyx account.</p>"
                 + "<p>If this was you (you reinstalled, switched machines, or used a recovery image), "
                 + "no action is needed.</p>"
                 + "<p>If this was <strong>not</strong> you, click the button below to reset the link "
@@ -107,7 +107,7 @@ public class SquatRecoveryMailer {
                 + "<p style=\"margin:24px 0\"><a href=\"" + recoveryUrl + "\" "
                 + "style=\"background:#2563eb;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px\">"
                 + "Reset cloud link</a></p>"
-                + "<p style=\"color:#666;font-size:12px\">- LiveContext</p>"
+                + "<p style=\"color:#666;font-size:12px\">- Trinyx</p>"
                 + "</body></html>";
     }
 }

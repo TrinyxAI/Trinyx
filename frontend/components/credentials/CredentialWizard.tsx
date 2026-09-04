@@ -257,7 +257,7 @@ function unwrapJsonbEnvelope(raw: unknown): unknown {
  * <p>The resolver is decoupled from {@code hasPlatformCredentials}: the URLs are
  * provider-fixed (Gmail = Google's endpoints regardless of who owns the OAuth
  * client), so they should always pre-fill when the catalog has them - even when
- * LiveContext has no global platform OAuth client for the integration and the
+ * Trinyx has no global platform OAuth client for the integration and the
  * user is registering a tenant-owned BYOK from scratch.
  */
 export function resolveOAuth2Defaults(template: CredentialTemplate | null | undefined): ResolvedOAuth2Defaults {
@@ -308,7 +308,7 @@ export function resolveOAuth2Defaults(template: CredentialTemplate | null | unde
 /**
  * Returns the byokOnlyScopes declared on a template, space-joined.
  * Used by the BYOK form to pre-fill the scope input for integrations whose
- * restricted scopes never appear on LiveContext's verified consent screen
+ * restricted scopes never appear on Trinyx's verified consent screen
  * (e.g. Classroom, Gmail restricted). Empty string when none declared.
  */
 function resolveByokOnlyScopes(template: CredentialTemplate | null | undefined): string {
@@ -587,7 +587,7 @@ export function CredentialWizard({
   // V166 BYOK: hide authUrl/tokenUrl/scopes whenever provider-canonical defaults
   // are available - independent of hasPlatformCredentials. The previous gate
   // (`hasPlatformCredentials === true`) silently dropped auto-fill when:
-  //   - LiveContext had no global OAuth client for the integration, OR
+  //   - Trinyx had no global OAuth client for the integration, OR
   //   - the user just deleted their tenant-owned BYOK row (cascade-revoke
   //     flow) and was the only platform_credential holder for it.
   // In both cases the URLs were still known from the catalog metadata, so
@@ -843,7 +843,7 @@ export function CredentialWizard({
       // V166 BYOK: when caller requested Advanced mode, jump straight to the
       // BYOK form regardless of whether platform creds exist. The user explicitly
       // wants to bring their own client_id/secret (e.g. for restricted scopes
-      // not declared on the LiveContext platform consent screen).
+      // not declared on the Trinyx platform consent screen).
       // Check BOTH `activeMode` AND `initialMode`: at dialog-open time the
       // `[open]` effect's setActiveMode(initialMode) has not applied yet when this
       // async callback's closure was captured, so `activeMode` can still read
@@ -1856,7 +1856,7 @@ export function CredentialWizard({
 
             {/* Fully-BYOK integrations (Google Classroom, …): platform-shared
                 OAuth client requests zero scopes for this provider - by design
-                to keep LiveContext's verified consent screen narrow. Tell the
+                to keep Trinyx's verified consent screen narrow. Tell the
                 user upfront that BYOK is the only path, with the catalog's
                 scopeNotes as the explanation. */}
             {fullyByok && (
@@ -1885,7 +1885,7 @@ export function CredentialWizard({
                 process.env.NEXT_PUBLIC_OAUTH2_CALLBACK_URL ||
                 (typeof window !== 'undefined'
                   ? `${window.location.origin}/api/credentials/oauth2/callback`
-                  : 'https://livecontext.ai/api/credentials/oauth2/callback');
+                  : 'https://app.trinyx.fr/api/credentials/oauth2/callback');
               // Catalog-declared scopes for the "Configure scopes" step. Without this,
               // a BYOK admin reading "Pick the scopes your workflow uses" has no way to
               // know WHICH scopes to enable in their provider console - they would have

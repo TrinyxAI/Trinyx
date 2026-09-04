@@ -15,7 +15,7 @@ describe('AboutInformationContent public links', () => {
       LinkedIn: 'https://www.linkedin.com/in/trinyx-ai-5bb4a5430/',
       X: 'https://x.com/Trinyxai',
       Instagram: 'https://www.instagram.com/trinyx.ai/',
-      GitHub: 'https://github.com/eddinerabii/Trinyx',
+      GitHub: 'https://github.com/TrinyxAI/Trinyx',
       TikTok: 'https://www.tiktok.com/@trinyx.ai',
       Discord: 'https://discord.gg/EykNSkEvM6',
     };
@@ -33,8 +33,10 @@ describe('AboutInformationContent public links', () => {
 
     expect(screen.getByRole('link', { name: /Email/i })).toHaveAttribute(
       'href',
-      'mailto:trinyx12@gmail.com',
+      'mailto:contact@trinyx.fr',
     );
+    const retiredAddress = ['trinyx12', 'gmail.com'].join('@');
+    expect(container.innerHTML).not.toContain(retiredAddress);
     expect(container.innerHTML).not.toMatch(/livecontext/i);
   });
 });

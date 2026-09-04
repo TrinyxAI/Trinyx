@@ -111,7 +111,7 @@ public class ModelConfigOverrideEntity {
     private String source = "manual";
 
     /**
-     * How the provider is consumed: cloud (LiveContext proxy), byok
+     * How the provider is consumed: cloud (Trinyx proxy), byok
      * (admin API key), bridge (CLI). Orthogonal to {@code source}, which
      * tracks catalog origin. Written by importers / factory registration;
      * admins cannot edit it from the UI. See V117.

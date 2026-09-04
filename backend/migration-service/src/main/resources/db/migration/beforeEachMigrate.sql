@@ -1,7 +1,9 @@
 -- Flyway SQL callback: reset schema resolution before every migration.
 --
--- Some historical migrations set search_path to a service schema and do not
--- reset it. Flyway reuses connections, so the next migration can otherwise
--- resolve unqualified orchestrator tables against the wrong schema during a
--- fresh database replay.
+-- Historical migrations can leave session-scoped search_path and timeout GUCs behind.
+-- Flyway reuses connections, so the next migration can otherwise resolve unqualified tables
+-- against the wrong schema or inherit a lock/statement timeout that is incompatible with its
+-- own operation (notably CREATE INDEX CONCURRENTLY).
+RESET lock_timeout;
+RESET statement_timeout;
 SET search_path TO orchestrator, public;

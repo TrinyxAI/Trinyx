@@ -301,7 +301,7 @@ public class PlatformCredentialsController {
      *
      * <p>User-facing. Returns only tenant-owned rows - platform-wide
      * ({@code tenant_id IS NULL}) rows are intentionally excluded so a regular
-     * user never sees the global LiveContext OAuth apps. Each row is mapped
+     * user never sees the global Trinyx OAuth apps. Each row is mapped
      * through {@link MyOAuthAppDto#from} which uses an explicit allowlist of
      * fields ({@code MyOAuthAppDtoLeakTest} is the regression guard).
      *

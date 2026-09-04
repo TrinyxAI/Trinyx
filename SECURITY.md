@@ -2,7 +2,8 @@
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities **privately** to **security@livecontext.ai**.
+Please report suspected vulnerabilities **privately** through the
+[Trinyx security contact form](https://trinyx.fr/contact?category=security).
 Do not open a public GitHub issue for security reports.
 
 Include what you can:
@@ -16,8 +17,9 @@ progress, and credit you in the release notes if you wish.
 
 ## Scope
 
-This policy covers the code in this repository (the Community Edition).
-For the hosted service at livecontext.ai, use the same contact address.
+This policy covers the Trinyx Community Edition code in this repository and
+the hosted Trinyx services on `trinyx.fr` and its subdomains. Use the same
+private security contact form for either deployment model.
 
 ## Supported versions
 

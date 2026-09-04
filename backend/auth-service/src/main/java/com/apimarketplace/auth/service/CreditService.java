@@ -41,6 +41,44 @@ public class CreditService {
     public boolean isUnlimited() {
         return unlimited;
     }
+
+    /**
+     * Authoritative fixed price used when an external Cloud runtime reserves a
+     * web-search operation. The Cloud sends only an operation intent; it must
+     * never become the source of truth for this configurable price.
+     */
+    public BigDecimal getWebSearchCreditsPerSearch() {
+        return webSearchCreditsPerSearch;
+    }
+
+    /**
+     * Recalculate external LLM settlement from authoritative paid-monolith pricing.
+     * The Cloud reports provider usage counters; it never chooses the monetary debit.
+     */
+    public BigDecimal calculateExternalLlmCredits(
+            String provider, String model, Integer promptTokens, Integer completionTokens,
+            Integer cacheCreationTokens, Integer cacheReadTokens,
+            Integer cachedTokens, Integer reasoningTokens) {
+        if (provider == null || provider.isBlank() || model == null || model.isBlank()
+                || !pricingService.hasPricing(provider, model)) {
+            throw new IllegalArgumentException("MODEL_PRICING_UNKNOWN");
+        }
+        int prompt = nonNegative(promptTokens, "promptTokens");
+        int completion = nonNegative(completionTokens, "completionTokens");
+        return pricingService.calculateCost(provider, model, new LlmTokenBreakdown(
+                prompt, completion,
+                nonNegative(cacheCreationTokens, "cacheCreationTokens"),
+                nonNegative(cacheReadTokens, "cacheReadTokens"),
+                nonNegative(cachedTokens, "cachedTokens"),
+                nonNegative(reasoningTokens, "reasoningTokens")));
+    }
+
+    private static int nonNegative(Integer value, String field) {
+        if (value == null) return 0;
+        if (value < 0) throw new IllegalArgumentException(field + " must be non-negative");
+        return value;
+    }
+
     private final boolean markupEnabled;
     private final boolean markupShadow;
     private final BigDecimal webSearchCreditsPerSearch;
@@ -166,7 +204,11 @@ public class CreditService {
         try {
             Long payer = planResolutionService.resolvePayerUserId(executorUserId);
             return payer != null ? payer : executorUserId;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
+            // Preserve the historical native billing contract. External paid authority
+            // never calls this resolver: it supplies a separately proven exact payer to
+            // tryReserveMarkupForExactPayer and therefore remains fail-closed.
+            log.warn("Payer resolution failed for executor {}; retaining self-pay", executorUserId, e);
             return executorUserId;
         }
     }
@@ -1564,23 +1606,38 @@ public class CreditService {
                                                   int ttlMinutes,
                                                   String scopeKind, String scopeId,
                                                   boolean hasExistingPin) {
+        Long payerUserId = resolvePayer(executorUserId);
+        return tryReserveMarkupForExactPayer(executorUserId, payerUserId, sourceId,
+                provider, model, projected, pinId, ttlMinutes, scopeKind, scopeId,
+                hasExistingPin);
+    }
+
+    /**
+     * External-authority reservation with a payer already proven against the
+     * signed billing subject. This method never resolves or substitutes a wallet.
+     */
+    @Transactional(noRollbackFor = DataIntegrityViolationException.class)
+    public CreditConsumeResult tryReserveMarkupForExactPayer(
+            Long executorUserId, Long payerUserId, String sourceId,
+            String provider, String model, BigDecimal projected, Long pinId,
+            int ttlMinutes, String scopeKind, String scopeId,
+            boolean hasExistingPin) {
+        if (executorUserId == null || payerUserId == null) {
+            throw new IllegalStateException("Authoritative executor and payer are required");
+        }
         if (!markupEnabled) {
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(executorUserId));
+            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(payerUserId));
         }
         if (projected == null || projected.signum() <= 0) {
-            return CreditConsumeResult.success(BigDecimal.ZERO, getBalance(executorUserId));
+            return CreditConsumeResult.success(BigDecimal.ZERO, getBalanceForSelf(payerUserId));
         }
         if (ttlMinutes <= 0 || ttlMinutes > 1440) {
             log.warn("Invalid ttlMinutes={} for reserve sourceId={} - clamping to 15", ttlMinutes, sourceId);
             ttlMinutes = 15;
         }
 
-        // Owner-pays: redirect to the workspace owner's wallet before any
-        // subscription lock / debit / ledger write. Reserve + commit + release
-        // all key off the row's user_id (= payer), so resolving once at entry
-        // makes the entire lifecycle consistent. The cap-enforcement sum query
-        // attributes consumption to executor_user_id (= executorUserId).
-        Long payerUserId = resolvePayer(executorUserId);
+        // payerUserId is authoritative and was resolved by the caller. Never
+        // substitute executorUserId here: external billing must fail closed.
 
         // Idempotency fast-path
         if (sourceId != null && ledgerRepository.existsBySourceId(sourceId)) {
@@ -1692,6 +1749,24 @@ public class CreditService {
         return CreditConsumeResult.success(projected, newBalance);
     }
 
+    /**
+     * Proves that an existing reservation is still owned by the authoritative
+     * payer captured by the external billing operation.
+     */
+    @Transactional(readOnly = true)
+    public void requireReservationPayer(String sourceId, Long expectedPayerUserId) {
+        if (sourceId == null || expectedPayerUserId == null) {
+            throw new IllegalStateException("Reservation source and payer are required");
+        }
+        CreditLedgerEntry reservation = ledgerRepository.findFirstBySourceId(sourceId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Authoritative reservation is missing: " + sourceId));
+        if (!expectedPayerUserId.equals(reservation.getUserId())) {
+            throw new IllegalStateException(
+                    "Authoritative reservation payer mismatch for " + sourceId);
+        }
+    }
+
     private CreditLedgerEntry buildReserveEntry(Long payerUserId, Long executorUserId,
                                                  String sourceId, String provider, String model,
                                                  BigDecimal projected, BigDecimal balanceAfter,
@@ -1801,7 +1876,17 @@ public class CreditService {
                 }
             }
             newBalance = unlimited ? UNLIMITED_BALANCE : sub.getTotalBalance();
-            outcome = CommitOutcome.COMMITTED;
+            boolean paygOwed = !unlimited && !subEligible
+                    && sub.getPaygRemainingCredits().signum() < 0;
+            if (paygOwed) {
+                // FREE monthly credits cannot repay non-workflow PAYG debt.
+                // The actual provider cost was fully accounted, but the account
+                // must be gated exactly like deductCredits' post-flight path.
+                sub.setDelinquent(true);
+                outcome = CommitOutcome.COMMITTED_PARTIAL;
+            } else {
+                outcome = CommitOutcome.COMMITTED;
+            }
         } else if (maxChargeable.signum() >= 0) {
             // partial-charge: drive total balance to 0 by refunding (or
             // debiting) the gap.
@@ -1927,6 +2012,58 @@ public class CreditService {
         }
         ledgerRepository.save(row);
         return ReleaseOutcome.RELEASED;
+    }
+
+    /**
+     * Cloud-authority settlement variant. A provider result may arrive after the
+     * ten-minute external reservation expired and was released. Within the
+     * separately enforced late-settlement window, the real cost is still written
+     * exactly once and may put the authoritative wallet into delinquency.
+     */
+    @Transactional
+    public CommitOutcome settleExternalReservation(String sourceId, BigDecimal actualAmount,
+                                                    String provider, String model,
+                                                    boolean allowLateSettlement) {
+        Optional<CreditLedgerEntry> rowOpt = findLedgerBySourceIdForLifecycleUpdate(sourceId);
+        if (rowOpt.isEmpty()) return CommitOutcome.RESERVATION_EXPIRED;
+        CreditLedgerEntry row = rowOpt.get();
+        String state = row.getSourceType();
+        if ("PLATFORM_MARKUP".equals(state)) return CommitOutcome.ALREADY_COMMITTED;
+        if ("PLATFORM_MARKUP_RESERVE".equals(state)) {
+            return commitReservation(sourceId, actualAmount, provider, model);
+        }
+        if (!allowLateSettlement || state == null
+                || !state.startsWith("PLATFORM_MARKUP_RELEASED")) {
+            return CommitOutcome.RESERVATION_EXPIRED;
+        }
+        if (actualAmount == null || actualAmount.signum() < 0) {
+            return CommitOutcome.RESERVATION_EXPIRED;
+        }
+
+        Subscription sub = findSubscriptionForUpdate(row.getUserId());
+        if (sub == null) return CommitOutcome.RESERVATION_EXPIRED;
+        boolean settlementDelinquent = false;
+        if (!unlimited && actualAmount.signum() > 0) {
+            boolean subEligible = subBucketEligible(sub, "PLATFORM_MARKUP");
+            applyDebit(sub, actualAmount, subEligible);
+            boolean paygOwed = !subEligible
+                    && sub.getPaygRemainingCredits().signum() < 0;
+            settlementDelinquent = sub.getTotalBalance().signum() < 0 || paygOwed;
+            if (settlementDelinquent) {
+                sub.setDelinquent(true);
+            }
+            subscriptionRepository.save(sub);
+        }
+        row.setSourceType("PLATFORM_MARKUP");
+        row.setAmount(actualAmount.negate());
+        row.setBalanceAfter(unlimited ? UNLIMITED_BALANCE : sub.getTotalBalance());
+        row.setProvider(provider);
+        row.setModel(model);
+        row.setExpiresAt(null);
+        row.setDescription(truncateDescription("Late Cloud settlement: " + provider + "/" + model));
+        ledgerRepository.save(row);
+        return settlementDelinquent
+                ? CommitOutcome.COMMITTED_PARTIAL : CommitOutcome.COMMITTED;
     }
 
     private Optional<CreditLedgerEntry> findLedgerBySourceIdForLifecycleUpdate(String sourceId) {

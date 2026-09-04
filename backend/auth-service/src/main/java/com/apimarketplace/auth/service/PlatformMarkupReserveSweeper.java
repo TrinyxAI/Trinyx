@@ -61,6 +61,7 @@ public class PlatformMarkupReserveSweeper {
 
     /** Cap per scheduled run so a backlog doesn't monopolize the auth-service event thread. */
     private static final int BATCH_LIMIT = 500;
+    private static final String CLOUD_RESERVATION_PREFIX = "cloud-reservation:";
 
     private final CreditLedgerRepository ledgerRepository;
     private final CreditService creditService;
@@ -110,6 +111,13 @@ public class PlatformMarkupReserveSweeper {
         int alreadyDone = 0;
         int failures = 0;
         for (CreditLedgerEntry row : expired) {
+            if (row.getSourceId() != null
+                    && row.getSourceId().startsWith(CLOUD_RESERVATION_PREFIX)) {
+                // Last-line fail-closed guard in addition to the repository predicate:
+                // a future query regression must not release an ambiguous Cloud hold.
+                log.error("Generic reserve sweeper refused Cloud-owned sourceId={}", row.getSourceId());
+                continue;
+            }
             try {
                 CreditService.ReleaseOutcome outcome = creditService.releaseReservation(
                         row.getSourceId(),

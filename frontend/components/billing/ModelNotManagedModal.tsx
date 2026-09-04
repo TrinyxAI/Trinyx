@@ -21,7 +21,7 @@ export function showModelNotManagedModal() {
 
 /**
  * CE-only modal shown when a chat / agent / workflow LLM call relayed to the linked
- * LiveContext Cloud account is refused for MODEL_NOT_SUPPORTED: the selected model is not in
+ * Trinyx Cloud account is refused for MODEL_NOT_SUPPORTED: the selected model is not in
  * the cloud's curated catalog, i.e. not in any bundle this install holds (a stale or foreign
  * model catalog). The remedy is to refresh the model bundle so the available model list
  * matches the cloud again.

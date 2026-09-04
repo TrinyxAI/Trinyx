@@ -90,6 +90,11 @@ public interface FileStorageService {
      */
     Optional<DownloadStream> openStream(String key);
 
+    /**
+     * Idempotent object deletion. Returns {@code true} when the object was
+     * deleted or was already absent, and {@code false} only when absence could
+     * not be confirmed because the storage operation failed.
+     */
     boolean delete(String key);
 
     int deleteRunFiles(String tenantId, String workflowId, String runId);

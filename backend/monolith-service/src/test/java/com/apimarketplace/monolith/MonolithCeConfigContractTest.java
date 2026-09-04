@@ -285,16 +285,28 @@ class MonolithCeConfigContractTest {
     }
 
     @Test
+    @DisplayName("application-ce.yml defaults to remote Marketplace with the independent local-mode CloudLink switch off")
+    void ceCloudLinkDefaultsToUpstreamRemoteAvailability() throws Exception {
+        Map<String, Object> root = loadCeYaml();
+
+        assertThat(nestedValue(root, "marketplace", "mode"))
+            .isEqualTo("${MARKETPLACE_MODE:remote}");
+        assertThat(nestedValue(root, "cloud-link", "enabled"))
+            .as("remote mode activates CloudLink; this separate switch is only the local-mode opt-in")
+            .isEqualTo("${CLOUD_LINK_ENABLED:false}");
+    }
+
+    @Test
     @DisplayName("application-ce.yml maps Cloud Link OAuth and IP hash settings to CE Docker env vars")
     void ceCloudLinkUsesBackendCallbackAndGeneratedIpHashKey() throws Exception {
         Map<String, Object> root = loadCeYaml();
 
         assertThat(nestedValue(root, "cloud-link", "keycloak-url"))
             .as("CE Cloud Link must use the public Keycloak hostname configured for the cloud realm")
-            .isEqualTo("${CLOUD_KEYCLOAK_URL:https://auth.livecontext.ai/realms/livecontext}");
+            .isEqualTo("${CLOUD_KEYCLOAK_URL:https://auth.trinyx.fr/realms/trinyx}");
         assertThat(nestedValue(root, "cloud-link", "client-id"))
             .as("The cloud realm config extends the existing public PKCE client")
-            .isEqualTo("${CLOUD_LINK_CLIENT_ID:livecontext-frontend}");
+            .isEqualTo("${CLOUD_LINK_CLIENT_ID:trinyx-frontend}");
         assertThat(nestedValue(root, "cloud-link", "redirect-uri"))
             .as("OAuth codes must return to the CE backend callback, not a frontend URL with code= in the query string")
             .isEqualTo("${CLOUD_LINK_REDIRECT_URI:http://localhost:8080/api/cloud-link/callback}");
@@ -307,41 +319,25 @@ class MonolithCeConfigContractTest {
     }
 
     @Test
-    @DisplayName("application-ce.yml bakes the cloud's PUBLIC Ed25519 key as the default catalog.bundle.trusted-keys "
-            + "so a fresh CE trusts signed bundles out of the box (no more TRUST_UNCONFIGURED)")
+    @DisplayName("application-ce.yml never inherits the historical upstream bundle trust root")
     @SuppressWarnings("unchecked")
-    void ceBakesCloudPublicKeyAsDefaultTrustedKey() throws Exception {
+    void ceRequiresTrinyxBundleTrustConfigurationOrBootstrap() throws Exception {
         Map<String, Object> root = loadCeYaml();
         Map<String, Object> catalog = (Map<String, Object>) root.get("catalog");
         Map<String, Object> bundle = (Map<String, Object>) catalog.get("bundle");
         String raw = (String) bundle.get("trusted-keys");
 
-        // Shape: ${CATALOG_BUNDLE_TRUSTED_KEYS:<default>}. The env var name has no ':',
-        // and the default carries no ':' or '}', so stripping the first '${NAME:' and the
-        // trailing '}' yields exactly the baked default value.
         assertThat(raw)
-            .as("trusted-keys must keep the CATALOG_BUNDLE_TRUSTED_KEYS env override")
-            .startsWith("${CATALOG_BUNDLE_TRUSTED_KEYS:");
-        String bakedDefault = raw.replaceFirst("^\\$\\{[^:]+:", "").replaceFirst("}$", "");
+            .as("the Trinyx public ring remains externally configurable")
+            .isEqualTo("${CATALOG_BUNDLE_TRUSTED_KEYS:}");
 
-        // The empty default is exactly the bug: TrustedKeyRegistry.hasKeys()=false, so
-        // CatalogBundleSyncScheduler records TRUST_UNCONFIGURED on every 15-min tick.
-        assertThat(bakedDefault)
-            .as("an empty default reintroduces the TRUST_UNCONFIGURED sync failures")
-            .isNotBlank()
-            .contains("livecontext-prod-v1=");
-
-        // Parse the baked default through the SAME class the runtime uses
-        // (TrustedKeyRegistry / ApiCatalogTrustedKeyRegistry both delegate to it).
-        // A malformed base64 key would silently parse to zero keys, back to square one.
+        String bakedDefault = raw.replaceFirst("^\\$\\{[^:]+:", "")
+                .replaceFirst("}$", "");
         TrustedKeys keys = new TrustedKeys(bakedDefault);
         assertThat(keys.hasKeys())
-            .as("the baked key must decode to a usable pinned key")
-            .isTrue();
-        assertThat(keys.keyIds()).containsExactly("livecontext-prod-v1");
-        assertThat(keys.find("livecontext-prod-v1"))
-            .as("the pinned keyId must resolve to a real Ed25519 public key the verifier can use")
-            .isPresent();
+            .as("no historical upstream signer is trusted before explicit config or HTTPS bootstrap")
+            .isFalse();
+        assertThat(keys.keyIds()).isEmpty();
     }
 
     private Map<String, Object> loadCeYaml() throws Exception {

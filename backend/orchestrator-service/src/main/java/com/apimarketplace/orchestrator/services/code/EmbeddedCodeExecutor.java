@@ -2,7 +2,7 @@ package com.apimarketplace.orchestrator.services.code;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -27,10 +27,10 @@ import java.util.concurrent.TimeUnit;
  * Security note: This does NOT sandbox like Piston does. Acceptable for self-hosted CE
  * where the user owns the machine. NOT suitable for multi-tenant cloud environments.
  * <p>
- * Activated by: piston.embedded=true
+ * Activated by: piston.enabled=true and piston.embedded=true
  */
 @Service
-@ConditionalOnProperty(name = "piston.embedded", havingValue = "true")
+@ConditionalOnExpression("${piston.enabled:false} && ${piston.embedded:false}")
 public class EmbeddedCodeExecutor implements CodeExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(EmbeddedCodeExecutor.class);

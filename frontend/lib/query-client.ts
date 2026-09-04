@@ -1,5 +1,5 @@
 /**
- * Configuration React Query optimisee pour LiveContext
+ * Configuration React Query optimisee pour Trinyx
  * Cache intelligent, retry automatique, gestion d'erreurs
  */
 

@@ -89,8 +89,8 @@ spring:
 # Configuration Keycloak
 app:
   mail:
-    from: ${SMTP_FROM:noreply@livecontext.ai}
-    from-name: LiveContext
+    from: ${SMTP_FROM:noreply@trinyx.fr}
+    from-name: Trinyx
   security:
     keycloak:
       audience: ${KEYCLOAK_AUDIENCE:livecontext-frontend}
@@ -101,7 +101,8 @@ gateway:
     verification-enabled: ${GATEWAY_VERIFICATION_ENABLED:true}
     public-paths:
       - /actuator/
-      - /api/internal/
+      - /internal/v1/credit-reservations
+      - /internal/v1/entitlement-projections
       - /api/users/health
       - /api/auth/health
       - /public/
@@ -120,20 +121,223 @@ gateway:
       - /api/auth/openid-configuration
     hmac-required-paths:
       - /api/credits/
-      - /api/internal/credentials/access-token
-      - /api/internal/credentials/data-map
-      - /api/internal/credentials/force-refresh-token
-      - /api/internal/credentials/refresh-token
-      - /api/internal/credentials/by-integration
-      - /api/internal/credentials/platform
-      # FOLLOW-UP (CRED-1, parity audit 2026-06-16): the lookup resolvers /all, /default, /{id},
-      # /scopes return DECRYPTED Credential objects but are NOT HMAC-gated here. Widening to the
-      # whole /api/internal/credentials/ prefix is the right end-state, but several in-cluster
-      # callers still hit them UNSIGNED (conversation-service findExistingCredential -> /default;
-      # catalog-import -> /pricing-versions/bootstrap), so it must be done AFTER those callers sign.
-      # External access is already blocked (gateway does not route /api/internal/**); this is
-      # in-cluster defense-in-depth only.
-      - /api/internal/auth/workspace/
+      - /api/internal/
+    service-authenticated-paths:
+      - /api/internal/
+    service-secrets:
+      catalog-service: ${CATALOG_SERVICE_S2S_SECRET:}
+      orchestrator-service: ${ORCHESTRATOR_SERVICE_S2S_SECRET:}
+      agent-service: ${AGENT_SERVICE_S2S_SECRET:}
+      datasource-service: ${DATASOURCE_SERVICE_S2S_SECRET:}
+      interface-service: ${INTERFACE_SERVICE_S2S_SECRET:}
+      publication-service: ${PUBLICATION_SERVICE_S2S_SECRET:}
+      storage-service: ${STORAGE_SERVICE_S2S_SECRET:}
+      trigger-service: ${TRIGGER_SERVICE_S2S_SECRET:}
+      gateway-service: ${GATEWAY_SERVICE_S2S_SECRET:}
+      auth-service: ${AUTH_SERVICE_S2S_SECRET:}
+    service-route-permissions:
+      catalog-service:
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/access-token"
+        - "GET:/api/internal/credentials/access-token/by-id"
+        - "POST:/api/internal/credentials/refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token/by-id"
+        - "GET:/api/internal/credentials/data-map"
+        - "GET:/api/internal/credentials/data-map/by-id"
+        - "GET:/api/internal/credentials/scopes"
+        - "GET:/api/internal/credentials/scopes/by-id"
+        - "DELETE:/api/internal/credentials/by-integration/{integrationName}"
+        - "GET:/api/internal/credentials/platform"
+        - "GET:/api/internal/credentials/platform/{name}"
+        - "POST:/api/internal/credentials/platform"
+        - "POST:/api/internal/credentials/platform-tenant"
+        - "DELETE:/api/internal/credentials/platform-tenant/{integrationName}"
+        - "DELETE:/api/internal/credentials/platform/{name}"
+        - "GET:/api/internal/credentials/platform-integration/{integrationName}"
+        - "GET:/api/internal/credentials/{credentialId}"
+        - "GET:/api/internal/credentials/default"
+        - "GET:/api/internal/credentials/all"
+        - "GET:/api/internal/credentials/identities"
+        - "POST:/api/internal/credentials/run-pricing-pin"
+        - "DELETE:/api/internal/credentials/run-pricing-pin/{runId}"
+        - "GET:/api/internal/credentials/resolve-markup"
+        - "GET:/api/internal/credentials/markup/run-rate"
+        - "GET:/api/internal/credentials/markup/scope-rate"
+        - "GET:/api/internal/credentials/markup/scope-pin-exists"
+        - "DELETE:/api/internal/credentials/markup/scope-pin"
+        - "POST:/api/internal/credentials/pricing-versions/bootstrap"
+        - "POST:/api/internal/credentials/pricing-versions/published-prices"
+        - "POST:/api/internal/credentials/pricing-versions/apply-catalog-bundle"
+        - "GET:/api/internal/credentials/platform/by-name"
+        - "GET:/api/internal/credentials/pricing/{credentialId}/latest"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "GET:/api/internal/auth/ce-link/{installId}/active"
+        - "GET:/api/internal/auth/ce-link/{installId}/entitlements"
+        - "POST:/api/internal/auth/credit/dead-letter"
+      orchestrator-service:
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/access-token"
+        - "GET:/api/internal/credentials/access-token/by-id"
+        - "GET:/api/internal/credentials/data-map"
+        - "GET:/api/internal/credentials/data-map/by-id"
+        - "GET:/api/internal/credentials/scopes"
+        - "GET:/api/internal/credentials/scopes/by-id"
+        - "GET:/api/internal/credentials/{credentialId}"
+        - "GET:/api/internal/credentials/default"
+        - "GET:/api/internal/credentials/all"
+        - "GET:/api/internal/credentials/identities"
+        - "POST:/api/internal/credentials/refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token"
+        - "POST:/api/internal/credentials/force-refresh-token/by-id"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+        - "POST:/api/internal/auth/credit/dead-letter"
+      agent-service:
+        - "GET:/api/internal/credentials/configured-integrations/{tenantId}"
+        - "GET:/api/internal/credentials/state-version"
+        - "GET:/api/internal/credentials/identities"
+        - "GET:/api/internal/variables/bundle"
+        - "POST:/api/internal/cloud-credit-proxy/reserve"
+        - "POST:/api/internal/cloud-credit-proxy/reserve-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/dispatching"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-llm"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/commit-amount"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/release-local"
+        - "POST:/api/internal/cloud-credit-proxy/{operationId}/outcome-unknown"
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+        - "POST:/api/internal/auth/credit/dead-letter"
+        - "POST:/api/internal/auth/model-pricing/sync"
+      datasource-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+      interface-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/org-restrictions"
+        - "DELETE:/api/internal/auth/org-restrictions"
+        - "PUT:/api/internal/auth/org-restrictions/bulk"
+      publication-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+        - "POST:/api/internal/auth/credit/dead-letter"
+      storage-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+      trigger-service:
+        - "GET:/api/internal/auth/plans/limits/{resourceType}"
+        - "GET:/api/internal/auth/org-restrictions"
+        - "GET:/api/internal/auth/org-restrictions/write"
+        - "GET:/api/internal/auth/org-restrictions/member"
+        - "GET:/api/internal/auth/users/{userId}/default-organization"
+        - "GET:/api/internal/auth/users/{userId}/roles"
+        - "GET:/api/internal/auth/organizations/{orgId}/member-ids"
+        - "GET:/api/internal/auth/users/{userId}/display-name"
+        - "GET:/api/internal/auth/users/{userId}/publisher-profile"
+        - "POST:/api/internal/auth/users/resolve-batch"
+      gateway-service:
+        - "GET:/api/internal/cloud-identity/context"
+        - "POST:/api/internal/cloud-identity/bind"
+        - "POST:/api/internal/cloud-identity/revoke"
+        - "PUT:/api/internal/v1/entitlement-projections/repair"
+        - "GET:/api/internal/v1/entitlement-projections/decision"
+        - "GET:/api/internal/auth/ce-link/{installId}/active"
+        - "GET:/api/internal/auth/ce-link/{installId}/entitlements"
+      auth-service:
+        - "POST:/api/internal/auth/workspace/{organizationId}/purge"
+        - "POST:/api/internal/auth/workspace/reconcile/{userId}"
+        - "POST:/api/internal/auth/workspace/reconcile-all"
 
 oauth2:
   callback-url: ${OAUTH2_CALLBACK_URL:http://localhost:8083/api/credentials/oauth2/callback}
@@ -183,6 +387,10 @@ credit:
 
 # Configuration de facturation
 billing:
+  authority:
+    mode: ${BILLING_AUTHORITY_MODE:native-cloud}
+  external:
+    reservation-sweep-ms: ${BILLING_EXTERNAL_RESERVATION_SWEEP_MS:60000}
   provider: stripe
   # --- Unit-economics levers: internal pricing configuration ---
   # 1 credit = $0.001 of provider LIST price; every LLM call is billed
@@ -205,7 +413,7 @@ billing:
     secretKey: ${STRIPE_SECRET_KEY}
     webhookSecret: ${STRIPE_WEBHOOK_SECRET}
     # Fall back to APP_PUBLIC_URL (the value the k3s helm chart already injects for every
-    # public link, e.g. https://livecontext.ai) when STRIPE_SUCCESS_URL/STRIPE_CANCEL_URL
+    # public link, e.g. https://app.trinyx.fr) when STRIPE_SUCCESS_URL/STRIPE_CANCEL_URL
     # are not set explicitly - otherwise prod checkout redirects leak http://localhost:3000.
     # Mirrors the orchestrator.{chat,form}-endpoint.base-url pattern in trigger-service.
     successUrl: ${STRIPE_SUCCESS_URL:${APP_PUBLIC_URL:http://localhost:3000}/app/settings/pricing?checkout=success}
@@ -283,3 +491,29 @@ org:
     rate-limit:
       per-inviter-per-hour: ${ORG_INVITE_PER_INVITER:20}
       per-org-per-hour: ${ORG_INVITE_PER_ORG:50}
+
+# Trinyx v2 persistent assertion and workload key rings.
+# Format for verification rings: kid=base64-x509-public-key;kid2=base64-x509-public-key.
+# Private PKCS#8 keys are optional on verifier-only deployments and must come from a secret store.
+trinyx:
+  assertions:
+    identity:
+      issuer: ${TRINYX_IDENTITY_ISSUER:https://app.trinyx.fr}
+      audience: ${TRINYX_IDENTITY_AUDIENCE:trinyx-cloud}
+      verification-keys: ${TRINYX_IDENTITY_VERIFICATION_KEYS:}
+      signing-kid: ${TRINYX_IDENTITY_SIGNING_KID:}
+      signing-key: ${TRINYX_IDENTITY_SIGNING_KEY:}
+    entitlement:
+      issuer: ${TRINYX_ENTITLEMENT_ISSUER:https://app.trinyx.fr}
+      audience: ${TRINYX_ENTITLEMENT_AUDIENCE:trinyx-cloud}
+      verification-keys: ${TRINYX_ENTITLEMENT_VERIFICATION_KEYS:}
+      signing-kid: ${TRINYX_ENTITLEMENT_SIGNING_KID:}
+      signing-key: ${TRINYX_ENTITLEMENT_SIGNING_KEY:}
+  s2s:
+    verification-issuer: ${TRINYX_S2S_VERIFICATION_ISSUER:trinyx-cloud}
+    verification-audience: ${TRINYX_S2S_VERIFICATION_AUDIENCE:trinyx-billing-authority}
+    verification-keys: ${TRINYX_S2S_VERIFICATION_KEYS:}
+    signing-issuer: ${TRINYX_S2S_SIGNING_ISSUER:trinyx-cloud}
+    signing-audience: ${TRINYX_S2S_SIGNING_AUDIENCE:trinyx-billing-authority}
+    signing-kid: ${TRINYX_S2S_SIGNING_KID:}
+    signing-key: ${TRINYX_S2S_SIGNING_KEY:}

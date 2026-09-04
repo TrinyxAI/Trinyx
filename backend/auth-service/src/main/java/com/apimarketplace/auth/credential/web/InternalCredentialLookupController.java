@@ -2,6 +2,7 @@ package com.apimarketplace.auth.credential.web;
 
 import com.apimarketplace.auth.credential.domain.CredentialModels.*;
 import com.apimarketplace.auth.credential.repository.CredentialRepository;
+import com.apimarketplace.common.web.TenantDelegation;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +18,12 @@ import java.util.Optional;
 public class InternalCredentialLookupController {
 
     private final CredentialRepository credentialRepository;
+
+    @org.springframework.beans.factory.annotation.Value("${app.edition:ce}")
+    private String appEdition;
+
+    @org.springframework.beans.factory.annotation.Value("${trinyx.tenant-delegation.secret:}")
+    private String tenantDelegationSecret;
 
     public InternalCredentialLookupController(CredentialRepository credentialRepository) {
         this.credentialRepository = credentialRepository;
@@ -60,6 +67,9 @@ public class InternalCredentialLookupController {
     public ResponseEntity<List<Credential>> getAllCredentials(
             @RequestParam String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        if (!tenantContextDelegated(userId, organizationId)) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
         // Org-aware: when an active workspace is supplied, return every credential in
         // that workspace (post-V261 each row carries the workspace org_id, including the
         // user's own), so agent/builder credential pickers see workspace-shared rows.
@@ -67,7 +77,11 @@ public class InternalCredentialLookupController {
         List<Credential> credentials = (organizationId != null && !organizationId.isBlank())
                 ? credentialRepository.findByOrganizationIdStrict(organizationId, 1, 10_000)
                 : credentialRepository.findAllByTenantId(userId);
-        return ResponseEntity.ok(credentials);
+        // Bulk discovery must never become a bulk secret-export primitive. Callers that
+        // need one selected credential use the exact id/name endpoints after selection.
+        return ResponseEntity.ok(credentials.stream()
+                .map(Credential::withoutSecrets)
+                .toList());
     }
 
     /**
@@ -84,6 +98,9 @@ public class InternalCredentialLookupController {
     public ResponseEntity<List<CredentialIdentity>> getCredentialIdentities(
             @RequestParam String userId,
             @RequestHeader(value = "X-Organization-ID", required = false) String organizationId) {
+        if (!tenantContextDelegated(userId, organizationId)) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
         List<Credential> credentials = (organizationId != null && !organizationId.isBlank())
                 ? credentialRepository.findByOrganizationIdStrict(organizationId, 1, 10_000)
                 : credentialRepository.findAllByTenantId(userId);
@@ -98,6 +115,31 @@ public class InternalCredentialLookupController {
 
     /** Identity only. Adding a field that can carry secret material here is a bug. */
     public record CredentialIdentity(Long id, String name, String integration, String status) {
+    }
+
+    private boolean tenantContextDelegated(String userId, String organizationId) {
+        if (!"cloud".equalsIgnoreCase(appEdition)) {
+            return true;
+        }
+        try {
+            var attributes = org.springframework.web.context.request.RequestContextHolder
+                    .getRequestAttributes();
+            if (!(attributes instanceof org.springframework.web.context.request.ServletRequestAttributes servlet)) {
+                return false;
+            }
+            var request = servlet.getRequest();
+            return TenantDelegation.verify(
+                    request.getHeader(TenantDelegation.HEADER),
+                    tenantDelegationSecret,
+                    userId,
+                    request.getHeader("X-Principal-ID"),
+                    request.getHeader("X-Billing-Subject-ID"),
+                    organizationId,
+                    request.getHeader("X-Install-ID"),
+                    java.time.Instant.now());
+        } catch (RuntimeException invalid) {
+            return false;
+        }
     }
 
     private static boolean matchesOwnerOrOrg(Credential c, String userId, String organizationId) {

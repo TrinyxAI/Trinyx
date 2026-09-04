@@ -7,6 +7,7 @@ import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionContext;
 import com.apimarketplace.agent.tools.ToolsProvider.ToolExecutionResult;
 import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.common.credit.CreditConsumptionClient;
+import com.apimarketplace.common.credit.LlmCacheTokens;
 import com.apimarketplace.orchestrator.config.WebSearchConfig;
 import com.apimarketplace.orchestrator.tools.websearch.BrowserAgentModule;
 import com.apimarketplace.orchestrator.tools.websearch.CeWebSearchRelayRequest;
@@ -29,6 +30,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.UUID;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,8 +41,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -308,6 +312,8 @@ class CloudWebSearchRelayControllerTest {
         private ListOperations<String, String> browseListOps;
         @Mock
         private AgentClient agentClient;
+        @Mock
+        private CreditConsumptionClient externalCreditClient;
 
         private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -324,6 +330,9 @@ class CloudWebSearchRelayControllerTest {
             BrowserAgentModule realBrowseModule = new BrowserAgentModule(
                     browseRestTemplate, browseConfig, browseRedisTemplate, objectMapper,
                     null, null, null, null, null, agentClient);
+            realBrowseModule.setCreditConsumptionClient(externalCreditClient);
+            lenient().when(externalCreditClient.markExternalProviderDispatching(any(UUID.class)))
+                    .thenReturn(true);
             controller = new CloudWebSearchRelayController(authClient, searchModule, realBrowseModule);
         }
 
@@ -332,6 +341,60 @@ class CloudWebSearchRelayControllerTest {
                     task, "https://example.com",
                     Map.of("provider", "google", "model", "gemini-2.5-flash"),
                     25, Map.of("interaction_mode", "autonomous"), "stream-9", "tc-9");
+        }
+
+        @Test
+        @DisplayName("external authority reserves before Chromium and commits actual tokens without a local debit")
+        @SuppressWarnings("unchecked")
+        void externalAuthorityWrapsProviderWithReservation() {
+            when(authClient.userOwnsActiveCeLink("42", INSTALL_ID)).thenReturn(true);
+            when(externalCreditClient.usesExternalAuthority()).thenReturn(true);
+            when(externalCreditClient.reserveExternalLlm(eq(42L), any(UUID.class),
+                    eq("cloudWebSearchRelay"), eq("BROWSER_AGENT_EXECUTION"),
+                    eq("google"), eq("gemini-2.5-flash"), anyInt(), eq(102400)))
+                    .thenReturn(new CreditConsumptionClient.ExternalReservationResult(
+                            true, "a".repeat(64), null));
+            when(externalCreditClient.commitExternalLlm(any(UUID.class), eq("a".repeat(64)),
+                    eq("google"), eq("gemini-2.5-flash"), nullable(String.class),
+                    eq(5000), eq(250))).thenReturn(true);
+            when(browseConfig.getBrowserAgentBlpopTimeout()).thenReturn(150);
+            when(browseConfig.getCallbackBaseUrl()).thenReturn("http://orchestrator:8099");
+            when(browseRedisTemplate.opsForList()).thenReturn(browseListOps);
+            HashOperations<String, Object, Object> hashOps = mock(HashOperations.class);
+            when(browseRedisTemplate.opsForHash()).thenReturn((HashOperations) hashOps);
+            when(browseListOps.leftPop(anyString(), any(Duration.class)))
+                    .thenReturn(COMPLETED_BROWSE_RESULT);
+            when(browseRestTemplate.postForObject(anyString(), any(), eq(Map.class)))
+                    .thenReturn(Map.of("job_id", "job-browse-external"));
+
+            var request = new com.apimarketplace.orchestrator.tools.websearch.CeBrowseRelayRequest(
+                    "book a flight", "https://example.com",
+                    Map.of("provider", "google", "model", "gemini-2.5-flash",
+                            "max_tokens", 99999),
+                    999, Map.of("interaction_mode", "autonomous"),
+                    "stream-9", "tc-9");
+            ResponseEntity<Map<String, Object>> response =
+                    controller.agentBrowse(CLOUD_USER_ID, INSTALL_ID, request);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            org.mockito.InOrder order = inOrder(externalCreditClient, browseRestTemplate);
+            order.verify(externalCreditClient).reserveExternalLlm(eq(42L), any(UUID.class),
+                    eq("cloudWebSearchRelay"), eq("BROWSER_AGENT_EXECUTION"),
+                    eq("google"), eq("gemini-2.5-flash"), anyInt(), eq(102400));
+            order.verify(externalCreditClient)
+                    .markExternalProviderDispatching(any(UUID.class));
+            order.verify(browseRestTemplate).postForObject(anyString(), any(), eq(Map.class));
+            order.verify(externalCreditClient).commitExternalLlm(
+                    any(UUID.class), eq("a".repeat(64)), eq("google"),
+                    eq("gemini-2.5-flash"), nullable(String.class), eq(5000), eq(250));
+
+            ArgumentCaptor<AgentObservabilityRequest> observability =
+                    ArgumentCaptor.forClass(AgentObservabilityRequest.class);
+            verify(agentClient).recordObservability(observability.capture());
+            assertThat(observability.getValue().isCreditExternallyManaged()).isTrue();
+            verify(externalCreditClient, never()).consumeCredits(
+                    anyString(), anyString(), anyString(), anyString(), anyString(),
+                    anyInt(), anyInt(), any(LlmCacheTokens.class));
         }
 
         @Test

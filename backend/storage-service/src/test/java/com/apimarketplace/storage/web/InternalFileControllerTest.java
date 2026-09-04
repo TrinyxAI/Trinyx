@@ -1,5 +1,7 @@
 package com.apimarketplace.storage.web;
 
+import com.apimarketplace.common.web.TenantDelegation;
+import com.apimarketplace.common.web.StorageOperationCapability;
 import com.apimarketplace.storage.service.file.DownloadStream;
 import com.apimarketplace.storage.service.file.FileStorageService;
 import com.apimarketplace.storage.service.file.StorageStreamingMetrics;
@@ -23,7 +25,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * Streaming-pipeline regression tests for
@@ -55,6 +57,110 @@ class InternalFileControllerTest {
     @BeforeEach
     void setUp() {
         controller = new InternalFileController(fileStorageService, streamingMetrics);
+    }
+
+    @Test
+    @DisplayName("Cloud delete rejects a service-signed but edge-undelegated tenant")
+    void cloudDeleteRequiresEdgeTenantDelegation() {
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", "d".repeat(32));
+
+        ResponseEntity<java.util.Map<String, Object>> response =
+                controller.delete("42/files/object", "42", null,
+                        "principal", "billing", "org", "install");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        org.mockito.Mockito.verify(fileStorageService, org.mockito.Mockito.never())
+                .delete(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("Cloud delete accepts the exact short-lived edge delegation")
+    void cloudDeleteAcceptsExactEdgeTenantDelegation() {
+        String secret = "d".repeat(32);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", secret);
+        String token = TenantDelegation.issue(secret, "42", "principal", "billing",
+                "org", "install", java.time.Instant.now());
+        when(fileStorageService.delete("42/files/object")).thenReturn(true);
+
+        ResponseEntity<java.util.Map<String, Object>> response =
+                controller.delete("42/files/object", "42", token,
+                        "principal", "billing", "org", "install");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("deleted", true);
+    }
+
+    @Test
+    @DisplayName("Durable workspace erasure succeeds without servlet delegation")
+    void durableWorkspaceErasureUsesExactOutboxCapability() {
+        String secret = "d".repeat(32);
+        java.util.UUID erasureId = java.util.UUID.randomUUID();
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", secret);
+        String capability = StorageOperationCapability.issueWorkspaceErasure(
+                secret, erasureId, "org", "42", "42/files/object",
+                java.time.Instant.now());
+        when(fileStorageService.delete("42/files/object")).thenReturn(true);
+
+        var response = controller.deleteWorkspaceErasure(
+                erasureId, "42/files/object", "42", "org",
+                capability, "auth-service");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("deleted", true);
+    }
+
+    @Test
+    @DisplayName("Workspace erasure rejects a capability replayed for another key")
+    void durableWorkspaceErasureRejectsResourceMismatch() {
+        String secret = "d".repeat(32);
+        java.util.UUID erasureId = java.util.UUID.randomUUID();
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", secret);
+        String capability = StorageOperationCapability.issueWorkspaceErasure(
+                secret, erasureId, "org", "42", "42/files/allowed",
+                java.time.Instant.now());
+
+        var response = controller.deleteWorkspaceErasure(
+                erasureId, "42/files/other", "42", "org",
+                capability, "auth-service");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        verify(fileStorageService, never()).delete(anyString());
+    }
+
+    @Test
+    @DisplayName("Cloud interactive run deletion requires edge delegation")
+    void cloudRunDeletionRequiresDelegation() {
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "appEdition", "cloud");
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                controller, "tenantDelegationSecret", "d".repeat(32));
+
+        var response = controller.deleteRunFiles(
+                "workflow", "run", "42", null,
+                "principal", "billing", "org", "install");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        verify(fileStorageService, never()).deleteRunFiles(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("Async run deletion is restricted to the orchestrator job authority")
+    void asyncRunDeletionRequiresExactServiceAuthority() {
+        when(fileStorageService.deleteRunFiles("42", "workflow", "run")).thenReturn(3);
+
+        var refused = controller.deleteRunFilesJob(
+                "workflow", "run", "42", "org", "catalog-service");
+        var accepted = controller.deleteRunFilesJob(
+                "workflow", "run", "42", "org", "orchestrator-service");
+
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(accepted.getBody()).containsEntry("deletedCount", 3);
+        verify(fileStorageService, times(1)).deleteRunFiles("42", "workflow", "run");
     }
 
     @Test

@@ -51,14 +51,26 @@ public class StripeHealthIndicator extends AbstractHealthIndicator {
             
             builder.down()
                    .withDetail("status", "disconnected")
-                   .withDetail("error", e.getMessage())
-                   .withDetail("code", e.getCode());
+                   .withDetail("error", detail(e.getMessage(), "Stripe request failed"));
+            addDetail(builder, "code", e.getCode());
+            addDetail(builder, "requestId", e.getRequestId());
         } catch (Exception e) {
             logger.error("Stripe health check error: {}", e.getMessage());
             
             builder.down()
                    .withDetail("status", "error")
-                   .withDetail("error", e.getMessage());
+                   .withDetail("error", detail(e.getMessage(),
+                           e.getClass().getSimpleName()));
         }
+    }
+
+    private static void addDetail(Health.Builder builder, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            builder.withDetail(name, value);
+        }
+    }
+
+    private static String detail(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

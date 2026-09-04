@@ -1,16 +1,17 @@
-# LiveContext Community Edition: Docker Compose (prebuilt images)
+# Trinyx Community Edition: Docker Compose (prebuilt images)
 # Usage:
-#   git clone https://github.com/livecontext-ai/livecontext-ce
-#   cd livecontext-ce
-#   docker compose up -d
+#   git clone https://github.com/TrinyxAI/Trinyx
+#   cd Trinyx
+#   docker compose -f cli/assets/docker-compose.yml up -d
 #   Open http://localhost:3000
 #
 # This compose PULLS prebuilt images from GHCR (no local build). The image tag is
-# pinned to this release, so a clone always runs the matching version.
+# pinned to the CLI runtime tag. The release process must publish all five images
+# from the final tagged commit and verify their digests before publishing the CLI.
 #
 # Configuration (cloud connection, SMTP, ports): copy docker/.env.ce.example to
 # docker/.env.ce and pass it with `--env-file docker/.env.ce`. For agents to run, connect
-# to LiveContext Cloud (recommended) or add your own OpenAI/Anthropic/Google key in the app.
+# to Trinyx Cloud (recommended) or add your own OpenAI/Anthropic/Google key in the app.
 #
 # Ports (override via env or --env-file):
 #   FRONTEND_PORT=3000   (the app; open http://localhost:3000)
@@ -30,24 +31,24 @@
 #
 # Each one is turned on by an env file (`docker/.env.ce.renderer`, `docker/.env.ce.browser-agent`)
 # that sets the Docker profile AND the matching app setting in one shot:
-#   docker compose --env-file docker/.env.ce.renderer up -d
+#   docker compose -f cli/assets/docker-compose.yml --env-file docker/.env.ce.renderer up -d
 #
 # Those env files ship with the git repository, NOT with the npm package, and
-# `npx livecontext` passes no --env-file. So if you started this stack with npx,
+# `npx trinyx` passes no --env-file. So if you started this stack with npx,
 # clone the repo and use `docker compose` directly to enable either add-on:
-#   https://github.com/livecontext-ai/livecontext-ce
+#   https://github.com/TrinyxAI/Trinyx
 # See README.md ("Optional features") and docker/README-CE.md for details.
 
 name: livecontext-ce
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.1-pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: livecontext
       POSTGRES_USER: ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}
     volumes:
       - livecontext_data:/var/lib/postgresql/data
     healthcheck:
@@ -61,7 +62,7 @@ services:
           memory: 256M
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     volumes:
       - livecontext_redis:/data
@@ -77,7 +78,7 @@ services:
           memory: 384M
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -97,7 +98,7 @@ services:
           memory: 256M
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
     depends_on:
       minio:
         condition: service_healthy
@@ -111,7 +112,7 @@ services:
     restart: "no"
 
   bridge:
-    image: ghcr.io/livecontext-ai/livecontext-ce-bridge:latest
+    image: ${TRINYX_CE_BRIDGE_IMAGE:-ghcr.io/trinyxai/trinyx-ce-bridge:v0.2.13}
     restart: unless-stopped
     depends_on:
       redis:
@@ -138,7 +139,7 @@ services:
           memory: 512M
 
   livecontext:
-    image: ghcr.io/livecontext-ai/livecontext-ce:latest
+    image: ${TRINYX_CE_IMAGE:-ghcr.io/trinyxai/trinyx-ce:v0.2.13}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -157,7 +158,7 @@ services:
       DB_PORT: 5432
       DB_NAME: livecontext
       DB_USERNAME: ${DB_USERNAME:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET:-}
@@ -188,7 +189,7 @@ services:
       # update check while staying unidentified, or ENABLED=false to drop the request
       # entirely (no badge either). See README-CE.md.
       CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}
-      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}
+      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-false}
       # Browser agent (agent_browse) - OFF by default. Opt in with the
       # `browser-agent` profile + WEBSEARCH_ENABLED=true (both set by
       # docker/.env.ce.browser-agent). When enabled, the orchestrator talks to
@@ -224,6 +225,10 @@ services:
       # Catalog seed: import the bundled OpenAPI specs at first boot
       CATALOG_SEED_ENABLED: "true"
       CATALOG_SEED_PATH: /app/catalog-seeds
+      # Explicit Trinyx Cloud public trust roots (keyId=base64X509;...). Empty
+      # inherits no upstream key; verification remains closed until the existing
+      # HTTPS signing-key bootstrap pins the configured Trinyx Cloud key.
+      CATALOG_BUNDLE_TRUSTED_KEYS: ${CATALOG_BUNDLE_TRUSTED_KEYS:-}
       LOGGING_FILE_NAME: /app/logs/livecontext-ce.log
       AUDIT_LOG_PATH: /app/logs/audit
     volumes:
@@ -249,8 +254,8 @@ services:
 
   # ── Browser agent (agent_browse) - OPT-IN, heavy (Chromium + browser-use) ──
   # NOT started by a default `up`. Unlike the other services (prebuilt images),
-  # this builds from the bundled websearch-service/ source on demand so opting in
-  # doesn't pull ~1 GB for users who never browse. Enable both this container AND
+  # this pulls the Trinyx-owned websearch image only when the profile is enabled,
+  # so default installs do not download Chromium. Enable both this container AND
   # the orchestrator module in one shot:
   #   docker compose --env-file docker/.env.ce.browser-agent up -d
   # which sets COMPOSE_PROFILES=browser-agent (starts this) + WEBSEARCH_ENABLED=true
@@ -259,9 +264,7 @@ services:
   # CE Redis + MinIO.
   websearch:
     profiles: ["browser-agent"]
-    build:
-      context: ./websearch-service
-    image: livecontext-ce-websearch:local
+    image: ${TRINYX_CE_WEBSEARCH_IMAGE:-ghcr.io/trinyxai/trinyx-ce-websearch:v0.2.13}
     restart: unless-stopped
     depends_on:
       redis:
@@ -309,7 +312,7 @@ services:
   # JSON output format) are mounted from ./searxng/settings.yml; edit its server.secret_key.
   searxng:
     profiles: ["browser-agent"]
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.8.17-374939b88
     restart: unless-stopped
     environment:
       SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
@@ -336,7 +339,7 @@ services:
   # secrets - HTML in, bytes out; reached only by the app over the compose network.
   screenshot-renderer:
     profiles: ["renderer"]
-    image: ghcr.io/livecontext-ai/livecontext-ce-screenshot-renderer:latest
+    image: ${TRINYX_CE_SCREENSHOT_RENDERER_IMAGE:-ghcr.io/trinyxai/trinyx-ce-screenshot-renderer:v0.2.13}
     restart: unless-stopped
     environment:
       PORT: "8094"
@@ -359,7 +362,7 @@ services:
           memory: 1024M
 
   frontend:
-    image: ghcr.io/livecontext-ai/livecontext-ce-frontend:latest
+    image: ${TRINYX_CE_FRONTEND_IMAGE:-ghcr.io/trinyxai/trinyx-ce-frontend:v0.2.13}
     restart: unless-stopped
     depends_on:
       livecontext:
@@ -371,13 +374,13 @@ services:
       # so the same prebuilt image serves localhost, a LAN address and a public domain.
       #
       # Leave GATEWAY_PUBLIC_URL empty (the default) and the app derives the origin from
-      # the address you opened it with, on BACKEND_PORT: `npx livecontext` on a server and
+      # the address you opened it with, on BACKEND_PORT: `npx trinyx` on a server and
       # opening http://192.168.1.50:3000 connects to http://192.168.1.50:8080, with nothing
       # to rebuild.
       #
       # Set it only when the backend is NOT at <the address you opened the app with>:BACKEND_PORT,
       # typically a reverse proxy serving both on one origin:
-      #   GATEWAY_PUBLIC_URL=https://livecontext.example.com
+      #   GATEWAY_PUBLIC_URL=https://trinyx.example.com
       GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-}
       BACKEND_PORT: ${BACKEND_PORT:-8080}
 

@@ -20,6 +20,7 @@ import com.apimarketplace.agent.service.cloud.CeRelaySettlementService;
 import com.apimarketplace.agent.streaming.StreamingCallback;
 import com.apimarketplace.auth.client.AuthClient;
 import com.apimarketplace.common.credit.CreditConsumptionClient;
+import com.apimarketplace.common.credit.LlmCacheTokens;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -64,7 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequestMapping("/api/ce-llm")
 public class CloudLlmRelayController {
 
-    private static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    private static final String INSTALL_HEADER = "X-Install-ID";
     private static final String SOURCE_TYPE = "CE_LLM_RELAY";
     private static final int DEFAULT_COMPLETION_ESTIMATE = 8192;
 
@@ -82,6 +83,9 @@ public class CloudLlmRelayController {
      * (unique sourceIds, no double- or under-billing), losing only the per-message aggregation.
      */
     private final boolean centralizedBillingEnabled;
+
+    @Value("${billing.authority.mode:native-cloud}")
+    private String billingAuthorityMode;
 
     public CloudLlmRelayController(AuthClient authClient,
                                    CreditConsumptionClient creditClient,
@@ -125,17 +129,30 @@ public class CloudLlmRelayController {
         CompletionRequest request = withCloudTenant(
                 relayRequest.completionRequest(), userId, billedModel, false);
         BudgetEstimate estimate = estimateBudget(request);
-        if (!gate(userId, billedProvider.getProviderName(), billedModel, estimate, centralized, relayRequest.executionId())) {
+        BillingTarget target = billingTarget(userId, relayRequest.executionId(), centralized,
+                billedProvider.getProviderName(), billedModel, estimate);
+        if (target == null) {
             return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .body(Map.of("error", "INSUFFICIENT_CREDITS"));
         }
+        if (!prepareProviderDispatch(target)) {
+            releaseUndispatchedHold(target);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"));
+        }
 
-        BillingTarget target = new BillingTarget(centralized, userId, relayRequest.executionId(),
-                "ce-llm-" + UUID.randomUUID(), billedProvider.getProviderName(), billedModel);
-        CompletionResponse response = billedProvider.complete(request);
-        TokenUsage usage = usageFrom(response, estimate, response != null ? response.content() : null);
-        recordUsageOnce(new AtomicBoolean(false), target, usage);
-        return ResponseEntity.ok(response);
+        try {
+            CompletionResponse response = billedProvider.complete(request);
+            TokenUsage usage = usageFrom(response, estimate,
+                    response != null ? response.content() : null);
+            recordUsageOnce(new AtomicBoolean(false), target, usage);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException failure) {
+            // The request crossed the provider boundary. A transport exception does not
+            // prove the provider rejected it, so never release the authoritative hold.
+            recordAmbiguousProviderOutcome(target, "provider-outcome-unknown");
+            throw failure;
+        }
     }
 
     @PostMapping(value = "/stream", produces = "application/x-ndjson")
@@ -167,20 +184,30 @@ public class CloudLlmRelayController {
         CompletionRequest request = withCloudTenant(
                 relayRequest.completionRequest(), userId, billedModel, true);
         BudgetEstimate estimate = estimateBudget(request);
-        if (!gate(userId, billedProvider.getProviderName(), billedModel, estimate, centralized, relayRequest.executionId())) {
+        BillingTarget target = billingTarget(userId, relayRequest.executionId(), centralized,
+                billedProvider.getProviderName(), billedModel, estimate);
+        if (target == null) {
             return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(outputStream -> writeEvent(outputStream,
                             CloudLlmStreamEvent.error("INSUFFICIENT_CREDITS")));
         }
-
-        BillingTarget target = new BillingTarget(centralized, userId, relayRequest.executionId(),
-                "ce-llm-" + UUID.randomUUID(), billedProvider.getProviderName(), billedModel);
         StreamingResponseBody body = outputStream -> {
             AtomicInteger streamedContentChars = new AtomicInteger(0);
             AtomicBoolean recorded = new AtomicBoolean(false);
             AtomicBoolean streamClosed = new AtomicBoolean(false);
+            AtomicBoolean providerOutcomeAmbiguous = new AtomicBoolean(false);
+            AtomicBoolean providerDispatched = new AtomicBoolean(false);
             try {
+                if (!prepareProviderDispatch(target)) {
+                    releaseUndispatchedHold(target);
+                    writeQuietly(outputStream,
+                            CloudLlmStreamEvent.error(
+                                    "BILLING_DISPATCH_JOURNAL_UNAVAILABLE"),
+                            streamClosed);
+                    return;
+                }
+                providerDispatched.set(true);
                 billedProvider.completeStreaming(request, new StreamingCallback() {
                     @Override
                     public void onChunk(String chunk) {
@@ -218,6 +245,7 @@ public class CloudLlmRelayController {
 
                     @Override
                     public void onError(String error) {
+                        providerOutcomeAmbiguous.set(true);
                         if (!streamClosed.get()) {
                             writeQuietly(outputStream, CloudLlmStreamEvent.error(error), streamClosed);
                         }
@@ -229,6 +257,7 @@ public class CloudLlmRelayController {
                     }
                 });
             } catch (Exception e) {
+                providerOutcomeAmbiguous.set(true);
                 log.warn("CE LLM relay stream failed for cloudUser={} installId={} billed={}/{}: {}",
                         cloudUserId, installId, billedProvider.getProviderName(), billedModel,
                         e.getMessage());
@@ -236,7 +265,16 @@ public class CloudLlmRelayController {
                     writeQuietly(outputStream, CloudLlmStreamEvent.error(e.getMessage()), streamClosed);
                 }
             } finally {
-                if (streamedContentChars.get() > 0) {
+                if (!providerDispatched.get()) {
+                    // No provider boundary was crossed. The failed dispatch path
+                    // already scheduled the authoritative release durably.
+                } else if (providerOutcomeAmbiguous.get()
+                        && target.externalOperationId() != null) {
+                    recordAmbiguousProviderOutcome(target,
+                            "stream-provider-outcome-unknown-after-dispatch");
+                } else if (target.externalOperationId() != null || streamedContentChars.get() > 0) {
+                    // Settle prompt-only successful responses too: the upstream may
+                    // incur cost before producing the first content chunk.
                     recordUsageOnce(recorded, target,
                             usageFrom(null, estimate, streamedContentChars.get()));
                 }
@@ -320,12 +358,75 @@ public class CloudLlmRelayController {
         if (!recorded.compareAndSet(false, true)) {
             return;
         }
-        if (target.centralized()) {
+        if (target.externalOperationId() != null) {
+            boolean acknowledged = creditClient.commitExternalLlm(
+                    target.externalOperationId(), target.externalRequestHash(),
+                    target.provider(), target.model(), null,
+                    usage.promptTokens(), usage.completionTokens(),
+                    new LlmCacheTokens(usage.cacheCreationTokens(), usage.cacheReadTokens(),
+                            usage.cachedTokens(), usage.reasoningTokens()));
+            if (!acknowledged) {
+                log.error("External wallet settlement not acknowledged for operation {}",
+                        target.externalOperationId());
+            }
+        } else if (target.centralized()) {
             accrualStore.accrue(target.executionId(), target.userId(), target.provider(), target.model(),
                     toAccruedDelta(usage), System.currentTimeMillis());
         } else {
             consumeOrPersist(target.userId(), target.sourceId(), target.provider(), target.model(), usage);
         }
+    }
+
+    private BillingTarget billingTarget(String userId, String executionId, boolean centralized,
+                                        String provider, String model, BudgetEstimate estimate) {
+        String sourceId = "ce-llm-" + UUID.randomUUID();
+        if (isExternalAuthority()) {
+            UUID operationId = UUID.randomUUID();
+            var reserve = creditClient.reserveExternalLlm(
+                    Long.valueOf(userId), operationId, "cloudLlmRelay", SOURCE_TYPE,
+                    provider, model, estimate.promptTokens(), estimate.completionTokens());
+            if (!reserve.success()) {
+                return null;
+            }
+            return new BillingTarget(false, userId, executionId, sourceId, provider, model,
+                    operationId, reserve.requestHash());
+        }
+        if (!gate(userId, provider, model, estimate, centralized, executionId)) {
+            return null;
+        }
+        return new BillingTarget(centralized, userId, executionId, sourceId, provider, model,
+                null, null);
+    }
+
+    private boolean prepareProviderDispatch(BillingTarget target) {
+        return target.externalOperationId() == null
+                || creditClient.markExternalProviderDispatching(target.externalOperationId());
+    }
+
+    private void releaseUndispatchedHold(BillingTarget target) {
+        if (target.externalOperationId() == null) {
+            return;
+        }
+        boolean acknowledged = creditClient.releaseExternal(
+                target.externalOperationId(), target.externalRequestHash(),
+                "provider-not-dispatched-authority-ack-unavailable");
+        if (!acknowledged) {
+            log.warn("External wallet release queued after provider-dispatch authorization "
+                            + "was not acknowledged for operation {}",
+                    target.externalOperationId());
+        }
+    }
+
+    private void recordAmbiguousProviderOutcome(BillingTarget target, String reason) {
+        if (target.externalOperationId() != null) {
+            creditClient.recordExternalOutcomeUnknown(
+                    target.externalOperationId(), target.externalRequestHash(),
+                    target.provider(), target.model(), reason);
+        }
+    }
+
+    private boolean isExternalAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
     }
 
     private static CeRelayAccrualStore.AccruedUsage toAccruedDelta(TokenUsage u) {
@@ -402,6 +503,12 @@ public class CloudLlmRelayController {
                                               String cloudUserId,
                                               String model,
                                               boolean streaming) {
+        Integer providerMaxTokens = source.maxTokens();
+        if (isExternalAuthority() && (providerMaxTokens == null || providerMaxTokens <= 0)) {
+            // The authoritative hold is priced with this same conservative ceiling. Providers
+            // that support max output tokens therefore cannot be invoked without a matching cap.
+            providerMaxTokens = DEFAULT_COMPLETION_ESTIMATE;
+        }
         return CompletionRequest.builder()
                 .tenantId(cloudUserId)
                 .model(model)
@@ -409,7 +516,7 @@ public class CloudLlmRelayController {
                 .userPrompt(source.userPrompt())
                 .conversationHistory(source.conversationHistory())
                 .temperature(source.temperature())
-                .maxTokens(source.maxTokens())
+                .maxTokens(providerMaxTokens)
                 .topP(source.topP())
                 .frequencyPenalty(source.frequencyPenalty())
                 .presencePenalty(source.presencePenalty())
@@ -568,7 +675,8 @@ public class CloudLlmRelayController {
 
     /** Per-request billing context: where this call's usage goes (accrual vs per-call ledger). */
     private record BillingTarget(boolean centralized, String userId, String executionId,
-                                 String sourceId, String provider, String model) {
+                                 String sourceId, String provider, String model,
+                                 UUID externalOperationId, String externalRequestHash) {
     }
 
     private record TokenUsage(int promptTokens, int completionTokens,

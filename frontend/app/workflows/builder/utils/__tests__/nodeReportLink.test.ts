@@ -77,7 +77,7 @@ describe('buildNodeReportHref - CE points at the cloud origin', () => {
     vi.stubEnv('NEXT_PUBLIC_AUTH_MODE', '');
     const { buildNodeReportHref: ceBuildHref } = await import('../nodeReportLink');
     const href = ceBuildHref(ctx({}), t);
-    expect(href.startsWith('https://livecontext.ai/contact?category=bug&message=')).toBe(true);
+    expect(href.startsWith('https://app.trinyx.fr/contact?category=bug&message=')).toBe(true);
     expect(href).not.toContain('localhost');
   });
 });

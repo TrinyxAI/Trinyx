@@ -67,6 +67,7 @@ public class CeLinkService {
     private final CeLinkActiveRowCache activeRowCache;
     private final CeLinkActiveRowCachePublisher cachePublisher;
     private final ApplicationEventPublisher eventPublisher;
+    private CloudIdentityBindingService cloudIdentityBindingService;
 
     public CeLinkService(CeLinkRepository repository,
                          CeLinkHeartbeatRepository heartbeatRepository,
@@ -82,6 +83,15 @@ public class CeLinkService {
         this.activeRowCache = activeRowCache;
         this.cachePublisher = cachePublisher;
         this.eventPublisher = eventPublisher;
+    }
+
+    /**
+     * Optional because native/legacy Cloud-link tests and non-external billing deployments do not
+     * materialize v2 identity bindings. In the Trinyx external-authority stack this bean is present.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setCloudIdentityBindingService(CloudIdentityBindingService cloudIdentityBindingService) {
+        this.cloudIdentityBindingService = cloudIdentityBindingService;
     }
 
     /** Drop the local cache + broadcast to sibling replicas. Single chokepoint. */
@@ -263,14 +273,27 @@ public class CeLinkService {
         return activeRowCache.get(userId, repository::userHasAnyActiveLink);
     }
 
+    /**
+     * Returns whether the actor may use the active installation.
+     *
+     * <p>Direct ownership remains the native compatibility path. In external-authority Cloud mode,
+     * a distinct organization member is also accepted when its signed ACTIVE identity binding
+     * shares the exact install, organization and billing subject of the link owner's ACTIVE
+     * binding. The binding service fails closed for revoked or mismatched scopes.
+     */
     @Transactional(readOnly = true)
     public boolean userOwnsActiveLink(Long userId, UUID installId) {
         if (userId == null || installId == null) {
             return false;
         }
-        return repository.findByInstallIdAndUserId(installId, userId)
+        boolean directOwner = repository.findByInstallIdAndUserId(installId, userId)
                 .map(CeLink::isActive)
                 .orElse(false);
+        if (directOwner) {
+            return true;
+        }
+        return cloudIdentityBindingService != null
+                && cloudIdentityBindingService.userMayUseActiveInstall(userId, installId);
     }
 
     /**

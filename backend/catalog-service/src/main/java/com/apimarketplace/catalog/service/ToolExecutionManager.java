@@ -78,6 +78,11 @@ public class ToolExecutionManager {
         java.math.BigDecimal reservedAmount = null;
         CatalogToolBillingService.BillingScope billingScope = null;
         boolean reservationSettled = false;
+        // Once the external authority has durably acknowledged DISPATCHING,
+        // provider consumption may have happened. From that point onward an
+        // error is ambiguous and MUST retain the hold for reconciliation rather
+        // than release it blindly.
+        boolean externalProviderDispatched = false;
         // Set when the billing pre-flight allowed the call only because the
         // caller has a provider key of their own. Restored in the finally block
         // so the pin never outlives this call on a pooled thread.
@@ -314,6 +319,15 @@ public class ToolExecutionManager {
                 log.info("[ToolExecutionManager] Executing tool {} (API: {}) with {} parameters for userId={}, JSON: {}",
                         context.getToolName(), apiId, parameters.size(), userId, parametersJson);
 
+                if (reservationSourceId != null
+                        && catalogBillingService.usesExternalAuthority()) {
+                    if (!catalogBillingService.markProviderDispatching(reservationSourceId)) {
+                        throw new IllegalStateException(
+                                "Billing dispatch journal unavailable; provider was not called");
+                    }
+                    externalProviderDispatched = true;
+                }
+
                 executionResult = apiService.executeApiTool(
                         apiId.toString(),
                         context.getToolName(),
@@ -544,7 +558,8 @@ public class ToolExecutionManager {
             // charged for a call that produced nothing.
             reservationSettled = settleReservation(
                     reservationSourceId, reservedAmount, billingScope, context,
-                    success, (String) executionResult.get("credentialSource"));
+                    success, (String) executionResult.get("credentialSource"),
+                    externalProviderDispatched);
 
             return ToolExecutionResponse.builder()
                     .success(success)
@@ -600,24 +615,35 @@ public class ToolExecutionManager {
                     .build();
         } finally {
             // Safety net for the third path: an exception thrown BETWEEN the
-            // reserve and the settle (dehydration, projection, shaping, an
-            // upstream client error, a bug). The reservation is released, so
-            // held credits are never abandoned to expire on their own, and the
-            // customer is not charged for a call whose result never reached
-            // them. Cannot double-refund a committed reservation: `settled` is
-            // set by settleReservation itself, and scope-release is idempotent
-            // (a second one answers ALREADY_RELEASED).
+            // reserve and the settle (provider transport, dehydration,
+            // projection, shaping, a bug). Before DISPATCHING, release is safe:
+            // the provider provably saw no bytes. After the external authority
+            // acknowledged DISPATCHING, consumption may have happened and a
+            // release would refund a potentially consumed call. Preserve the
+            // hold as OUTCOME_UNKNOWN for durable reconciliation instead.
             if (reservationSourceId != null && !reservationSettled) {
-                try {
-                    catalogBillingService.releaseOnFailure(reservationSourceId,
-                            "catalog: execution aborted before settlement");
-                    log.warn("[ToolExecutionManager] Released reservation {} for tool {} - execution aborted before settlement",
+                if (externalProviderDispatched) {
+                    catalogBillingService.recordProviderOutcomeUnknown(
+                            reservationSourceId,
+                            billingScope != null ? billingScope.provider() : null,
+                            billingScope != null ? billingScope.model() : null,
+                            "catalog: execution aborted after provider dispatch");
+                    log.error("[ToolExecutionManager] Reservation {} for tool {} requires reconciliation - "
+                                    + "execution aborted after provider dispatch",
                             reservationSourceId, context.getToolName());
-                } catch (Exception releaseEx) {
-                    // Nothing else to try. The auth-side TTL expiry is the last
-                    // line of defence and will return the credits on its own.
-                    log.error("[ToolExecutionManager] Could not release reservation {} for tool {}: {}",
-                            reservationSourceId, context.getToolName(), releaseEx.getMessage());
+                } else {
+                    try {
+                        catalogBillingService.releaseOnFailure(reservationSourceId,
+                                "catalog: execution aborted before provider dispatch");
+                        log.warn("[ToolExecutionManager] Released reservation {} for tool {} - "
+                                        + "execution aborted before provider dispatch",
+                                reservationSourceId, context.getToolName());
+                    } catch (Exception releaseEx) {
+                        // Nothing else to try. The auth-side TTL expiry is the
+                        // last line of defence and will return the credits.
+                        log.error("[ToolExecutionManager] Could not release reservation {} for tool {}: {}",
+                                reservationSourceId, context.getToolName(), releaseEx.getMessage());
+                    }
                 }
             }
             // Drop the caller's-own-key pin with the call that asked for it. The
@@ -770,8 +796,9 @@ public class ToolExecutionManager {
      *
      * <p>Three outcomes:
      * <ul>
-     *   <li><b>Upstream failed</b> - release. A customer is never charged for a
-     *       call that produced nothing.</li>
+     *   <li><b>Upstream failed</b> - release only when the provider was never
+     *       dispatched. After external DISPATCHING, the result is ambiguous and
+     *       the hold remains under OUTCOME_UNKNOWN reconciliation.</li>
      *   <li><b>The user's own credential answered</b> - release. The agentic
      *       path cannot know this before the call (see
      *       {@link #intendedCredentialSource}), so BYOK is corrected here
@@ -788,13 +815,23 @@ public class ToolExecutionManager {
                                       CatalogToolBillingService.BillingScope scope,
                                       ToolContextService.ToolContext context,
                                       boolean success,
-                                      String resolvedCredentialSource) {
+                                      String resolvedCredentialSource,
+                                      boolean externalProviderDispatched) {
         if (sourceId == null) {
             return true; // nothing reserved - nothing to settle
         }
         try {
             if (!success) {
-                catalogBillingService.releaseOnFailure(sourceId, "catalog: upstream call failed");
+                if (externalProviderDispatched) {
+                    catalogBillingService.recordProviderOutcomeUnknown(
+                            sourceId,
+                            scope != null ? scope.provider() : null,
+                            scope != null ? scope.model() : null,
+                            "catalog: provider outcome unknown after dispatch");
+                } else {
+                    catalogBillingService.releaseOnFailure(sourceId,
+                            "catalog: upstream call failed before provider dispatch");
+                }
                 return true;
             }
             if ("USER".equalsIgnoreCase(resolvedCredentialSource)) {
@@ -807,11 +844,22 @@ public class ToolExecutionManager {
                     scope != null ? scope.model() : null);
             return true;
         } catch (Exception e) {
-            // Report NOT settled so the finally block attempts the release. A
-            // commit that threw after the ledger row flipped is safe to chase
-            // with a release: scope-release on a committed row is a no-op.
             log.warn("[ToolExecutionManager] Could not settle reservation {} for tool {}: {}",
                     sourceId, context.getToolName(), e.getMessage());
+            if (externalProviderDispatched) {
+                // A failed/uncertain commit after provider dispatch must never
+                // be chased by release: the provider may have consumed and the
+                // authority may also have accepted the commit before the
+                // response was lost.
+                catalogBillingService.recordProviderOutcomeUnknown(
+                        sourceId,
+                        scope != null ? scope.provider() : null,
+                        scope != null ? scope.model() : null,
+                        "catalog: settlement outcome unknown after provider dispatch");
+                return true;
+            }
+            // Before dispatch, report NOT settled so the finally block can
+            // safely release the reservation.
             return false;
         }
     }

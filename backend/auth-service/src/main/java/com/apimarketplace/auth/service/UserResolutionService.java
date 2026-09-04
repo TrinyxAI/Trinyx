@@ -59,6 +59,9 @@ public class UserResolutionService {
     private final PlanStorageQuotaSyncer quotaSyncer;
     /** Owns the transactional, per-user-locked creation of the bootstrap FREE subscription. */
     private final FreeSubscriptionProvisioner freeSubscriptionProvisioner;
+
+    @org.springframework.beans.factory.annotation.Value("${billing.authority.mode:native-cloud}")
+    private String billingAuthorityMode;
     // PR6 dual-write: pre-compute both billing-plan and active-org-tier
     // so the gateway / frontend can consume either field. PR7 cutover
     // flips which one is canonical for X-User-Plan / capabilities gating.
@@ -179,11 +182,12 @@ public class UserResolutionService {
             // 3. Ensure user has a username
             ensureUsername(user);
 
-            // 4. Ensure user has a free subscription
-            ensureFreeSubscription(user);
-
-            // 4b. Attribute credits if email is verified (idempotent)
-            attributeCreditsIfEligible(user);
+            // Native Cloud keeps its legacy bootstrap billing. In external-paid-monolith
+            // mode the linked installation is the only subscription/wallet authority.
+            if (!usesExternalBillingAuthority()) {
+                ensureFreeSubscription(user);
+                attributeCreditsIfEligible(user);
+            }
             ensureSamlMembershipForBrokeredLogin(user, keycloakJwt);
 
             // 5. Atomic conditional last-login update - see updateLastLoginAtomic.
@@ -351,8 +355,9 @@ public class UserResolutionService {
                 return retryByProvider;
             }
 
-            // Fallback: find by email (handles Keycloak user recreation with new providerId)
-            return findByEmailFromJwt(keycloakJwt);
+            // External authority identity bindings explicitly prohibit email reconciliation.
+            // Native Cloud keeps the legacy same-provider recovery behavior.
+            return usesExternalBillingAuthority() ? Optional.empty() : findByEmailFromJwt(keycloakJwt);
         }
     }
 
@@ -558,11 +563,17 @@ public class UserResolutionService {
                 needsOnboarding
         );
 
-        // Get remaining credits
-        try {
-            response.setRemainingCredits(creditService.getBalance(user.getId()));
-        } catch (Exception e) {
-            log.warn("Could not get credit balance for user {}: {}", user.getId(), e.getMessage());
+        response.setPrincipalId(user.getPrincipalId().toString());
+        response.setBillingSubjectId(user.getBillingSubjectId().toString());
+
+        // A Cloud instance in external-authority mode must never advertise a local
+        // spendable balance. The authoritative display balance is queried separately.
+        if (!usesExternalBillingAuthority()) {
+            try {
+                response.setRemainingCredits(creditService.getBalance(user.getId()));
+            } catch (Exception e) {
+                log.warn("Could not get credit balance for user {}: {}", user.getId(), e.getMessage());
+            }
         }
 
         // Get default organization ID and role
@@ -620,6 +631,10 @@ public class UserResolutionService {
         return response;
     }
 
+    private boolean usesExternalBillingAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
+    }
+
     /**
      * Creates a user with real values extracted from Keycloak JWT.
      *
@@ -649,7 +664,7 @@ public class UserResolutionService {
             // existing account - the reported cross-provider account merge. This is
             // the app-layer half of the defense; the Keycloak first-broker-login
             // block is the other half.
-            if (email != null && !email.isEmpty()) {
+            if (!usesExternalBillingAuthority() && email != null && !email.isEmpty()) {
                 Optional<User> existingByEmail = userRepository.findByEmail(email);
                 if (existingByEmail.isPresent()) {
                     User existing = existingByEmail.get();

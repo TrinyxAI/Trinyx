@@ -17,7 +17,7 @@ import { McpKeysManager } from "./McpKeysManager";
 
 /**
  * Settings > MCP Server: connect external MCP clients (Claude Code, Cursor, ...)
- * to the LiveContext MCP endpoint with a personal lc_live_ API key.
+ * to the Trinyx MCP endpoint with a personal lc_live_ API key.
  */
 export default function McpServerPage() {
   const { isAuthenticated, isAuthChecking } = useAuthGuard();
@@ -76,7 +76,7 @@ export default function McpServerPage() {
   const keyForSnippet = t("snippet.keyPlaceholder");
   const jsonSnippet = `{
   "mcpServers": {
-    "livecontext": {
+    "trinyx": {
       "type": "http",
       "url": "${mcpUrl}",
       "headers": {
@@ -86,11 +86,11 @@ export default function McpServerPage() {
   }
 }`;
   const claudeCodeSnippet =
-    `claude mcp add --transport http livecontext ${mcpUrl} --header "X-API-Key: ${keyForSnippet}"`;
-  const codexSnippet = `[mcp_servers.livecontext]
+    `claude mcp add --transport http trinyx ${mcpUrl} --header "X-API-Key: ${keyForSnippet}"`;
+  const codexSnippet = `[mcp_servers.trinyx]
 url = "${mcpUrl}"
 
-[mcp_servers.livecontext.http_headers]
+[mcp_servers.trinyx.http_headers]
 "X-API-Key" = "${keyForSnippet}"`;
 
   if (isAuthChecking || (isAuthenticated && loading)) {

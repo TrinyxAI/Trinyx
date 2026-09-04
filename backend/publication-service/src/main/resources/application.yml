@@ -89,3 +89,9 @@ management:
   endpoint:
     health:
       show-details: always
+
+# Pending OAuth state is process-local. The guarded topology remains single-replica
+# until a shared, single-consumption TTL store is implemented.
+cloud-link:
+  pending-state-store: ${CLOUD_LINK_PENDING_STATE_STORE:in-memory}
+  replica-count: ${CLOUD_LINK_REPLICA_COUNT:1}

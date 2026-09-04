@@ -16,7 +16,7 @@ describe('llms.txt', () => {
   });
 
   it('only links docs pages that exist in the docs IA (no dead GEO links)', () => {
-    const docsUrls = [...llmsTxt.matchAll(/https:\/\/docs\.livecontext\.ai([^\s):]*)/g)].map((m) => m[1] || '/');
+    const docsUrls = [...llmsTxt.matchAll(/https:\/\/trinyx\.fr(\/docs[^\s):]*)/g)].map((m) => m[1] || '/');
     expect(docsUrls.length).toBeGreaterThan(0);
     const known = new Set(DOCS_PAGES.map((p) => p.href));
     for (const path of docsUrls) {
@@ -26,7 +26,7 @@ describe('llms.txt', () => {
 
   it('links every live comparison page', () => {
     for (const comparison of COMPARISONS) {
-      expect(llmsTxt).toContain(`https://livecontext.ai/compare/${comparison.slug}`);
+      expect(llmsTxt).toContain(`https://trinyx.fr/compare/${comparison.slug}`);
     }
   });
 });

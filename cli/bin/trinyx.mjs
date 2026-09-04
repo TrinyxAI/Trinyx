@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// LiveContext CE launcher. Wraps the prebuilt Docker stack behind one npm command.
+// Trinyx Community Edition launcher. Wraps the prebuilt Docker stack behind one npm command.
 // The container images are the runtime; this CLI only orchestrates docker compose.
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +11,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ASSETS = join(HERE, '..', 'assets');
 const VERSION = JSON.parse(readFileSync(join(HERE, '..', 'package.json'), 'utf8')).version;
 
-const PORT = process.env.LIVECONTEXT_PORT || '3000';
-const HOME = process.env.LIVECONTEXT_HOME || join(process.cwd(), 'livecontext');
-const PROJECT = 'livecontext';
+const PORT = process.env.TRINYX_PORT || process.env.LIVECONTEXT_PORT || '3000';
+const HOME = process.env.TRINYX_HOME || process.env.LIVECONTEXT_HOME || join(process.cwd(), 'trinyx');
+const PROJECT = 'trinyx';
 
 const c = {
   b: (s) => `\x1b[1m${s}\x1b[0m`,
@@ -84,7 +84,7 @@ async function fetchSeed() {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 20000);
-    const res = await fetch('https://livecontext.ai/api/catalog-bundles/seed', { signal: ctrl.signal });
+    const res = await fetch('https://cloud.trinyx.fr/api/catalog-bundles/seed', { signal: ctrl.signal });
     clearTimeout(timer);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const bundle = await res.json();
@@ -123,22 +123,22 @@ async function up() {
   const info = checkDocker();
   log(`${c.green('✓')} Docker ${c.dim(info.docker)} · Compose ${c.dim(info.compose)}`);
   const compose = ensureWorkdir();
-  log(`${c.b('LiveContext')} ${c.dim('v' + VERSION)} : starting the stack in ${c.cyan(HOME)}`);
+  log(`${c.b('Trinyx')} ${c.dim('v' + VERSION)} : starting the stack in ${c.cyan(HOME)}`);
   await fetchSeed();
   log(c.dim('Pulling images and starting containers (first run downloads a few GB)...\n'));
   const code = await run('docker', composeArgs(compose, ['up', '-d', '--remove-orphans']));
   if (code !== 0) die('docker compose failed to start the stack. See the output above.');
-  process.stdout.write(`\n${c.dim('Waiting for LiveContext to become ready')}`);
+  process.stdout.write(`\n${c.dim('Waiting for Trinyx to become ready')}`);
   const ok = await waitForHealth();
   log('');
   if (!ok) {
     log(`${c.red('!')} The stack started but did not answer on port ${PORT} in time.`);
-    log(`  Check logs with: ${c.b('livecontext logs')}`);
+    log(`  Check logs with: ${c.b('trinyx logs')}`);
     process.exit(2);
   }
-  log(`\n${c.green('✓ LiveContext is running.')}`);
+  log(`\n${c.green('✓ Trinyx is running.')}`);
   log(`  Open ${c.b(c.cyan(`http://localhost:${PORT}`))}  ${c.dim('(the first account you create becomes the admin)')}`);
-  log(`\n  ${c.dim('Manage it:')}  livecontext logs   ·   livecontext down   ·   livecontext update`);
+  log(`\n  ${c.dim('Manage it:')}  trinyx logs   ·   trinyx down   ·   trinyx update`);
   log(`  ${c.dim('Optional config (LLM keys, SMTP, ports):')} edit ${c.dim(join(HOME, '.env.example'))} → .env and re-run.\n`);
 }
 
@@ -170,11 +170,11 @@ async function update() {
 }
 function help() {
   log(`
-${c.b('LiveContext')} ${c.dim('v' + VERSION)} : self-hosted AI automation, one command.
+${c.b('Trinyx')} ${c.dim('v' + VERSION)} : self-hosted AI automation, one command.
 
-  ${c.b('npx livecontext')} ${c.dim('[command]')}
+  ${c.b('npx trinyx')} ${c.dim('[command]')}
 
-  ${c.cyan('up')}        Start LiveContext (default). Pulls images and boots the stack.
+  ${c.cyan('up')}        Start Trinyx (default). Pulls images and boots the stack.
   ${c.cyan('down')}      Stop and remove the containers.
   ${c.cyan('logs')}      Follow the logs.
   ${c.cyan('status')}    Show container status.

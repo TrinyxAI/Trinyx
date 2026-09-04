@@ -238,7 +238,9 @@ public class BrowserAgentNode extends BaseNode {
         // panel shows the literal task, not raw `{{trigger.task}}`
         // placeholders.
         recordObservability(context, rawOutput, toolResult.success(),
-            toolResult.error(), duration, resolvedParams);
+            toolResult.error(), duration, resolvedParams,
+            toolResult.metadata() != null
+                    && Boolean.TRUE.equals(toolResult.metadata().get("externalBillingManaged")));
 
         if (!toolResult.success()) {
             String err = toolResult.error() != null ? toolResult.error() : "Browser session failed";
@@ -474,7 +476,8 @@ public class BrowserAgentNode extends BaseNode {
                                      boolean success,
                                      String errorMessage,
                                      long durationMs,
-                                     Map<String, Object> resolvedParams) {
+                                     Map<String, Object> resolvedParams,
+                                     boolean creditExternallyManaged) {
         if (agentClient == null) {
             return;
         }
@@ -484,6 +487,7 @@ public class BrowserAgentNode extends BaseNode {
             // PR20 - propagate workspace identity onto the browser-agent workflow-node row.
             req.setOrganizationId(context.organizationId());
             req.setAgentType("browser_agent");
+            req.setCreditExternallyManaged(creditExternallyManaged);
             req.setNodeId(nodeId);
             req.setRunId(context.runId());
             req.setEpoch(context.epoch());

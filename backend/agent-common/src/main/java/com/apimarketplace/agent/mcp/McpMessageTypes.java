@@ -18,7 +18,7 @@ public class McpMessageTypes {
     ) {
         public static ServerInfo defaultInfo() {
             return new ServerInfo(
-                "LiveContext Agent Tools",
+                "Trinyx Agent Tools",
                 "1.0.0",
                 new ServerCapabilities(true, true, false)
             );

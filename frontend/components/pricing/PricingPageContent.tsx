@@ -27,9 +27,9 @@ import { CREDIT_TIERS, BASE_PRICES, STARTER_MAX_CREDITS, calcPrice as calcPriceB
 import { formatUtcDate } from '@/lib/utils/dateFormatters';
 import { cloudLinkService, type CloudLinkStatus, CLOUD_NO_SUBSCRIPTION } from '@/lib/api/cloud-link.service';
 
-// CE installs manage billing on the LINKED LiveContext Cloud account; the cloud web app lives
+// CE installs manage billing on the LINKED Trinyx Cloud account; the cloud web app lives
 // here (matches the hardcoded cloud host used elsewhere in CE, e.g. marketplace CategoryFilter).
-const CLOUD_WEB_BASE = 'https://livecontext.ai';
+const CLOUD_WEB_BASE = 'https://app.trinyx.fr';
 const DELEGATES_BILLING_TO_CLOUD = IS_CE && !IS_BILLING_ENABLED;
 
 

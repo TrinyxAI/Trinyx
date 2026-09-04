@@ -15,119 +15,203 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 
 /**
- * Security filter that verifies requests originate from the API Gateway.
- *
- * <p>Every non-public request must carry {@code X-Gateway-Secret} and
- * {@code X-Gateway-Timestamp} headers that the gateway generates using a
- * shared HMAC-like scheme. Without this filter an attacker with network
- * access could spoof the {@code X-User-ID} header and impersonate any tenant.</p>
- *
- * <p>Public paths are configured per-service via {@link GatewayFilterProperties}.</p>
- *
- * <p>The filter can be disabled via {@code gateway.filter.verification-enabled=false}
- * for local development or test profiles.</p>
+ * Verifies gateway-authenticated context. Version 1 remains available only for
+ * controlled migration; version 2 binds the complete request and prevents replay.
  */
 @Order(1)
 public class GatewayAuthenticationFilter implements Filter {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayAuthenticationFilter.class);
 
-    private static final String HEADER_GATEWAY_SECRET = "X-Gateway-Secret";
-    private static final String HEADER_GATEWAY_TIMESTAMP = "X-Gateway-Timestamp";
-    private static final String HEADER_PROVIDER_ID = "X-Provider-ID";
-
-    /** Maximum allowed clock skew between gateway and this service (5 minutes). */
-    private static final long MAX_TIMESTAMP_AGE_MS = 300_000;
+    private static final String SECRET = "X-Gateway-Secret";
+    private static final String VERSION = "X-Gateway-Signature-Version";
+    private static final String TIMESTAMP = "X-Gateway-Timestamp";
+    private static final String NONCE = "X-Gateway-Nonce";
+    private static final String BODY_HASH = "X-Gateway-Body-SHA256";
+    private static final String PROVIDER = "X-Provider-ID";
 
     private final GatewayFilterProperties properties;
+    private final GatewayNonceStore nonceStore;
 
+    /** Test/backward-compatible constructor. Production auto-configuration supplies Redis. */
     public GatewayAuthenticationFilter(GatewayFilterProperties properties) {
+        this(properties, new InMemoryGatewayNonceStore());
+    }
+
+    public GatewayAuthenticationFilter(GatewayFilterProperties properties, GatewayNonceStore nonceStore) {
         this.properties = properties;
+        this.nonceStore = nonceStore;
         if (properties.isVerificationEnabled() && isUnsafeSecret(properties.getSecretKey())) {
-            throw new IllegalStateException("gateway.filter.secret-key must be configured when gateway verification is enabled");
+            throw new IllegalStateException(
+                    "gateway.filter.secret-key must be a non-placeholder key when verification is enabled");
         }
-        // Loud warning on startup when HMAC verification is disabled. Accidentally flipping
-        // this to false in prod silently reopens the "any client can forge X-User-Roles:
-        // ADMIN against port 8083" bypass - there must be no way to miss it in logs.
+        if (properties.isVerificationEnabled()) {
+            properties.getServiceSecrets().forEach((serviceId, serviceSecret) -> {
+                if (isUnsafeSecret(serviceSecret)) {
+                    throw new IllegalStateException(
+                            "gateway.filter.service-secrets." + serviceId
+                                    + " must be a non-placeholder key");
+                }
+            });
+        }
+        if (properties.isVerificationEnabled() && properties.isRequireDistributedNonceStore()) {
+            if (!nonceStore.distributed()) {
+                throw new IllegalStateException(
+                        "Gateway HMAC v2 requires a distributed nonce store in this environment");
+            }
+            nonceStore.assertAvailable();
+        }
         if (!properties.isVerificationEnabled()) {
-            log.warn("╔════════════════════════════════════════════════════════════════╗");
-            log.warn("║  SECURITY WARNING: gateway HMAC verification is DISABLED.     ║");
-            log.warn("║  gateway.filter.verification-enabled=false                    ║");
-            log.warn("║  Any client with network access can forge X-User-Roles and   ║");
-            log.warn("║  X-User-ID headers. This must ONLY be used in dev/test.      ║");
-            log.warn("╚════════════════════════════════════════════════════════════════╝");
+            log.warn("SECURITY WARNING: gateway HMAC verification is disabled");
+        }
+        if (properties.isVerificationEnabled() && properties.isAcceptV1()) {
+            log.warn("Gateway HMAC v1 compatibility is enabled; disable it after signer migration");
         }
     }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
+        HttpServletRequest http = (HttpServletRequest) request;
+        HttpServletResponse target = (HttpServletResponse) response;
 
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        HttpServletResponse httpResponse = (HttpServletResponse) response;
-
-        // When verification is disabled (dev/test), pass through immediately
         if (!properties.isVerificationEnabled()) {
             chain.doFilter(request, response);
             return;
         }
 
-        String requestPath = httpRequest.getRequestURI();
-
-        // Public endpoints do not require gateway authentication unless explicitly
-        // listed as HMAC-required dangerous internal endpoints.
-        if (isPublicEndpoint(requestPath) && !isHmacRequiredEndpoint(requestPath)) {
+        String path = http.getRequestURI();
+        if (isPublicEndpoint(path) && !isHmacRequiredEndpoint(path)) {
             chain.doFilter(request, response);
             return;
         }
 
-        // Extract gateway headers
-        String gatewaySecretHeader = httpRequest.getHeader(HEADER_GATEWAY_SECRET);
-        String gatewayTimestamp = httpRequest.getHeader(HEADER_GATEWAY_TIMESTAMP);
-
-        // Resolve providerId: query parameter first, then header fallback
-        String providerId = httpRequest.getParameter("providerId");
-        if (providerId == null) {
-            providerId = httpRequest.getHeader(HEADER_PROVIDER_ID);
-        }
-
-        // Reject if any required header/parameter is missing
-        if (gatewaySecretHeader == null || gatewayTimestamp == null || providerId == null) {
-            log.warn("Gateway headers missing for {} - secret={}, timestamp={}, providerId={}",
-                    requestPath,
-                    gatewaySecretHeader != null ? "present" : "absent",
-                    gatewayTimestamp != null ? "present" : "absent",
-                    providerId != null ? "present" : "absent");
-            rejectRequest(httpResponse, HttpServletResponse.SC_UNAUTHORIZED, "Missing gateway authentication headers");
+        if (GatewaySignatureV2.VERSION.equals(http.getHeader(VERSION))) {
+            verifyV2(http, target, chain);
             return;
         }
 
-        // Audit 2026-05-17 round-3 F16 - pass user + org headers into the
-        // verification step so the signature binds to them.
-        String userIdHdr = httpRequest.getHeader("X-User-ID");
-        String orgIdHdr = httpRequest.getHeader("X-Organization-ID");
-        if (!isValidGatewaySecret(gatewaySecretHeader, providerId, gatewayTimestamp, userIdHdr, orgIdHdr)) {
-            log.warn("Invalid gateway secret for path={} providerId={}", requestPath, providerId);
-            rejectRequest(httpResponse, HttpServletResponse.SC_UNAUTHORIZED, "Invalid gateway secret");
+        if (!properties.isAcceptV1()) {
+            rejectRequest(target, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Gateway signature version 2 is required");
+            return;
+        }
+        verifyV1(http, target, chain);
+    }
+
+    private void verifyV2(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        String signature = request.getHeader(SECRET);
+        String timestamp = request.getHeader(TIMESTAMP);
+        String nonce = request.getHeader(NONCE);
+        String bodyHash = request.getHeader(BODY_HASH);
+        String providerId = request.getHeader(PROVIDER);
+
+        if (blank(signature) || blank(timestamp) || blank(nonce)
+                || blank(bodyHash) || blank(providerId)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Missing gateway authentication v2 headers");
+            return;
+        }
+        if (!signature.startsWith(GatewaySignatureV2.PREFIX)
+                || !timestampWithinAbsoluteSkew(timestamp, properties.getV2TimestampSkewMs())) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Invalid gateway signature or timestamp");
             return;
         }
 
-        log.debug("Gateway authentication passed for path={}", requestPath);
+        String userRoles = request.getHeader("X-User-Roles");
+        String organizationRole = request.getHeader("X-Organization-Role");
+        if (!GatewaySignatureV2.rolesAreSafe(userRoles)
+                || !GatewaySignatureV2.rolesAreSafe(organizationRole)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid role context");
+            return;
+        }
+
+        CachedBodyHttpServletRequest cached;
+        try {
+            cached = new CachedBodyHttpServletRequest(request, properties.getMaxBodyBytes());
+        } catch (CachedBodyHttpServletRequest.BodyTooLargeException tooLarge) {
+            rejectRequest(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE, tooLarge.getMessage());
+            return;
+        }
+
+        String actualBodyHash = GatewaySignatureV2.sha256Hex(cached.body());
+        if (!GatewaySignatureV2.constantTimeEquals(bodyHash.toLowerCase(), actualBodyHash)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Gateway body hash mismatch");
+            return;
+        }
+
+        String query = request.getQueryString();
+        String requestTarget = request.getRequestURI()
+                + (query == null || query.isEmpty() ? "" : "?" + query);
+        GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
+                timestamp,
+                nonce,
+                request.getMethod(),
+                requestTarget,
+                actualBodyHash,
+                providerId,
+                request.getHeader("X-User-ID"),
+                request.getHeader("X-Principal-ID"),
+                request.getHeader("X-Billing-Subject-ID"),
+                request.getHeader("X-Organization-ID"),
+                organizationRole,
+                userRoles,
+                request.getHeader("X-Install-ID"));
+
+        String signingSecret = properties.secretFor(providerId, request.getRequestURI());
+        if (signingSecret == null
+                || !properties.serviceMayCall(providerId, request.getMethod(), request.getRequestURI())) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Invalid service identity or route audience");
+            return;
+        }
+        String expected = GatewaySignatureV2.sign(signingSecret, context);
+        if (!GatewaySignatureV2.constantTimeEquals(signature, expected)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid gateway signature");
+            return;
+        }
+
+        // Consume only after cryptographic verification so unauthenticated traffic
+        // cannot exhaust the replay cache.
+        if (!nonceStore.consume(providerId, nonce, Duration.ofMillis(properties.getNonceTtlMs()))) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Replayed gateway nonce");
+            return;
+        }
+
+        chain.doFilter(cached, response);
+    }
+
+    private void verifyV1(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        String signature = request.getHeader(SECRET);
+        String timestamp = request.getHeader(TIMESTAMP);
+        // Preserve v1 query-parameter priority while migration is active.
+        String providerId = request.getParameter("providerId");
+        if (providerId == null) providerId = request.getHeader(PROVIDER);
+
+        if (blank(signature) || blank(timestamp) || blank(providerId)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED,
+                    "Missing gateway authentication headers");
+            return;
+        }
+
+        String userId = request.getHeader("X-User-ID");
+        String organizationId = request.getHeader("X-Organization-ID");
+        if (!isValidGatewaySecret(signature, providerId, timestamp, userId, organizationId)) {
+            rejectRequest(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid gateway secret");
+            return;
+        }
         chain.doFilter(request, response);
     }
 
-    /**
-     * Determines whether a request path is a public endpoint that does not
-     * require gateway authentication. Matches against the configured
-     * {@code gateway.filter.public-paths} prefixes.
-     */
     boolean isPublicEndpoint(String path) {
         return matchesAnyPrefix(path, properties.getPublicPaths());
     }
@@ -137,84 +221,76 @@ public class GatewayAuthenticationFilter implements Filter {
     }
 
     private boolean matchesAnyPrefix(String path, List<String> prefixes) {
-        if (prefixes == null || prefixes.isEmpty()) {
-            return false;
-        }
+        if (prefixes == null || prefixes.isEmpty()) return false;
         for (String prefix : prefixes) {
-            if (prefix != null && path.startsWith(prefix)) {
-                return true;
-            }
+            if (prefix != null && path.startsWith(prefix)) return true;
         }
         return false;
     }
 
     private boolean isUnsafeSecret(String secret) {
-        return secret == null
-                || secret.isBlank()
-                || GatewayFilterProperties.DEFAULT_SECRET_KEY.equals(secret);
+        if (secret == null || secret.isBlank()
+                || GatewayFilterProperties.DEFAULT_SECRET_KEY.equals(secret)) {
+            return true;
+        }
+        String normalized = secret.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.startsWith("replace-with")
+                || normalized.startsWith("ci-")
+                || normalized.contains("changeme");
     }
 
-    private static final String HMAC_ALGO = "HmacSHA256";
-    private static final String SIGNATURE_PREFIX = "gw_";
-
-    /**
-     * Verify the HMAC-SHA256 signature emitted by
-     * {@code gateway.GatewaySecurityService}. Null user/org coerce to empty
-     * string; both sides use the identical data shape:
-     * {@code HMAC(secret, providerId|userId|orgId|timestamp)}.
-     *
-     * <p>Comparison is constant-time via {@link MessageDigest#isEqual} to
-     * defeat timing-side-channel attacks on the signature byte slice.
-     */
     boolean isValidGatewaySecret(String receivedSecret, String providerId, String timestamp,
-                                  String userId, String organizationId) {
+                                 String userId, String organizationId) {
         try {
-            if (receivedSecret == null || !receivedSecret.startsWith(SIGNATURE_PREFIX)) {
-                return false;
-            }
-            long requestTime = Long.parseLong(timestamp);
-            if (System.currentTimeMillis() - requestTime > MAX_TIMESTAMP_AGE_MS) {
-                log.debug("Gateway timestamp expired: age={}ms",
-                        System.currentTimeMillis() - requestTime);
-                return false;
-            }
+            if (receivedSecret == null || !receivedSecret.startsWith("gw_")) return false;
+            if (!timestampWithinAbsoluteSkew(timestamp, properties.getV1TimestampSkewMs())) return false;
             String expected = generateExpectedSecret(providerId, timestamp, userId, organizationId);
             return MessageDigest.isEqual(
                     receivedSecret.getBytes(StandardCharsets.UTF_8),
                     expected.getBytes(StandardCharsets.UTF_8));
-        } catch (NumberFormatException e) {
-            log.warn("Invalid gateway timestamp format: {}", timestamp);
-            return false;
         } catch (Exception e) {
-            log.error("Error validating gateway secret: {}", e.getMessage());
+            log.debug("Gateway v1 validation failed: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Compute the expected HMAC-SHA256 signature for the given (providerId,
-     * userId, organizationId, timestamp) tuple. MUST stay byte-identical to
-     * {@code gateway.GatewaySecurityService.computeSignature}.
-     */
-    String generateExpectedSecret(String providerId, String timestamp, String userId, String organizationId) {
-        String safeUser = userId != null ? userId : "";
-        String safeOrg = organizationId != null ? organizationId : "";
-        String data = providerId + "|" + safeUser + "|" + safeOrg + "|" + timestamp;
+    String generateExpectedSecret(String providerId, String timestamp,
+                                  String userId, String organizationId) {
+        String data = (providerId == null ? "" : providerId) + "|"
+                + (userId == null ? "" : userId) + "|"
+                + (organizationId == null ? "" : organizationId) + "|" + timestamp;
         try {
-            Mac mac = Mac.getInstance(HMAC_ALGO);
+            Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(
-                    properties.getSecretKey().getBytes(StandardCharsets.UTF_8), HMAC_ALGO));
-            byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            return SIGNATURE_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+                    properties.getSecretKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return "gw_" + Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
             throw new IllegalStateException("HmacSHA256 unavailable", e);
         }
+    }
+
+    private boolean timestampWithinAbsoluteSkew(String value, long maximumSkewMs) {
+        if (maximumSkewMs < 0) {
+            return false;
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            long delta = Math.subtractExact(System.currentTimeMillis(), parsed);
+            return delta >= -maximumSkewMs && delta <= maximumSkewMs;
+        } catch (NumberFormatException | ArithmeticException e) {
+            return false;
+        }
+    }
+
+    private boolean blank(String value) {
+        return value == null || value.isBlank();
     }
 
     private void rejectRequest(HttpServletResponse response, int status, String message) throws IOException {
         response.setStatus(status);
         response.setContentType("application/json");
-        response.getWriter().write(
-                String.format("{\"error\":\"Unauthorized\",\"message\":\"%s\"}", message));
+        response.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\""
+                + message.replace("\"", "") + "\"}");
     }
 }

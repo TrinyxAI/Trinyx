@@ -12,7 +12,7 @@ import java.util.UUID;
  * {@code storage.storage} row UUID - never by the raw S3 key. The S3 key starts with the
  * numeric tenant/user id ({@code {tenantId}/{workflowId}/...}), so putting it in a URL leaks
  * the owner's id; the row UUID leaks nothing. The URL is built against the public origin
- * ({@code app.base-url} = {@code APP_PUBLIC_URL}, e.g. {@code https://livecontext.ai}) and
+ * ({@code app.base-url} = {@code APP_PUBLIC_URL}, e.g. {@code https://app.trinyx.fr}) and
  * targets the Next.js proxy path {@code /api/proxy/files/by-id/{id}/raw}, which forwards to the
  * org-scoped streaming endpoint in storage-service and promotes the caller's session token.
  *

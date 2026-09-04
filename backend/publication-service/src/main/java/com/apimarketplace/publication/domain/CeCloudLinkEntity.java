@@ -71,7 +71,7 @@ public class CeCloudLinkEntity implements OrgScopedEntity {
 
     /**
      * CE runtime source for API LLM providers. BYOK keeps local keys; CLOUD relays
-     * only the completion call to the linked LiveContext account.
+     * only the completion call to the linked Trinyx account.
      */
     @Column(name = "llm_source", nullable = false, length = 16)
     private String llmSource = "BYOK";
@@ -79,7 +79,7 @@ public class CeCloudLinkEntity implements OrgScopedEntity {
     /**
      * CE source for third-party catalog API platform credentials. BYOK executes locally
      * with the install's own credentials; CLOUD relays the tool execution to the linked
-     * LiveContext account, which injects its platform credentials and bills markup there.
+     * Trinyx account, which injects its platform credentials and bills markup there.
      */
     @Column(name = "catalog_source", nullable = false, length = 16)
     private String catalogSource = "BYOK";

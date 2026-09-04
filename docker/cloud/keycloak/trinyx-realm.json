@@ -30,16 +30,16 @@
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "https://app.trinyx.fr/api/cloud-link/callback",
-        "https://cloud.trinyx.fr/*"
+        "${PAID_PUBLIC_URL}/api/cloud-link/callback",
+        "${CLOUD_PUBLIC_URL}/*"
       ],
       "webOrigins": [
-        "https://app.trinyx.fr",
-        "https://cloud.trinyx.fr"
+        "${PAID_PUBLIC_URL}",
+        "${CLOUD_PUBLIC_URL}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://app.trinyx.fr/*##https://cloud.trinyx.fr/*"
+        "post.logout.redirect.uris": "${PAID_PUBLIC_URL}/*##${CLOUD_PUBLIC_URL}/*"
       },
       "protocolMappers": [
         {

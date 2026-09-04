@@ -157,6 +157,37 @@ services:
       AUTH_MODE: ${AUTH_MODE:-embedded}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-monolith}
       BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      MARKETPLACE_MODE: ${MARKETPLACE_MODE:-remote}
+      BILLING_AUTHORITY_MODE: ${BILLING_AUTHORITY_MODE:-native}
+      # CE remains disconnected by default. Paid-monolith explicitly enables this
+      # contract and supplies all private key material from its runtime secret store.
+      CLOUD_LINK_ENABLED: ${CLOUD_LINK_ENABLED:-false}
+      CLOUD_LINK_PENDING_STATE_STORE: ${CLOUD_LINK_PENDING_STATE_STORE:-in-memory}
+      CLOUD_LINK_REPLICA_COUNT: ${CLOUD_LINK_REPLICA_COUNT:-1}
+      MARKETPLACE_CLOUD_API_URL: "${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}/api"
+      CATALOG_BUNDLE_CLOUD_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      API_CATALOG_BUNDLE_CLOUD_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      SKILL_BUNDLE_CLOUD_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      CLOUD_KEYCLOAK_URL: "${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}"
+      CLOUD_LINK_CLIENT_ID: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
+      CLOUD_LINK_REDIRECT_URI: "${PAID_PUBLIC_URL:-https://app.trinyx.fr}/api/cloud-link/callback"
+      CLOUD_LINK_ENCRYPTION_KEY: ${CLOUD_LINK_ENCRYPTION_KEY:-}
+      CATALOG_BUNDLE_TRUSTED_KEYS: ${CATALOG_BUNDLE_TRUSTED_KEYS:-}
+      TRINYX_IDENTITY_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+      TRINYX_IDENTITY_SIGNING_KID: ${TRINYX_IDENTITY_SIGNING_KID:-}
+      TRINYX_IDENTITY_SIGNING_KEY: ${TRINYX_IDENTITY_SIGNING_KEY:-}
+      TRINYX_ENTITLEMENT_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+      TRINYX_ENTITLEMENT_SIGNING_KID: ${TRINYX_ENTITLEMENT_SIGNING_KID:-}
+      TRINYX_ENTITLEMENT_SIGNING_KEY: ${TRINYX_ENTITLEMENT_SIGNING_KEY:-}
+      TRINYX_S2S_SIGNING_ISSUER: ${TRINYX_S2S_SIGNING_ISSUER:-trinyx-paid-authority}
+      TRINYX_S2S_SIGNING_AUDIENCE: ${TRINYX_S2S_SIGNING_AUDIENCE:-trinyx-cloud-internal}
+      TRINYX_S2S_SIGNING_KID: ${TRINYX_S2S_SIGNING_KID:-}
+      TRINYX_S2S_SIGNING_KEY: ${TRINYX_S2S_SIGNING_KEY:-}
+      TRINYX_S2S_VERIFICATION_ISSUER: ${TRINYX_S2S_VERIFICATION_ISSUER:-trinyx-cloud}
+      TRINYX_S2S_VERIFICATION_AUDIENCE: ${TRINYX_S2S_VERIFICATION_AUDIENCE:-trinyx-billing-authority}
+      TRINYX_S2S_VERIFICATION_KEYS: ${TRINYX_S2S_VERIFICATION_KEYS:-}
+      TRINYX_ENTITLEMENT_CLOUD_INGEST_URL: ${TRINYX_ENTITLEMENT_CLOUD_INGEST_URL:-https://cloud-internal.trinyx.private:8443/internal/v1/entitlement-projections}
+      TRINYX_IDENTITY_CLOUD_REVOCATION_URL: ${TRINYX_IDENTITY_CLOUD_REVOCATION_URL:-https://cloud-internal.trinyx.private:8443/internal/v1/identity-bindings/revocations}
       CREDIT_UNLIMITED: ${CREDIT_UNLIMITED:-true}
       CREDIT_CONSUMPTION_ENABLED: ${CREDIT_CONSUMPTION_ENABLED:-true}
       PLAN_LIMITS_ENABLED: ${PLAN_LIMITS_ENABLED:-false}
@@ -203,7 +234,7 @@ services:
       # update check while staying unidentified, or ENABLED=false to drop the request
       # entirely (no badge either). See README-CE.md.
       CE_VERSIONCHECK_ENABLED: ${CE_VERSIONCHECK_ENABLED:-true}
-      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-true}
+      CE_VERSIONCHECK_SENDINSTALLID: ${CE_VERSIONCHECK_SENDINSTALLID:-false}
       # Browser agent (agent_browse) - OFF by default. Opt in with the
       # `browser-agent` profile + WEBSEARCH_ENABLED=true (both set by
       # docker/.env.ce.browser-agent). When enabled, the orchestrator talks to

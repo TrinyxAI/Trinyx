@@ -1,7 +1,7 @@
 /**
  * Cloud Link Service
  *
- * CE-only: Manages the OAuth link between CE instance and LiveContext cloud account.
+ * CE-only: Manages the OAuth link between CE instance and Trinyx cloud account.
  */
 
 import { apiClient } from './api-client';

@@ -40,7 +40,7 @@ public class WebSearchConfig {
      * VLAN IP (e.g. {@code http://10.0.0.0:8085}) which the user's browser
      * cannot reach - Caddy on app-host proxies {@code /cdp/*} to the
      * websearch host instead. This must therefore point at the public
-     * site (e.g. {@code https://livecontext.ai}). When unset, falls back
+     * site (e.g. {@code https://app.trinyx.fr}). When unset, falls back
      * to {@link #serviceUrl} so dev/local setups (where service URL = host
      * URL) keep working without extra config.
      */

@@ -1,5 +1,6 @@
 package com.apimarketplace.auth.config;
 
+import com.apimarketplace.auth.service.WorkspaceStorageObjectDeleter;
 import com.apimarketplace.storage.client.StorageClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,7 +22,16 @@ public class StorageClientConfig {
 
     @Bean
     public StorageClient storageClient(
-            @Value("${services.storage-url:http://localhost:8082}") String storageUrl) {
-        return new StorageClient(storageUrl);
+            @Value("${services.storage-url:http://localhost:8082}") String storageUrl,
+            @Value("${internal.s2s.service-secret:}") String serviceSecret,
+            @Value("${trinyx.tenant-delegation.secret:}") String erasureAuthoritySecret) {
+        return new StorageClient(
+                storageUrl, serviceSecret, "auth-service", erasureAuthoritySecret);
+    }
+
+    @Bean
+    public WorkspaceStorageObjectDeleter workspaceStorageObjectDeleter(
+            StorageClient storageClient) {
+        return storageClient::deleteWorkspaceErasure;
     }
 }

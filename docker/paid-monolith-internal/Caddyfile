@@ -1,0 +1,30 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+# Deploy on the paid-monolith host only. Bind this listener to the host's private
+# VPC address at the infrastructure layer and allow ingress solely from the
+# Trinyx Cloud security group. The public app.trinyx.fr proxy must not import
+# this file or route /internal/v1/**.
+https://{$PAID_MONOLITH_INTERNAL_HOST:billing-internal.trinyx.private}:{$PAID_MONOLITH_INTERNAL_PORT:8443} {
+	tls {$PAID_MONOLITH_INTERNAL_CERT_FILE} {$PAID_MONOLITH_INTERNAL_KEY_FILE}
+
+	@wallet {
+		method POST
+		path /internal/v1/credit-reservations /internal/v1/credit-reservations/*/dispatching /internal/v1/credit-reservations/*/commit /internal/v1/credit-reservations/*/release /internal/v1/credit-reservations/*/outcome-unknown
+	}
+	handle @wallet {
+		reverse_proxy 127.0.0.1:8080 {
+			# MonolithSecurityFilter grants the workload-token bypass only to a
+			# genuine loopback hop without public proxy provenance.
+			header_up -Forwarded
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+			header_up -X-Real-IP
+		}
+	}
+
+	respond 404
+}

@@ -3,7 +3,8 @@ package com.apimarketplace.auth.metrics;
 import com.apimarketplace.auth.repository.UserRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Meter;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,12 +16,12 @@ import static org.mockito.Mockito.when;
 @DisplayName("AuthMetrics")
 class AuthMetricsTest {
 
-    private SimpleMeterRegistry registry;
+    private PrometheusMeterRegistry registry;
     private AuthMetrics metrics;
 
     @BeforeEach
     void setUp() {
-        registry = new SimpleMeterRegistry();
+        registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         UserRepository repo = mock(UserRepository.class);
         when(repo.count()).thenReturn(0L);
         metrics = new AuthMetrics(registry, repo);
@@ -73,6 +74,21 @@ class AuthMetricsTest {
                 .filter(m -> "google".equals(m.getId().getTag("provider")))
                 .count();
         assertThat(matching).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Prometheus login meters always use the same tag-key schema")
+    void loginMeters_useStablePrometheusTagKeys() {
+        metrics.loginSuccess("google");
+        metrics.loginFailure("google", "invalid_credentials");
+
+        assertThat(registry.getMeters().stream()
+                .map(Meter::getId)
+                .filter(id -> AuthMetrics.LOGIN_TOTAL.equals(id.getName()))
+                .map(id -> id.getTags().stream().map(tag -> tag.getKey()).sorted().toList())
+                .distinct())
+                .containsExactly(java.util.List.of("provider", "reason", "result"));
+        assertThat(registry.scrape()).contains("auth_login_total");
     }
 
     @Test

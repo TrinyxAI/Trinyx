@@ -117,7 +117,7 @@ public class RssNode extends BaseNode {
             .uri(URI.create(url))
             .timeout(HTTP_TIMEOUT)
             .header("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")
-            .header("User-Agent", "LiveContext-RSSNode/1.0")
+            .header("User-Agent", "Trinyx-RSSNode/1.0")
             .GET()
             .build();
 

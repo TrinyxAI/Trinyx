@@ -3,11 +3,29 @@ name: Validate Cloud stack
 on:
   pull_request:
     paths:
+      - "docker-compose.yml"
       - "docker/docker-compose.cloud.yml"
+      - "docker/docker-compose.cloud.runtime.yml"
+      - "docker/cloud-images.json"
+      - "backend/**"
+      - "frontend/**"
+      - "mcp/**"
+      - "websearch-service/**"
+      - "screenshot-renderer/**"
+      - "cli/**"
       - "docker/.env.cloud.example"
       - "docker/cloud/**"
       - "docs/deployment/cloud.md"
-      - ".github/workflows/cloud-stack.yml"
+      - "docs/deployment/cloud-gateway-routes.md"
+      - "docs/**"
+      - "templates/**"
+      - "README.md"
+      - "docker/README-CE.md"
+      - ".github/workflows/**"
+      - "scripts/validate-trinyx-branding.sh"
+      - "scripts/validate-phase2-reachability.mjs"
+      - "scripts/validate-cloud-image-contract.mjs"
+      - "scripts/validate-cloud-publisher-bootstrap.mjs"
   workflow_dispatch:
 
 permissions:
@@ -16,8 +34,18 @@ permissions:
 jobs:
   cloud-compose:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4.11-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
         with:
           fetch-depth: 0
 
@@ -26,8 +54,13 @@ jobs:
         run: |
           set -euo pipefail
           test -f docker/docker-compose.cloud.yml
+          test -f docker/docker-compose.cloud.runtime.yml
+          test -f docker/cloud-images.json
+          test -f scripts/validate-cloud-image-contract.mjs
+          test -f scripts/validate-cloud-publisher-bootstrap.mjs
           test -f docker/.env.cloud.example
           test -f docker/cloud/Caddyfile
+          test -f docker/paid-monolith-internal/Caddyfile
           test -f docker/cloud/keycloak/Dockerfile
           test -f docker/cloud/keycloak/trinyx-realm.json
           test -f docker/cloud/postgres/00-keycloak-schema.sql
@@ -44,6 +77,205 @@ jobs:
           set -euo pipefail
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config --quiet
           docker compose             --env-file docker/.env.cloud.example             -f docker/docker-compose.cloud.yml             config > /tmp/trinyx-cloud.rendered.yml
+          node scripts/validate-cloud-image-contract.mjs
+          node scripts/validate-cloud-publisher-bootstrap.mjs
+          cp docker/.env.cloud.example /tmp/trinyx-cloud-runtime.env
+          node <<'NODE'
+          const fs = require('node:fs');
+          const inventory = JSON.parse(fs.readFileSync('docker/cloud-images.json', 'utf8'));
+          const imageEnv = inventory.images.map((item, index) => {
+            const digest = (index + 1).toString(16).padStart(64, '0');
+            return item.environment + '=' + item.package + '@sha256:' + digest;
+          });
+          fs.appendFileSync('/tmp/trinyx-cloud-runtime.env', '\n' + imageEnv.join('\n') + '\n');
+          NODE
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml config --quiet
+          docker compose --env-file /tmp/trinyx-cloud-runtime.env \
+            -f docker/docker-compose.cloud.yml \
+            -f docker/docker-compose.cloud.runtime.yml \
+            config --format json > /tmp/trinyx-cloud-runtime.json
+          node scripts/validate-cloud-image-contract.mjs \
+            --rendered /tmp/trinyx-cloud-runtime.json
+          CLOUD_PUBLIC_URL=https://cloud-staging.example.invalid \
+            KEYCLOAK_PUBLIC_URL=https://auth-staging.example.invalid \
+            PAID_PUBLIC_URL=https://app-staging.example.invalid \
+            docker compose --env-file docker/.env.cloud.example \
+              -f docker/docker-compose.cloud.yml config --format json \
+              > /tmp/trinyx-cloud.staging.json
+          PISTON_ENABLED=true \
+            PISTON_URL=https://piston-staging.example.invalid \
+            docker compose --env-file docker/.env.cloud.example \
+              -f docker/docker-compose.cloud.yml config --format json \
+              > /tmp/trinyx-cloud.piston-enabled.json
+          docker compose -f docker-compose.yml config --format json \
+            > /tmp/trinyx-paid.defaults.json
+          env \
+            CLOUD_PUBLIC_URL=https://cloud-staging.example.invalid \
+            KEYCLOAK_PUBLIC_URL=https://auth-staging.example.invalid \
+            PAID_PUBLIC_URL=https://app-staging.example.invalid \
+            KEYCLOAK_REALM_NAME=trinyx-staging \
+            KEYCLOAK_FRONTEND_CLIENT_ID=trinyx-staging-frontend \
+            MARKETPLACE_MODE=local \
+            BILLING_AUTHORITY_MODE=paid-monolith-authority \
+            CLOUD_LINK_ENABLED=true \
+            CLOUD_LINK_ENCRYPTION_KEY=test-only-cloud-link-encryption-key \
+            CATALOG_BUNDLE_TRUSTED_KEYS=test-catalog-key=test-only-public-key \
+            TRINYX_IDENTITY_SIGNING_KID=test-identity-kid \
+            TRINYX_IDENTITY_SIGNING_KEY=test-only-identity-private-key \
+            TRINYX_ENTITLEMENT_SIGNING_KID=test-entitlement-kid \
+            TRINYX_ENTITLEMENT_SIGNING_KEY=test-only-entitlement-private-key \
+            TRINYX_S2S_SIGNING_ISSUER=test-paid-authority \
+            TRINYX_S2S_SIGNING_AUDIENCE=test-cloud-internal \
+            TRINYX_S2S_SIGNING_KID=test-workload-kid \
+            TRINYX_S2S_SIGNING_KEY=test-only-workload-private-key \
+            TRINYX_S2S_VERIFICATION_ISSUER=test-cloud \
+            TRINYX_S2S_VERIFICATION_AUDIENCE=test-billing-authority \
+            TRINYX_S2S_VERIFICATION_KEYS=test-cloud-kid=test-only-public-key \
+            TRINYX_ENTITLEMENT_CLOUD_INGEST_URL=https://cloud-internal-staging.example.invalid:8443/internal/v1/entitlement-projections \
+            TRINYX_IDENTITY_CLOUD_REVOCATION_URL=https://cloud-internal-staging.example.invalid:8443/internal/v1/identity-bindings/revocations \
+            docker compose -f docker-compose.yml config --format json \
+              > /tmp/trinyx-paid.cloud-link.json
+
+      - name: Assert staging origins and paid CloudLink Compose contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const stagingCloud = JSON.parse(fs.readFileSync('/tmp/trinyx-cloud.staging.json', 'utf8'));
+          const pistonEnabledCloud = JSON.parse(fs.readFileSync('/tmp/trinyx-cloud.piston-enabled.json', 'utf8'));
+          const paidDefaults = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.defaults.json', 'utf8'));
+          const paidCloudLink = JSON.parse(fs.readFileSync('/tmp/trinyx-paid.cloud-link.json', 'utf8'));
+
+          const cloudUrl = 'https://cloud-staging.example.invalid';
+          const keycloakUrl = 'https://auth-staging.example.invalid';
+          const paidUrl = 'https://app-staging.example.invalid';
+          const forbidden = [
+            'https://cloud.trinyx.fr',
+            'https://auth.trinyx.fr',
+            'https://app.trinyx.fr',
+          ];
+          const assertEqual = (actual, expected, label) => {
+            if (actual !== expected) {
+              throw new Error(label + ': expected ' + expected + ', got ' + actual);
+            }
+          };
+          for (const value of forbidden) {
+            if (JSON.stringify(stagingCloud).includes(value)) {
+              throw new Error('staging Cloud render retained production origin ' + value);
+            }
+            if (JSON.stringify(paidCloudLink).includes(value)) {
+              throw new Error('paid CloudLink render retained production origin ' + value);
+            }
+          }
+
+          const orchestrator = stagingCloud.services['orchestrator-service'].environment;
+          const remotePiston = pistonEnabledCloud.services['orchestrator-service'].environment;
+          assertEqual(orchestrator.PISTON_ENABLED, 'false', 'Cloud Piston opt-in');
+          assertEqual(orchestrator.PISTON_EMBEDDED, 'false', 'Cloud embedded code hard-disable');
+          assertEqual(orchestrator.PISTON_URL, '', 'Cloud disabled Piston URL');
+          assertEqual(remotePiston.PISTON_ENABLED, 'true', 'remote Piston opt-in');
+          assertEqual(remotePiston.PISTON_EMBEDDED, 'false', 'remote Piston must remain isolated');
+          assertEqual(
+            remotePiston.PISTON_URL,
+            'https://piston-staging.example.invalid',
+            'remote Piston URL',
+          );
+
+          const auth = stagingCloud.services['auth-service'].environment;
+          const trigger = stagingCloud.services['trigger-service'].environment;
+          const gateway = stagingCloud.services['gateway-service'].environment;
+          const keycloak = stagingCloud.services.keycloak.environment;
+          for (const name of [
+            'APP_PUBLIC_URL', 'WEBHOOK_BASE_URL', 'CHAT_ENDPOINT_BASE_URL',
+            'FORM_ENDPOINT_BASE_URL', 'AGENT_WEBHOOK_BASE_URL',
+            'WEBSEARCH_PUBLIC_WS_BASE', 'OAUTH2_FRONTEND_URL',
+          ]) assertEqual(auth[name], cloudUrl, 'Cloud ' + name);
+          assertEqual(auth.OAUTH2_CALLBACK_URL, cloudUrl + '/api/credentials/oauth2/callback', 'Cloud OAuth callback');
+          assertEqual(auth.KEYCLOAK_ISSUER_URI, keycloakUrl + '/realms/trinyx', 'Cloud Keycloak issuer');
+          assertEqual(auth.SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI, keycloakUrl + '/realms/trinyx', 'resource server issuer');
+          assertEqual(auth.TRINYX_IDENTITY_ISSUER, paidUrl, 'identity issuer');
+          assertEqual(auth.TRINYX_ENTITLEMENT_ISSUER, paidUrl, 'entitlement issuer');
+          assertEqual(trigger.ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL, cloudUrl, 'trigger chat origin');
+          assertEqual(trigger.ORCHESTRATOR_FORM_ENDPOINT_BASE_URL, cloudUrl, 'trigger form origin');
+          assertEqual(gateway.KEYCLOAK_ISSUER, keycloakUrl + '/realms/trinyx', 'gateway issuer');
+          assertEqual(keycloak.KC_HOSTNAME, keycloakUrl, 'Keycloak hostname');
+          assertEqual(keycloak.CLOUD_PUBLIC_URL, cloudUrl, 'Keycloak realm Cloud origin');
+          assertEqual(keycloak.KEYCLOAK_PUBLIC_URL, keycloakUrl, 'Keycloak public origin');
+          assertEqual(keycloak.PAID_PUBLIC_URL, paidUrl, 'Keycloak realm paid origin');
+
+          let realmSource = fs.readFileSync('docker/cloud/keycloak/trinyx-realm.json', 'utf8');
+          realmSource = realmSource
+            .replaceAll('${CLOUD_PUBLIC_URL}', cloudUrl)
+            .replaceAll('${PAID_PUBLIC_URL}', paidUrl);
+          const realm = JSON.parse(realmSource);
+          const frontend = realm.clients.find((client) => client.clientId === '${KEYCLOAK_FRONTEND_CLIENT_ID}');
+          if (!frontend) throw new Error('Keycloak frontend client missing');
+          assertEqual(frontend.redirectUris[0], paidUrl + '/api/cloud-link/callback', 'paid callback');
+          assertEqual(frontend.redirectUris[1], cloudUrl + '/*', 'Cloud redirect URI');
+          assertEqual(frontend.webOrigins[0], paidUrl, 'paid web origin');
+          assertEqual(frontend.webOrigins[1], cloudUrl, 'Cloud web origin');
+          assertEqual(
+            frontend.attributes['post.logout.redirect.uris'],
+            paidUrl + '/*##' + cloudUrl + '/*',
+            'logout redirects',
+          );
+          for (const value of forbidden) {
+            if (JSON.stringify(realm).includes(value)) {
+              throw new Error('staging realm retained production origin ' + value);
+            }
+          }
+
+          const ce = paidDefaults.services.livecontext.environment;
+          assertEqual(ce.MARKETPLACE_MODE, 'remote', 'CE marketplace default');
+          assertEqual(ce.BILLING_AUTHORITY_MODE, 'native', 'CE billing authority default');
+          assertEqual(ce.CLOUD_LINK_ENABLED, 'false', 'CE CloudLink default');
+          assertEqual(ce.CLOUD_LINK_PENDING_STATE_STORE, 'in-memory', 'CE pending state default');
+          assertEqual(ce.CLOUD_LINK_REPLICA_COUNT, '1', 'CE replica default');
+          for (const name of [
+            'CLOUD_LINK_ENCRYPTION_KEY', 'CATALOG_BUNDLE_TRUSTED_KEYS',
+            'TRINYX_IDENTITY_SIGNING_KID', 'TRINYX_IDENTITY_SIGNING_KEY',
+            'TRINYX_ENTITLEMENT_SIGNING_KID', 'TRINYX_ENTITLEMENT_SIGNING_KEY',
+            'TRINYX_S2S_SIGNING_KID', 'TRINYX_S2S_SIGNING_KEY',
+            'TRINYX_S2S_VERIFICATION_KEYS',
+          ]) assertEqual(ce[name] || '', '', 'CE safe empty ' + name);
+
+          const enabled = paidCloudLink.services.livecontext.environment;
+          const expected = {
+            MARKETPLACE_MODE: 'local',
+            BILLING_AUTHORITY_MODE: 'paid-monolith-authority',
+            CLOUD_LINK_ENABLED: 'true',
+            MARKETPLACE_CLOUD_API_URL: cloudUrl + '/api',
+            CATALOG_BUNDLE_CLOUD_URL: cloudUrl,
+            API_CATALOG_BUNDLE_CLOUD_URL: cloudUrl,
+            SKILL_BUNDLE_CLOUD_URL: cloudUrl,
+            CLOUD_KEYCLOAK_URL: keycloakUrl + '/realms/trinyx-staging',
+            CLOUD_LINK_CLIENT_ID: 'trinyx-staging-frontend',
+            CLOUD_LINK_REDIRECT_URI: paidUrl + '/api/cloud-link/callback',
+            CLOUD_LINK_ENCRYPTION_KEY: 'test-only-cloud-link-encryption-key',
+            CATALOG_BUNDLE_TRUSTED_KEYS: 'test-catalog-key=test-only-public-key',
+            TRINYX_IDENTITY_ISSUER: paidUrl,
+            TRINYX_IDENTITY_SIGNING_KID: 'test-identity-kid',
+            TRINYX_IDENTITY_SIGNING_KEY: 'test-only-identity-private-key',
+            TRINYX_ENTITLEMENT_ISSUER: paidUrl,
+            TRINYX_ENTITLEMENT_SIGNING_KID: 'test-entitlement-kid',
+            TRINYX_ENTITLEMENT_SIGNING_KEY: 'test-only-entitlement-private-key',
+            TRINYX_S2S_SIGNING_ISSUER: 'test-paid-authority',
+            TRINYX_S2S_SIGNING_AUDIENCE: 'test-cloud-internal',
+            TRINYX_S2S_SIGNING_KID: 'test-workload-kid',
+            TRINYX_S2S_SIGNING_KEY: 'test-only-workload-private-key',
+            TRINYX_S2S_VERIFICATION_ISSUER: 'test-cloud',
+            TRINYX_S2S_VERIFICATION_AUDIENCE: 'test-billing-authority',
+            TRINYX_S2S_VERIFICATION_KEYS: 'test-cloud-kid=test-only-public-key',
+            TRINYX_ENTITLEMENT_CLOUD_INGEST_URL: 'https://cloud-internal-staging.example.invalid:8443/internal/v1/entitlement-projections',
+            TRINYX_IDENTITY_CLOUD_REVOCATION_URL: 'https://cloud-internal-staging.example.invalid:8443/internal/v1/identity-bindings/revocations',
+          };
+          for (const [name, value] of Object.entries(expected)) {
+            assertEqual(enabled[name], value, 'paid CloudLink ' + name);
+          }
+          NODE
 
       - name: Assert Cloud modes and service DNS
         shell: bash
@@ -54,19 +286,151 @@ jobs:
           grep -q 'DEPLOYMENT_MODE: microservice' "${rendered}"
           grep -q 'AUTH_MODE: keycloak' "${rendered}"
           grep -q 'MARKETPLACE_MODE: local' "${rendered}"
-          grep -q 'BILLING_PROVIDER: stripe' "${rendered}"
+          grep -q 'BILLING_PROVIDER: none' "${rendered}"
+          grep -q 'BILLING_AUTHORITY_MODE: external-paid-monolith' "${rendered}"
+          grep -q 'GATEWAY_FILTER_ACCEPT_V1: "false"' "${rendered}"
           grep -q 'AUTH_SERVICE_URL: http://auth-service:8083' "${rendered}"
           grep -q 'CATALOG_SERVICE_URL: http://catalog-service:8081' "${rendered}"
           grep -q 'STORAGE_SERVICE_URL: http://storage-service:8082' "${rendered}"
           grep -q 'ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099' "${rendered}"
+          grep -q 'SPRING_DATA_REDIS_HOST: cloud-redis' "${rendered}"
+          grep -q 'SPRING_DATA_REDIS_PORT: "6379"' "${rendered}"
+          grep -q 'host_ip: 127.0.0.1' "${rendered}"
+          grep -q 'target: 8443' "${rendered}"
+          grep -q -- '--appendonly' "${rendered}"
+          grep -q -- '--appendfsync' "${rendered}"
+          grep -q -- 'everysec' "${rendered}"
+          grep -q -- '--maxmemory-policy' "${rendered}"
+          grep -q -- 'noeviction' "${rendered}"
+          grep -q 'cloud-redis-data:' "${rendered}"
+
+      - name: Prove authenticated Cloud Redis healthcheck at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="trinyx-redis-health-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          compose=(
+            docker compose
+            --project-name "${project}"
+            --env-file docker/.env.cloud.example
+            -f docker/docker-compose.cloud.yml
+          )
+
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          "${compose[@]}" up --detach cloud-redis
+          container="$("${compose[@]}" ps -q cloud-redis)"
+          test -n "${container}"
+
+          health=""
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "${container}")"
+            case "${health}" in
+              healthy) break ;;
+              unhealthy)
+                docker inspect "${container}" >&2
+                docker logs "${container}" >&2
+                exit 1
+                ;;
+            esac
+            sleep 1
+          done
+          test "${health}" = healthy
+
+          docker exec "${container}" sh -ec \
+            'test "$(REDISCLI_AUTH="$CLOUD_REDIS_PASSWORD" redis-cli --raw ping)" = PONG'
+
+          docker inspect --format '{{json .Config.Healthcheck.Test}}' "${container}" \
+            > /tmp/trinyx-cloud-redis-healthcheck.json
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const actual = JSON.parse(
+            fs.readFileSync('/tmp/trinyx-cloud-redis-healthcheck.json', 'utf8')
+          );
+          assert.deepEqual(actual, [
+            'CMD-SHELL',
+            "REDISCLI_AUTH=\"$CLOUD_REDIS_PASSWORD\" redis-cli ping | grep -q '^PONG$'",
+          ]);
+          NODE
+
+      - name: Assert Cloud provider wiring matches relay support
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const relay = fs.readFileSync(
+            'backend/agent-common/src/main/java/com/apimarketplace/agent/cloud/CloudRelaySupport.java',
+            'utf8',
+          );
+          const app = fs.readFileSync('backend/agent-service/src/main/resources/application.yml', 'utf8');
+          const compose = fs.readFileSync('docker/docker-compose.cloud.yml', 'utf8');
+          const envExample = fs.readFileSync('docker/.env.cloud.example', 'utf8');
+
+          const block = relay.match(/SUPPORTED_PROVIDERS\s*=\s*Set\.of\(([\s\S]*?)\n\s*\);/);
+          if (!block) throw new Error('cannot parse CloudRelaySupport.SUPPORTED_PROVIDERS');
+          const providers = [...block[1].matchAll(/"([a-z0-9-]+)"/g)].map((match) => match[1]);
+          if (providers.length < 13) throw new Error('unexpectedly short Cloud relay provider inventory');
+
+          for (const provider of providers) {
+            const key = provider.toUpperCase().replaceAll('-', '_') + '_API_KEY';
+            const appPlaceholder = 'api-key: ${' + key + ':}';
+            const composePlaceholder = key + ': ${' + key + ':-}';
+            if (!app.includes(appPlaceholder)) {
+              throw new Error(provider + ' is relay-executable but application.yml does not bind ' + key);
+            }
+            if (!compose.includes(composePlaceholder)) {
+              throw new Error(provider + ' is relay-executable but Cloud Compose does not forward ' + key);
+            }
+            if (!new RegExp('^' + key + '=$', 'm').test(envExample)) {
+              throw new Error(provider + ' is relay-executable but .env.cloud.example omits ' + key);
+            }
+          }
+
+          if (!app.includes('api-url: ${MINIMAX_API_URL:https://api.minimax.io/v1/chat/completions}')) {
+            throw new Error('MiniMax endpoint override is not bound');
+          }
+          if (!compose.includes('MINIMAX_API_URL: ${MINIMAX_API_URL:-https://api.minimax.io/v1/chat/completions}')) {
+            throw new Error('Cloud Compose does not forward the MiniMax endpoint override');
+          }
+          if (!/^MINIMAX_API_URL=https:\/\/api\.minimax\.io\/v1\/chat\/completions$/m.test(envExample)) {
+            throw new Error('.env.cloud.example does not document the MiniMax international endpoint');
+          }
+          const gatewayControls = [
+            ['CLOUD_GATEWAY_MAX_BUFFERED_REQUESTS', '8'],
+            ['CLOUD_GATEWAY_RATE_LIMIT_REQUESTS', '120'],
+            ['CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS', '60000'],
+          ];
+          if (!/^TRINYX_TENANT_DELEGATION_SECRET=replace-with-at-least-32-random-bytes$/m.test(envExample)) {
+            throw new Error('.env.cloud.example does not document the distinct tenant delegation key');
+          }
+          const delegationBindings = compose.match(/TRINYX_TENANT_DELEGATION_SECRET: \$\{TRINYX_TENANT_DELEGATION_SECRET:/g) || [];
+          if (delegationBindings.length !== 3) {
+            throw new Error('Tenant delegation key must be exposed only to gateway, auth and storage');
+          }
+          for (const [name, fallback] of gatewayControls) {
+            const composeBinding = name + ': ' + '${' + name + ':-' + fallback + '}';
+            if (!compose.includes(composeBinding)) {
+              throw new Error('Cloud Compose does not forward ' + name);
+            }
+            const envPattern = new RegExp('^' + name + '=' + fallback + String.fromCharCode(36), 'm');
+            if (!envPattern.test(envExample)) {
+              throw new Error('.env.cloud.example does not document ' + name);
+            }
+          }
+          NODE
 
       - name: Verify external image manifests
         shell: bash
         run: |
           set -euo pipefail
           for image in \
-            pgvector/pgvector:pg16 \
-            redis:7-alpine \
+            pgvector/pgvector:0.8.1-pg16 \
+            redis:7.4.11-alpine \
             minio/minio:RELEASE.2025-07-23T15-54-02Z \
             minio/mc:RELEASE.2025-07-21T05-28-08Z \
             quay.io/keycloak/keycloak:26.7.1 \
@@ -76,49 +440,370 @@ jobs:
             docker buildx imagetools inspect "${image}" >/dev/null
           done
 
-      - name: Validate Keycloak realm and Caddy
+      - name: Validate Keycloak realm and Caddy policy
         shell: bash
         run: |
           set -euo pipefail
           python -m json.tool docker/cloud/keycloak/trinyx-realm.json >/dev/null
-          docker run --rm             -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2.11.4-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          grep -Fq 'auto_https disable_redirects' docker/cloud/Caddyfile
+          if grep -Eq '^[[:space:]]*auto_https[[:space:]]+off([[:space:]]|$)' docker/cloud/Caddyfile; then
+            echo "Private TLS requires Caddy certificate automation; auto_https off is forbidden" >&2
+            exit 1
+          fi
+          grep -Eq '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' docker/cloud/Caddyfile
+          grep -Fq 'https://{$CLOUD_INTERNAL_HOST:cloud-internal.trinyx.private}:8443' docker/cloud/Caddyfile
+          grep -Eq '^[[:space:]]*tls[[:space:]]+internal([[:space:]]|$)' docker/cloud/Caddyfile
+          grep -q '/internal/v1/entitlement-projections' docker/cloud/Caddyfile
+          grep -q '/internal/v1/identity-bindings/revocations' docker/cloud/Caddyfile
+          grep -q '@billing_ingest' docker/cloud/Caddyfile
+          grep -Eq '^[[:space:]]*respond[[:space:]]+404([[:space:]]|$)' docker/cloud/Caddyfile
+          docker run --rm \
+            -v "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-      - name: Reject legacy runtime URLs and committed secrets
+      - name: Prove private Caddy TLS handshake at runtime
         shell: bash
         run: |
           set -euo pipefail
-          if grep -Rni 'livecontext\.ai'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud
-          then
-            echo "Legacy runtime URL found in Cloud stack" >&2
+          host=cloud-internal.trinyx.private
+          container=trinyx-cloud-caddy-tls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          volume=${container}-data
+          ca_file="${RUNNER_TEMP}/trinyx-cloud-caddy-root.crt"
+
+          cleanup() {
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+            docker volume rm "${volume}" >/dev/null 2>&1 || true
+            rm -f "${ca_file}"
+          }
+          trap cleanup EXIT
+
+          docker volume create "${volume}" >/dev/null
+          docker run --detach --name "${container}" \
+            --publish 127.0.0.1::8443 \
+            --env CLOUD_INTERNAL_HOST="${host}" \
+            --volume "${PWD}/docker/cloud/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            --volume "${volume}:/data" \
+            caddy:2.11.4-alpine >/dev/null
+
+          for attempt in $(seq 1 30); do
+            if docker exec "${container}" \
+              test -s /data/caddy/pki/authorities/local/root.crt; then
+              break
+            fi
+            if ! docker inspect --format '{{.State.Running}}' "${container}" | grep -qx true; then
+              docker logs "${container}" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec "${container}" \
+            test -s /data/caddy/pki/authorities/local/root.crt
+          docker cp "${container}:/data/caddy/pki/authorities/local/root.crt" "${ca_file}"
+
+          endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+          port="${endpoint##*:}"
+          test -n "${port}"
+
+          set +e
+          curl --silent --show-error --output /dev/null --noproxy '*' \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted"
+          curl_without_ca=$?
+          set -e
+          if [[ ${curl_without_ca} -ne 60 ]]; then
+            echo "Expected curl error 60 without the private CA, got ${curl_without_ca}" >&2
+            docker logs "${container}" >&2
             exit 1
           fi
-          if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})'             docker/docker-compose.cloud.yml             docker/.env.cloud.example             docker/cloud/keycloak/trinyx-realm.json
+
+          status="$(curl --silent --show-error --output /dev/null --noproxy '*' \
+            --write-out '%{http_code}' \
+            --cacert "${ca_file}" \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted")"
+          test "${status}" = 404
+
+          openssl_output="$(openssl s_client \
+            -connect "127.0.0.1:${port}" \
+            -servername "${host}" \
+            -CAfile "${ca_file}" </dev/null 2>&1)"
+          printf '%s\n' "${openssl_output}"
+          grep -q 'TLSv1.3' <<<"${openssl_output}"
+          if grep -q 'Cipher is (NONE)' <<<"${openssl_output}"; then
+            echo "Caddy accepted TCP but did not negotiate a TLS cipher" >&2
+            exit 1
+          fi
+          grep -q 'Verify return code: 0 (ok)' <<<"${openssl_output}"
+
+      - name: Reject legacy runtime domains and committed secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Runtime source only. Historical migrations, tests, generated/build output,
+          # legal attribution and protocol compatibility identifiers are intentionally
+          # outside this URL gate.
+          set +e
+          legacy_runtime_matches="$(
+            grep -RniE \
+              --include='*.java' --include='*.kt' --include='*.ts' --include='*.tsx' \
+              --include='*.js' --include='*.mjs' --include='*.yml' --include='*.yaml' \
+              --include='*.properties' --include='*.json' --include='*.xml' \
+              --include='*.sh' --include='*.env' --include='*.example' --include='*.toml' \
+              --include='Dockerfile*' \
+              'https?://([A-Za-z0-9-]+\.)*livecontext\.ai' \
+              backend frontend mcp websearch-service docker cli \
+              --exclude-dir=target --exclude-dir=node_modules --exclude-dir=test \
+              --exclude-dir=tests --exclude-dir=__tests__ --exclude-dir=migration 2>/dev/null
+          )"
+          grep_status=$?
+          set -e
+          if [[ ${grep_status} -gt 1 ]]; then
+            echo "Legacy runtime dependency scan failed" >&2
+            exit ${grep_status}
+          fi
+          if [[ -n "${legacy_runtime_matches}" ]]; then
+            echo "Legacy LiveContext runtime URL found:" >&2
+            printf '%s\n' "${legacy_runtime_matches}" >&2
+            exit 1
+          fi
+
+          if grep -nE '^# LiveContext|npx livecontext|https?://([^/]+\.)?livecontext\.ai' README.md docker/README-CE.md; then
+            echo "Canonical user documentation still contains legacy branding/runtime guidance" >&2
+            exit 1
+          fi
+          grep -q 'legacy compatibility' README.md
+          grep -q 'cli/assets/docker-compose.yml' README.md
+
+          if grep -Rni 'ghcr.io/livecontext-ai/' cli/assets docker/docker-compose.cloud.yml; then
+            echo "Runtime image is still owned by the LiveContext registry namespace" >&2
+            exit 1
+          fi
+
+          if grep -Rni 'livecontext-prod-v1=' backend/*/src/main/resources cli/assets docker/docker-compose.cloud.yml; then
+            echo "Runtime still trusts the historical upstream bundle signer" >&2
+            exit 1
+          fi
+
+          if grep -En '(sk_live_|rk_live_|whsec_[A-Za-z0-9]{20,}|price_[A-Za-z0-9]{10,})' \
+            docker/docker-compose.cloud.yml \
+            docker/.env.cloud.example \
+            docker/cloud/keycloak/trinyx-realm.json
           then
             echo "A Stripe secret or Price ID appears to be committed" >&2
             exit 1
           fi
 
+      - name: Enforce external Trinyx product identity
+        run: bash scripts/validate-trinyx-branding.sh
+
+      - name: Inventory preserved LiveContext compatibility identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          compatibility_matches="$(
+            grep -RniE --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
+              --include='*.json' --include='*.html' --include='*.yml' --include='*.yaml' --include='*.java' \
+              'LiveContext' frontend cli backend/*/src/main/resources backend/*/src/main/java 2>/dev/null
+          )"
+          compatibility_status=$?
+          set -e
+          if [[ ${compatibility_status} -gt 1 ]]; then exit ${compatibility_status}; fi
+          if [[ -n "${compatibility_matches}" ]]; then
+            echo "Preserved legal, upstream and compatibility identifiers:"
+            printf '%s\n' "${compatibility_matches}"
+          else
+            echo "No preserved LiveContext identifiers found."
+          fi
+
+      - name: Validate private paid-monolith wallet edge policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          private_edge=docker/paid-monolith-internal/Caddyfile
+          grep -Fq 'auto_https disable_redirects' "${private_edge}"
+          if grep -Eq '^[[:space:]]*auto_https[[:space:]]+off([[:space:]]|$)' "${private_edge}"; then
+            echo "Private paid TLS requires certificate handling; auto_https off is forbidden" >&2
+            exit 1
+          fi
+          grep -Eq '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' "${private_edge}"
+          grep -Fq 'https://{$PAID_MONOLITH_INTERNAL_HOST:billing-internal.trinyx.private}:{$PAID_MONOLITH_INTERNAL_PORT:8443}' "${private_edge}"
+          grep -q '@wallet {' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/dispatching' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/commit' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/release' "${private_edge}"
+          grep -q '/internal/v1/credit-reservations/\*/outcome-unknown' "${private_edge}"
+          grep -q 'respond 404' "${private_edge}"
+          if grep -q '/internal/v1/credit-reservations' docker/cloud/Caddyfile; then
+            echo "The public Cloud edge must not expose the paid-monolith wallet" >&2
+            exit 1
+          fi
+          grep -Fq 'PAID_MONOLITH_BILLING_URL: ${PAID_MONOLITH_BILLING_URL:-https://billing-internal.trinyx.private:8443}' docker/docker-compose.cloud.yml
+          grep -Fxq 'PAID_MONOLITH_BILLING_URL=https://billing-internal.trinyx.private:8443' docker/.env.cloud.example
+
+      - name: Prove private paid-monolith TLS handshake at runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          host=billing-internal.trinyx.private
+          container=trinyx-paid-caddy-tls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          cert_dir="${RUNNER_TEMP}/${container}-certs"
+
+          cleanup() {
+            docker rm -f "${container}" >/dev/null 2>&1 || true
+            rm -rf "${cert_dir}"
+          }
+          trap cleanup EXIT
+
+          mkdir -p "${cert_dir}"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+            -subj "/CN=${host}" \
+            -addext "subjectAltName=DNS:${host}" \
+            -keyout "${cert_dir}/server.key" \
+            -out "${cert_dir}/server.crt" >/dev/null 2>&1
+
+          docker run --detach --name "${container}" \
+            --publish 127.0.0.1::8443 \
+            --env PAID_MONOLITH_INTERNAL_HOST="${host}" \
+            --env PAID_MONOLITH_INTERNAL_PORT=8443 \
+            --env PAID_MONOLITH_INTERNAL_CERT_FILE=/certs/server.crt \
+            --env PAID_MONOLITH_INTERNAL_KEY_FILE=/certs/server.key \
+            --volume "${PWD}/docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            --volume "${cert_dir}:/certs:ro" \
+            caddy:2.11.4-alpine >/dev/null
+
+          for attempt in $(seq 1 30); do
+            if docker inspect --format '{{.State.Running}}' "${container}" | grep -qx true; then
+              endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+              if [[ -n "${endpoint}" ]]; then break; fi
+            else
+              docker logs "${container}" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          endpoint="$(docker port "${container}" 8443/tcp | head -n1)"
+          port="${endpoint##*:}"
+          test -n "${port}"
+
+          set +e
+          curl --silent --show-error --output /dev/null --noproxy '*' \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted"
+          curl_without_ca=$?
+          set -e
+          if [[ ${curl_without_ca} -ne 60 ]]; then
+            echo "Expected curl error 60 without the private paid CA, got ${curl_without_ca}" >&2
+            docker logs "${container}" >&2
+            exit 1
+          fi
+
+          status="$(curl --silent --show-error --output /dev/null --noproxy '*' \
+            --write-out '%{http_code}' \
+            --cacert "${cert_dir}/server.crt" \
+            --resolve "${host}:${port}:127.0.0.1" \
+            "https://${host}:${port}/not-allowlisted")"
+          test "${status}" = 404
+
+          openssl_output="$(openssl s_client \
+            -connect "127.0.0.1:${port}" \
+            -servername "${host}" \
+            -CAfile "${cert_dir}/server.crt" </dev/null 2>&1)"
+          printf '%s\n' "${openssl_output}"
+          grep -q 'TLSv1.3' <<<"${openssl_output}"
+          if grep -q 'Cipher is (NONE)' <<<"${openssl_output}"; then
+            echo "Paid Caddy accepted TCP but did not negotiate a TLS cipher" >&2
+            exit 1
+          fi
+          grep -q 'Verify return code: 0 (ok)' <<<"${openssl_output}"
+
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # actions/setup-java v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
+      - name: Validate Phase 2 route-to-controller reachability
+        shell: bash
+        run: node scripts/validate-phase2-reachability.mjs
+
+      - name: Validate Cloud Java runtime packaging and permissions
+        shell: bash
+        run: node scripts/validate-cloud-java-runtime.mjs
+
       - name: Test Cloud edition and gateway contracts
         working-directory: backend
         shell: bash
+        env:
+          TRINYX_TEST_REDIS_HOST: 127.0.0.1
         run: >-
           mvn -B -Pce
-          -pl common-lib -am
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,GatewayAuthenticationFilterTest
+          -pl common-lib,agent-common,shared-agent-lib,common-storage-service,gateway-service,auth-client,auth-service,storage-client,storage-service,datasource-service,interface-service,trigger-service,agent-client,agent-service,catalog-service,conversation-service,orchestrator-service,publication-service,migration-service -am
+          -Dtest=AppEditionProviderTest,TenantDelegationTest,StorageOperationCapabilityTest,StorageClientWorkspaceErasureTest,InternalFileControllerTest,AuthClientServiceSigningTest,InternalCredentialLookupControllerTest,AppEditionAutoConfigurationTest,GatewayWebAutoConfigurationTest,GatewayAuthenticationFilterTest,GatewayAuthenticationFilterV2Test,ServiceRouteAuthenticationTest,MonolithSecurityFilterBillingWorkloadTest,GatewaySignatureV2Test,GatewaySignatureV2ParityTest,AuthenticatedGatewayFilterTest,GatewayRequestRateLimiterTest,GatewaySecurityConfigTest,GatewayRouteInventoryTest,GlobalExceptionHandlerTest,AuthMetricsTest,RedisConfigTest,Ed25519JwsTest,WorkloadAuthenticationServiceTest,EntitlementProjectionServiceTest,CeLinkServiceTest,CeLinkEntitlementsServiceTest,CloudIdentityBindingServiceTest,CloudCreditAuthorityServiceTest,CreditServiceExactPayerTest,ExternalCloudCreditLifecycleTest,CloudCreditAuthorityControllerTest,WorkloadIngestControllerTest,PaidMonolithCreditClientTest,PaidMonolithSslContextFactoryTest,InternalServiceAuthenticationConfigurationTest,ExternalCreditProxyServiceTest,ExternalCreditProxyControllerTest,CreditConsumptionClientOrgScopeTest,CreditConsumptionClientAmbiguousOutcomeTest,ExternalSettlementIntentDispatcherTest,ExternalSettlementOutboxAutoConfigurationTest,OrchestratorSettlementOutboxBootstrapTest,RedisExternalSettlementIntentStoreTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspacePurgeServiceTest,WorkspacePurgeSchedulerTest,WorkspacePurgeInternalControllerTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,StorageApplicationYamlTest,ProjectionOutboxDispatcherTest,ExternalBillingAuthorityServiceTest,CloudLinkServiceTest,CeCloudLinkHeartbeatSchedulerTest,CloudLinkControllerBeanGatingTest,RemoteMarketplaceConfigBeanGatingTest,RemoteMarketplaceServiceAcquireDispatchTest,RemoteMarketplaceServiceReadProxyTest,CloudLlmRelayControllerTest,CloudWebSearchRelayControllerTest,WebSearchModuleBillingTest,BrowserAgentModuleTest,BrowserAgentNodeObservabilityTest,AgentObservabilityServiceRecordFromRequestTest,ExternalBillingAuthorityMigrationTest,ExternalCreditProjectionPostgresContractTest,WorkspaceDataPurgerPostgresContractTest,UpstreamMigrationIntegrityTest,FlywayLifecycleContractTest,PistonRuntimeConfigurationTest,PistonClientTest,EmbeddedCodeExecutorTest,CodeNodeTest,CeInstallTelemetryGatingTest,CeInstallIdProviderTest,HttpReleaseFeedClientInstallIdTest,CeVersionCheckSchedulerTest,CeInstallStatsControllerTest,RunNodeBatchTest,AdHocNodeExecutionServiceBatchTest,ToolExecutionManagerPerCallChargeTest,ToolExecutionManagerBillingLifecycleTest,GenerationFailClosedTest,GenerationSeedDescriptorsAreCallableTest,PlatformSalesResolverTest,BundleGenerationPricesTest,PublicationFileUrlResolverTest,ShowcaseFileNamespaceRepairServiceTest,ShowcaseFileRefRewriterTest,DataSourceFileCloneServiceTest,StorageKeysTest,FileProxyUrlsTest,ToolParameterTest,ToolSchemaGeneratorTest,CoreToolsProviderTest,WorkflowRelationServiceTest,WorkflowRelationsJsonTest,UnifiedExecutionEngineUnreachableMergeTest
+          -Dtrinyx.contract.docker.required=true
+          -Dsurefire.failIfNoSpecifiedTests=false
           test
 
-      - name: Ensure paid-monolith files are untouched
-        if: github.event_name == 'pull_request'
+      - name: Prove Gateway executable Spring Boot JAR
+        working-directory: backend
         shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          git diff --exit-code "${BASE_SHA}" --             docker-compose.yml             docker/.env.ce             docker/.env.paid-monolith
+          mvn -B -DskipTests -pl gateway-service -am package
+          manifest_dir="$(mktemp -d)"
+          trap 'rm -rf "${manifest_dir}"' EXIT
+          (
+            cd "${manifest_dir}"
+            jar --extract --file "${GITHUB_WORKSPACE}/backend/gateway-service/target/app.jar" META-INF/MANIFEST.MF
+          )
+          manifest="${manifest_dir}/META-INF/MANIFEST.MF"
+          grep -Fq 'Main-Class: org.springframework.boot.loader.launch.JarLauncher' "${manifest}"
+          grep -Fq 'Start-Class: com.apimarketplace.gateway.TrinyxGatewayApplication' "${manifest}"
+          jar --list --file gateway-service/target/app.jar > "${manifest_dir}/entries.txt"
+          grep -Fxq 'BOOT-INF/classes/com/apimarketplace/gateway/TrinyxGatewayApplication.class' \
+            "${manifest_dir}/entries.txt"
+
+
+      - name: Verify Trinyx CLI and frontend Cloud opt-in
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check cli/bin/trinyx.mjs
+          node cli/bin/trinyx.mjs --version
+          grep -q '"trinyx": "bin/trinyx.mjs"' cli/package.json
+          POSTGRES_PASSWORD=trinyx-ci docker compose -f cli/assets/docker-compose.yml config > /tmp/trinyx-cli.rendered.yml
+          grep -q 'POSTGRES_PASSWORD: trinyx-ci' /tmp/trinyx-cli.rendered.yml
+          grep -q 'DB_PASSWORD: trinyx-ci' /tmp/trinyx-cli.rendered.yml
+          node <<'NODE'
+          const fs = require('fs');
+          const version = require('./cli/package.json').version;
+          const compose = fs.readFileSync('cli/assets/docker-compose.yml', 'utf8');
+          const images = [
+            'trinyx-ce', 'trinyx-ce-bridge', 'trinyx-ce-frontend',
+            'trinyx-ce-screenshot-renderer', 'trinyx-ce-websearch'
+          ];
+          for (const image of images) {
+            const expected = `ghcr.io/trinyxai/${image}:v${version}`;
+            if (!compose.includes(expected)) throw new Error(`missing pinned image ${expected}`);
+          }
+          if (/ghcr\.io\/trinyxai\/trinyx-ce[^\s}]*:latest/.test(compose)) {
+            throw new Error('CLI runtime images must not use latest');
+          }
+          NODE
+          grep -Fq '[mcp_servers.trinyx.http_headers]' frontend/app/\[locale\]/app/settings/mcp-server/page.tsx
+          if grep -RniF '[mcp_servers.livecontext' frontend; then
+            echo "User-facing MCP snippets must use the Trinyx server identifier" >&2
+            exit 1
+          fi
+          if grep -q "const CE_API_BASE = 'https://cloud.trinyx.fr" frontend/components/marketplace/CategoryFilter.tsx; then
+            echo "Paid-monolith frontend must not hardcode an unavailable Cloud origin" >&2
+            exit 1
+          fi
+
+      - name: Verify Java and Node HMAC v1/v2 parity
+        shell: bash
+        run: node --test mcp/bridge/lib/__tests__/gatewayAuth.test.mjs

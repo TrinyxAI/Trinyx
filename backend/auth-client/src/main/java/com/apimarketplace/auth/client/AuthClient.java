@@ -6,6 +6,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -75,15 +76,35 @@ public class AuthClient {
     }
 
     public AuthClient(String authServiceUrl) {
-        this.restTemplate = new RestTemplate();
-        this.boundedRestTemplate = createBoundedRestTemplate();
-        this.baseUrl = authServiceUrl;
+        this(new RestTemplate(), authServiceUrl, "", "");
     }
 
     public AuthClient(RestTemplate restTemplate, String authServiceUrl) {
+        this(restTemplate, authServiceUrl, "", "");
+    }
+
+    AuthClient(RestTemplate restTemplate, String authServiceUrl,
+               String serviceId, String serviceSecret) {
         this.restTemplate = restTemplate;
         this.boundedRestTemplate = createBoundedRestTemplate();
+        configureSigning(this.restTemplate, serviceId, serviceSecret);
+        configureSigning(this.boundedRestTemplate, serviceId, serviceSecret);
         this.baseUrl = authServiceUrl;
+    }
+
+    private static void configureSigning(
+            RestTemplate target, String serviceId, String serviceSecret) {
+        boolean missingId = serviceId == null || serviceId.isBlank();
+        boolean missingSecret = serviceSecret == null || serviceSecret.isBlank();
+        if (missingSecret) {
+            return; // CE/monolith: downstream verification is disabled.
+        }
+        if (missingId) {
+            throw new IllegalStateException(
+                    "Internal auth service identity is required when the HMAC secret is configured");
+        }
+        target.getInterceptors().add(
+                new ServiceRequestSigningInterceptor(serviceId, serviceSecret));
     }
 
     private static RestTemplate createBoundedRestTemplate() {
@@ -131,9 +152,10 @@ public class AuthClient {
     public record PlanLimitResponse(String planCode, Integer limit) {}
 
     /**
-     * Cloud-side authorization check for CE LLM relay calls. The caller is the
-     * authenticated cloud user and the install id is the CE instance presenting
-     * the bearer token. Returns false on any malformed id or transport failure.
+     * Cloud-side authorization check for CE relay calls. The caller is the
+     * authenticated Cloud actor and the install id is the linked instance. Direct
+     * owners and organization members in the exact signed install/org/payer scope
+     * are accepted. Returns false on malformed input, scope mismatch or transport failure.
      */
     public boolean userOwnsActiveCeLink(String userId, String installId) {
         if (userId == null || userId.isBlank() || installId == null || installId.isBlank()) {
@@ -163,8 +185,8 @@ public class AuthClient {
 
     /**
      * Cloud-side subscription check for the CE catalog relay. Resolves the plan
-     * entitlements of the cloud account owning the given install's link. The
-     * caller is the authenticated cloud user, mirroring
+     * actor-free entitlements for the payer/workspace scope of the given install.
+     * The caller is the authenticated Cloud actor, mirroring
      * {@link #userOwnsActiveCeLink}. Fail-closed: any malformed id, transport
      * failure, or non-2xx response yields {@link CeLinkEntitlementsResult#none()}
      * ({@code planCode="__NONE__", hasSubscription=false}).
@@ -375,6 +397,62 @@ public class AuthClient {
             return null;
         }
     }
+
+    /**
+     * Ask the paid-monolith billing authority to issue the short-lived identity binding
+     * and entitlement projection required to bootstrap an authenticated Cloud link.
+     * The caller's numeric id is local compatibility state only; the signed response
+     * carries the stable principal and billing-subject identities.
+     */
+    public CloudAuthorityBundle issueExternalCloudAuthority(
+            String userId, UUID installId, UUID organizationId, String keycloakSubject) {
+        Objects.requireNonNull(installId, "installId");
+        Objects.requireNonNull(organizationId, "organizationId");
+        if (userId == null || userId.isBlank() || keycloakSubject == null || keycloakSubject.isBlank()) {
+            throw new IllegalArgumentException("userId and keycloakSubject are required");
+        }
+        String url = baseUrl + "/api/cloud-authority/v2/link";
+        Map<String, Object> body = Map.of(
+                "installId", installId.toString(),
+                "organizationId", organizationId.toString(),
+                "keycloakSubject", keycloakSubject);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, buildHeaders(userId));
+        ResponseEntity<CloudAuthorityBundle> response = restTemplate.exchange(
+                url, HttpMethod.POST, entity, CloudAuthorityBundle.class);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("Paid billing authority did not issue Cloud assertions");
+        }
+        return response.getBody();
+    }
+
+    /**
+     * Revoke a paid-monolith identity/entitlement scope. The authority writes signed
+     * tombstones transactionally; dispatch to Cloud is retried by its outbox.
+     */
+    public CloudAuthorityProjection revokeExternalCloudAuthority(
+            String userId, UUID installId, UUID organizationId) {
+        Objects.requireNonNull(installId, "installId");
+        Objects.requireNonNull(organizationId, "organizationId");
+        String url = baseUrl + "/api/cloud-authority/v2/revoke";
+        Map<String, Object> body = Map.of(
+                "installId", installId.toString(),
+                "organizationId", organizationId.toString());
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, buildHeaders(userId));
+        ResponseEntity<CloudAuthorityProjection> response = restTemplate.exchange(
+                url, HttpMethod.POST, entity, CloudAuthorityProjection.class);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("Paid billing authority did not revoke Cloud assertions");
+        }
+        return response.getBody();
+    }
+
+    public record CloudAuthorityBundle(
+            String identityBinding, String entitlementProjection,
+            long entitlementSequence, java.time.Instant entitlementExpiresAt) {}
+
+    public record CloudAuthorityProjection(
+            String assertion, long sequence, java.time.Instant expiresAt,
+            String accessState, String stateHash) {}
 
     /**
      * Resolve the user's platform roles as a CSV string (e.g. {@code "USER,ADMIN"}).

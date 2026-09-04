@@ -45,7 +45,7 @@ export default function CredentialsPage() {
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   // Forces the wizard to open in advanced (BYOK) mode for the
   // "Use my own OAuth app" per-row action - otherwise the wizard defaults
-  // to 'standard' (LiveContext's verified OAuth client). Reset on close.
+  // to 'standard' (Trinyx's verified OAuth client). Reset on close.
   const [wizardInitialMode, setWizardInitialMode] = useState<'standard' | 'advanced'>('standard');
   // "Add custom OAuth connection" entry point (MyOAuthAppsSection header) needs
   // an integration to attach the BYOK app to. Rather than building a separate

@@ -51,7 +51,7 @@ export function marketplacePath(slug: string): string {
 export function metaDescription(publication: PublicPublicationSummary, maxLength = 155): string {
   const description = publication.description.trim();
   if (description.length === 0) {
-    return `${publication.title} on the LiveContext marketplace.`;
+    return `${publication.title} on the Trinyx marketplace.`;
   }
   if (description.length <= maxLength) return description;
 

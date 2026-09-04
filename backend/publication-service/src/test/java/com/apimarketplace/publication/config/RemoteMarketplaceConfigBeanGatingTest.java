@@ -23,14 +23,10 @@ import static org.mockito.Mockito.mock;
  * Bean-gating contract for {@link RemoteMarketplaceConfig}.
  *
  * <p>The configuration is annotated
- * {@code @ConditionalOnProperty(name = "marketplace.mode", havingValue = "remote")} with NO
- * {@code matchIfMissing}, so it defaults to false: the CE remote-marketplace beans
- * ({@link CloudLinkService}, {@link RemoteMarketplaceService}, {@link CeCloudLinkHeartbeatScheduler})
- * are wired ONLY on the cloud-linked CE monolith where {@code marketplace.mode=remote}. On a cloud
- * install or a plain CE (property unset, or {@code marketplace.mode=local}) these beans MUST NOT
- * exist, otherwise the install would carry an unconfigured cloud-link surface. These tests pin that
- * contract so a regression in the condition (flipping {@code matchIfMissing} or renaming the
- * property) is caught.
+ * {@code @ConditionalOnProperty(name = "marketplace.mode", havingValue = "remote")}.
+ * {@link RemoteMarketplaceService} remains gated by {@code marketplace.mode=remote}. CloudLink
+ * always follows remote mode, while cloud-link.enabled=true preserves the Trinyx extension
+ * that enables linking for a paid-monolith whose Marketplace remains local.
  */
 @DisplayName("RemoteMarketplaceConfig - marketplace.mode=remote bean gating")
 class RemoteMarketplaceConfigBeanGatingTest {
@@ -38,42 +34,71 @@ class RemoteMarketplaceConfigBeanGatingTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(RemoteMarketplaceConfigDependencies.class)
             .withUserConfiguration(RemoteMarketplaceConfig.class)
+            .withUserConfiguration(CloudLinkConfig.class)
             // A non-default, non-blank key so CloudLinkService can construct when the gate opens.
             .withPropertyValues("cloud-link.encryption-key=unit-test-encryption-key");
 
     @Test
-    @DisplayName("Property unset - remote-marketplace beans are ABSENT (matchIfMissing defaults to false)")
-    void beansAbsentWhenPropertyUnset() {
-        contextRunner.run(context -> {
-            assertThat(context).hasNotFailed();
-            assertThat(context).doesNotHaveBean(CloudLinkService.class);
-            assertThat(context).doesNotHaveBean(RemoteMarketplaceService.class);
-            assertThat(context).doesNotHaveBean(CeCloudLinkHeartbeatScheduler.class);
-        });
+    @DisplayName("remote marketplace auto-enables the CloudLink capability when no override is set")
+    void remoteMarketplaceAutoEnablesCloudLink() {
+        contextRunner
+                .withPropertyValues("marketplace.mode=remote")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RemoteMarketplaceService.class);
+                    assertThat(context).hasSingleBean(CloudLinkService.class);
+                    assertThat(context).hasSingleBean(CeCloudLinkHeartbeatScheduler.class);
+                });
     }
 
     @Test
-    @DisplayName("marketplace.mode=local - remote-marketplace beans are ABSENT (no remote wiring on a non-remote install)")
-    void beansAbsentWhenModeLocal() {
+    @DisplayName("remote marketplace keeps CloudLink available even when the independent local-mode switch is false")
+    void remoteMarketplaceKeepsCloudLinkAvailable() {
         contextRunner
-                .withPropertyValues("marketplace.mode=local")
+                .withPropertyValues("marketplace.mode=remote", "cloud-link.enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context).doesNotHaveBean(CloudLinkService.class);
+                    assertThat(context).hasSingleBean(RemoteMarketplaceService.class);
+                    assertThat(context).hasSingleBean(CloudLinkService.class);
+                    assertThat(context).hasSingleBean(CeCloudLinkHeartbeatScheduler.class);
+                });
+    }
+
+    @Test
+    @DisplayName("remote marketplace and cloud-link enabled wire both feature sets")
+    void remoteMarketplaceWithCloudLinkWiresBothFeatureSets() {
+        contextRunner
+                .withPropertyValues("marketplace.mode=remote", "cloud-link.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RemoteMarketplaceService.class);
+                    assertThat(context).hasSingleBean(CloudLinkService.class);
+                    assertThat(context).hasSingleBean(CeCloudLinkHeartbeatScheduler.class);
+                });
+    }
+
+    @Test
+    @DisplayName("local marketplace without cloud-link wires neither feature")
+    void localMarketplaceWithoutCloudLinkWiresNeitherFeature() {
+        contextRunner
+                .withPropertyValues("marketplace.mode=local", "cloud-link.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(RemoteMarketplaceService.class);
+                    assertThat(context).doesNotHaveBean(CloudLinkService.class);
                     assertThat(context).doesNotHaveBean(CeCloudLinkHeartbeatScheduler.class);
                 });
     }
 
     @Test
-    @DisplayName("marketplace.mode=remote - cloudLinkService + remoteMarketplaceService + heartbeat scheduler ARE wired (CE monolith)")
-    void beansPresentWhenModeRemote() {
+    @DisplayName("local marketplace can enable cloud-link independently")
+    void localMarketplaceCanEnableCloudLinkIndependently() {
         contextRunner
-                .withPropertyValues("marketplace.mode=remote")
+                .withPropertyValues("marketplace.mode=local", "cloud-link.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(RemoteMarketplaceService.class);
                     assertThat(context).hasSingleBean(CloudLinkService.class);
-                    assertThat(context).hasSingleBean(RemoteMarketplaceService.class);
                     assertThat(context).hasSingleBean(CeCloudLinkHeartbeatScheduler.class);
                 });
     }

@@ -148,6 +148,7 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedgerEntry,
      */
     @Query("SELECT e FROM CreditLedgerEntry e " +
            "WHERE e.sourceType = 'PLATFORM_MARKUP_RESERVE' " +
+           "AND (e.sourceId IS NULL OR e.sourceId NOT LIKE 'cloud-reservation:%') " +
            "AND e.expiresAt IS NOT NULL " +
            "AND e.expiresAt < :now " +
            "ORDER BY e.expiresAt ASC")

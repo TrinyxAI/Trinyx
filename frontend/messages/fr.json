@@ -161,7 +161,7 @@
       "description": "Contactez Trinyx pour le support, les signalements de securite, les partenariats et les demandes presse."
     },
     "layout": {
-      "copyright": "© {year} LiveContext. Tous droits reserves.",
+      "copyright": "© {year} Trinyx. Tous droits reserves.",
       "privacyPolicy": "Politique de confidentialite",
       "termsOfService": "Conditions d'utilisation",
       "legalNotice": "Mentions legales",
@@ -1536,7 +1536,7 @@
       "title": "{count, plural, one {# ressource média à vérifier} other {# ressources média à vérifier}}",
       "subtitle": "À noter : nous avons détecté les références média ci-dessous dans votre publication. Confirmez que vous avez le droit d'utiliser chacune - même les fichiers hébergés en interne peuvent provenir de contenus protégés par des droits tiers. Ceci est un rappel, pas un blocage.",
       "sourceHost": "depuis {host} · {source}",
-      "attestationLabel": "Je confirme détenir tous les droits nécessaires pour utiliser ces ressources dans cette publication, y compris pour la redistribution commerciale via le marketplace LiveContext. Je comprends que je suis seul(e) responsable de toute réclamation relative à ce contenu (CGU §8).",
+      "attestationLabel": "Je confirme détenir tous les droits nécessaires pour utiliser ces ressources dans cette publication, y compris pour la redistribution commerciale via le marketplace Trinyx. Je comprends que je suis seul(e) responsable de toute réclamation relative à ce contenu (CGU §8).",
       "attestationVerbatim": "L'éditeur atteste, en application des CGU §8(iii)+(iv), détenir tous les droits nécessaires, y compris commerciaux, pour chaque ressource listée dans cette publication.",
       "attestationFooter": "Que vous cochiez la case ou non, votre décision est enregistrée (identifiant de version {version}) afin de disposer d'une trace d'audit en cas de signalement ultérieur.",
       "cancel": "Retour",

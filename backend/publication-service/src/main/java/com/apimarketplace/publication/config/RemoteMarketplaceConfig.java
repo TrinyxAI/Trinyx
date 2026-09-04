@@ -1,7 +1,6 @@
 package com.apimarketplace.publication.config;
 
 import com.apimarketplace.auth.client.AuthClient;
-import com.apimarketplace.publication.repository.CeCloudLinkRepository;
 import com.apimarketplace.publication.repository.PublicationReceiptRepository;
 import com.apimarketplace.publication.service.AgentPublicationService;
 import com.apimarketplace.publication.service.CloudLinkService;
@@ -17,55 +16,22 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Configuration for the CE remote marketplace feature.
- * Creates CloudLinkService and RemoteMarketplaceService beans.
- * Only active when marketplace.mode=remote (CE monolith).
+ * Configuration for the remote marketplace feature. Cloud-link lifecycle has its own
+ * {@link CloudLinkConfig} so a paid-monolith can keep marketplace local while linking to
+ * the Trinyx Cloud control plane.
  */
 @Configuration
 @ConditionalOnProperty(name = "marketplace.mode", havingValue = "remote")
 public class RemoteMarketplaceConfig {
 
-    @Value("${marketplace.cloud-api-url:https://livecontext.ai/api}")
+    @Value("${marketplace.cloud-api-url:https://cloud.trinyx.fr/api}")
     private String cloudApiUrl;
-
-    @Value("${cloud-link.keycloak-url:https://auth.livecontext.ai/realms/livecontext}")
-    private String keycloakUrl;
-
-    @Value("${cloud-link.client-id:livecontext-frontend}")
-    private String clientId;
-
-    @Value("${cloud-link.redirect-uri:http://localhost:8080/api/cloud-link/callback}")
-    private String redirectUri;
-
-    @Value("${cloud-link.encryption-key:}")
-    private String encryptionKey;
-
-    /** CE distribution version stamped on heartbeats + REGISTER audit metadata. */
-    @Value("${ce.version:dev}")
-    private String ceVersion;
-
-    @Bean
-    public CloudLinkService cloudLinkService(
-            CeCloudLinkRepository cloudLinkRepository,
-            ObjectMapper objectMapper) {
-        return new CloudLinkService(
-                cloudLinkRepository, keycloakUrl, clientId, redirectUri, encryptionKey,
-                cloudApiUrl, ceVersion, objectMapper);
-    }
-
-    @Bean
-    public com.apimarketplace.publication.service.CeCloudLinkHeartbeatScheduler ceCloudLinkHeartbeatScheduler(
-            CeCloudLinkRepository cloudLinkRepository,
-            CloudLinkService cloudLinkService) {
-        return new com.apimarketplace.publication.service.CeCloudLinkHeartbeatScheduler(
-                cloudLinkRepository, cloudLinkService);
-    }
 
     @Bean
     public RemoteMarketplaceService remoteMarketplaceService(
             SnapshotCloneService snapshotCloneService,
             PublicationReceiptRepository receiptRepository,
-            CloudLinkService cloudLinkService,
+            ObjectProvider<CloudLinkService> cloudLinkService,
             ObjectMapper objectMapper,
             AuthClient authClient,
             AgentPublicationService agentPublicationService,
@@ -73,7 +39,8 @@ public class RemoteMarketplaceConfig {
             OrchestratorInternalClient orchestratorClient,
             ObjectProvider<EditableWorkflowTwinService> editableWorkflowTwinService) {
         return new RemoteMarketplaceService(
-                cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService, objectMapper, authClient,
+                cloudApiUrl, snapshotCloneService, receiptRepository, cloudLinkService.getIfAvailable(),
+                objectMapper, authClient,
                 agentPublicationService, resourcePublicationService, orchestratorClient,
                 // Backs the ON-DEMAND editable copy (and owns its WORKFLOW-quota check).
                 // Acquire itself no longer needs it: it stopped minting a copy per install.

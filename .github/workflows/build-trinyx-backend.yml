@@ -4,26 +4,33 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'frontend/app/contact/**'
+      - 'frontend/components/about/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'scripts/validate-cloud-publisher-bootstrap.mjs'
   push:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'frontend/app/contact/**'
+      - 'frontend/components/about/**'
       - 'docker-compose.yml'
       - '.github/workflows/build-trinyx-backend.yml'
+      - '.github/workflows/build-trinyx-cloud-images.yml'
+      - 'scripts/validate-cloud-publisher-bootstrap.mjs'
   workflow_dispatch:
 
 concurrency:
-  group: trinyx-backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && format('trinyx-runtime-publish-{0}', github.sha) || format('trinyx-backend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
-  packages: write
 
 env:
-  BACKEND_IMAGE: ghcr.io/eddinerabii/trinyx-backend
+  BACKEND_IMAGE: ghcr.io/trinyxai/trinyx-backend
 
 jobs:
   test:
@@ -32,8 +39,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # actions/setup-java v4
         with:
           distribution: temurin
           java-version: '21'
@@ -41,14 +48,14 @@ jobs:
       - name: Compile and install the required reactor graph
         run: >-
           mvn -B -Pce -DskipTests
-          -pl common-lib,auth-service,catalog-service,monolith-service
+          -pl common-lib,auth-service,catalog-service,storage-service,monolith-service
           -am install
       - name: Run paid-monolith affected tests
         run: >-
           mvn -B -Pce
-          -pl common-lib,auth-service,catalog-service,monolith-service
+          -pl common-lib,auth-service,catalog-service,storage-service,monolith-service
           -Dsurefire.failIfNoSpecifiedTests=false
-          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,SubscriptionCacheBusterTest,PlanStorageQuotaSyncerTest,WebhookControllerReferralTest,CreditAttributionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest,ApiCatalogMergeServiceTest,ApiCatalogBundleSqlIntegrationTest,ApiCatalogBundleApplierTest
+          -Dtest=AppEditionProviderTest,AppEditionAutoConfigurationTest,MonolithCeConfigContractTest,WebhookControllerTest,StripeBillingServiceTest,StripeScheduleServiceTest,SubscriptionServiceTest,SubscriptionCacheBusterTest,PlanStorageQuotaSyncerTest,WebhookControllerReferralTest,CreditAttributionServiceTest,FreeSubscriptionProvisionerTest,FreeSubscriptionRenewalSchedulerTest,CreditAttributionGrantPaygTopupTest,CreditLedgerRepositoryLockIntegrationTest,CreditServiceTest,CreditServiceExactPayerTest,CreditControllerTest,CreditConsumptionClientTest,GatewayAuthenticationFilterTest,ServiceRouteAuthenticationTest,ModelPricingServiceTest,PlanLimitServiceTest,BillingControllerTest,BillingControllerIntegrationTest,StripeHealthIndicatorTest,WorkloadAuthenticationServiceTest,CloudCreditAuthorityControllerTest,ExternalCreditProxyServiceTest,CloudSettlementOutboxDispatcherTest,CloudSettlementResultWriterTest,WorkspaceDataPurgerTest,WorkspaceStorageErasureOutboxTest,WorkspaceStorageErasureDispatcherTest,RedisExternalSettlementIntentStoreTest,CreditConsumptionClientAmbiguousOutcomeTest,WorkspaceStorageObjectDeleterWiringTest,S3FileStorageServiceTest,StorageApplicationYamlTest,ApiCatalogMergeServiceTest,ApiCatalogBundleSqlIntegrationTest,ApiCatalogBundleApplierTest,CloudLinkConfigTopologyTest
           test
 
   frontend-test:
@@ -79,8 +86,8 @@ jobs:
       NEXT_PUBLIC_BILLING_ENABLED: ${{ matrix.billing-enabled }}
       NEXT_PUBLIC_SPRING_BASE_URL: http://livecontext-app:8080
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node v4
         with:
           node-version: '22.13'
           cache: npm
@@ -95,31 +102,210 @@ jobs:
           __tests__/components/settings/settingsNavItems.test.ts
           components/billing/__tests__/CancellationModal.test.tsx
           components/settings/__tests__/VersionCard.test.tsx
+          components/app/__tests__/SidePanel.detach.test.tsx
+          components/app/__tests__/WorkflowBuilderPanelContent.dispatch.test.tsx
+          components/app/__tests__/WorkflowPanelContent.canvasActions.test.tsx
+          app/workflows/builder/components/__tests__/BuilderCanvas.runControlsWiring.test.tsx
+          components/workflow/relations/__tests__/WorkflowRelationsMenu.test.tsx
+          components/files/__tests__/FileBrowser.navigation.test.tsx
+          app/contact/__tests__/contact-page.test.tsx
+          components/about/__tests__/AboutInformationContent.test.tsx
       - name: Build frontend (${{ matrix.mode }})
         run: npm run build
 
-  build:
+  build-pr:
+    if: github.event_name == 'pull_request'
     needs: [test, frontend-test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build backend monolith image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
         with:
           context: ./backend
           file: ./backend/monolith-service/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-            ${{ env.BACKEND_IMAGE }}:latest
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=trinyx-backend
           cache-to: type=gha,mode=max,scope=trinyx-backend
+
+      - name: Smoke boot CE defaults, key persistence and paid-monolith CloudLink
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          network="trinyx-ce-smoke"
+          keys_volume="trinyx-ce-smoke-keys"
+          cleanup() {
+            docker rm -f ce-smoke-backend ce-smoke-postgres ce-smoke-redis ce-smoke-minio >/dev/null 2>&1 || true
+            docker network rm "${network}" >/dev/null 2>&1 || true
+            docker volume rm -f "${keys_volume}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          cleanup
+          docker network create "${network}" >/dev/null
+          docker volume create "${keys_volume}" >/dev/null
+
+          docker run -d --name ce-smoke-postgres --network "${network}" \
+            -e POSTGRES_DB=livecontext -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            pgvector/pgvector:0.8.1-pg16 >/dev/null
+          docker run -d --name ce-smoke-redis --network "${network}" redis:7.4.11-alpine >/dev/null
+          docker run -d --name ce-smoke-minio --network "${network}" \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-07-23T15-54-02Z server /data >/dev/null
+
+          for attempt in {1..60}; do
+            if docker exec ce-smoke-postgres pg_isready -U postgres >/dev/null 2>&1 \
+                && docker exec ce-smoke-redis redis-cli ping >/dev/null 2>&1; then
+              break
+            fi
+            if [ "${attempt}" -eq 60 ]; then
+              echo "CE smoke dependencies did not become ready" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker run --rm --network "${network}" --entrypoint /bin/sh minio/mc:RELEASE.2025-07-21T05-28-08Z -c '
+            until mc alias set smoke http://ce-smoke-minio:9000 minioadmin minioadmin >/dev/null 2>&1; do sleep 2; done
+            mc mb --ignore-existing smoke/workflow-files >/dev/null
+          '
+
+          common_args=(
+            --network "${network}" -p 18080:8080
+            -e DB_HOST=ce-smoke-postgres -e DB_PORT=5432 -e DB_NAME=livecontext
+            -e DB_USERNAME=postgres -e DB_PASSWORD=postgres
+            -e REDIS_HOST=ce-smoke-redis -e REDIS_PORT=6379
+            -e STORAGE_S3_ENDPOINT=http://ce-smoke-minio:9000
+            -e STORAGE_S3_ACCESS_KEY=minioadmin -e STORAGE_S3_SECRET_KEY=minioadmin
+            -e STORAGE_S3_BUCKET=workflow-files
+            -v "${keys_volume}:/app/data/keys"
+          )
+
+          start_backend() {
+            docker run -d --name ce-smoke-backend "${common_args[@]}" "$@" \
+              "${BACKEND_IMAGE}:${GITHUB_SHA}" >/dev/null
+          }
+
+          wait_for_backend() {
+            label="$1"
+            health_path="${2:-/actuator/health}"
+            for attempt in {1..120}; do
+              if curl --fail --silent "http://127.0.0.1:18080${health_path}" >/dev/null; then
+                echo "${label} smoke boot succeeded via ${health_path}"
+                return 0
+              fi
+              if ! docker ps --format '{{.Names}}' | grep -qx ce-smoke-backend; then
+                echo "${label} backend exited during smoke boot" >&2
+                docker logs ce-smoke-backend >&2 || true
+                return 1
+              fi
+              sleep 5
+            done
+            echo "${label} backend did not become healthy within 10 minutes" >&2
+            docker logs ce-smoke-backend >&2 || true
+            return 1
+          }
+
+          # Defaults are intentionally omitted: marketplace=remote and cloud-link.enabled=false.
+          start_backend
+          wait_for_backend "CE default"
+          first_key_checksum="$(docker exec ce-smoke-backend sha256sum /app/data/keys/encryption.env | awk '{print $1}')"
+          test -n "${first_key_checksum}"
+
+          docker rm -f ce-smoke-backend >/dev/null
+          start_backend
+          wait_for_backend "CE recreated"
+          second_key_checksum="$(docker exec ce-smoke-backend sha256sum /app/data/keys/encryption.env | awk '{print $1}')"
+          test "${first_key_checksum}" = "${second_key_checksum}"
+          echo "CE encryption keys survived container recreation"
+
+          docker rm -f ce-smoke-backend >/dev/null
+          start_backend -e APP_EDITION=paid-monolith -e MARKETPLACE_MODE=local -e CLOUD_LINK_ENABLED=true \
+            -e CREDIT_UNLIMITED=false -e PLAN_LIMITS_ENABLED=true -e BILLING_PROVIDER=stripe \
+            -e MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED=true
+          # The aggregate health endpoint is intentionally DOWN without a real Stripe secret.
+          # Liveness proves the Spring process booted without weakening the paid runtime contract.
+          wait_for_backend "Paid monolith local Marketplace + CloudLink" "/actuator/health/liveness"
+          paid_version="$(curl --fail --silent http://127.0.0.1:18080/api/version)"
+          grep -q '"edition":"paid-monolith"' <<<"${paid_version}"
+          echo "Paid monolith edition contract confirmed"
+
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: [test, frontend-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # docker/setup-buildx-action v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # docker/login-action v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend monolith by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # docker/build-push-action v6
+        with:
+          context: ./backend
+          file: ./backend/monolith-service/Dockerfile
+          platforms: linux/amd64
+          outputs: type=image,name=${{ env.BACKEND_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/TrinyxAI/Trinyx
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=trinyx-backend
+          cache-to: type=gha,mode=max,scope=trinyx-backend
+      - name: Create immutable backend full-SHA tag
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          sha_ref="${BACKEND_IMAGE}:${GITHUB_SHA}"
+          inspect_digest() {
+            docker buildx imagetools inspect "$1" 2>/dev/null |
+              awk '$1 == "Digest:" { print $2; exit }'
+          }
+          existing="$(inspect_digest "${sha_ref}" || true)"
+          if [[ -n "${existing}" && "${existing}" != "${IMAGE_DIGEST}" ]]; then
+            echo "Refusing to move immutable ${sha_ref}: ${existing} != ${IMAGE_DIGEST}" >&2
+            exit 1
+          fi
+          if [[ -z "${existing}" ]]; then
+            docker buildx imagetools create \
+              --tag "${sha_ref}" "${BACKEND_IMAGE}@${IMAGE_DIGEST}"
+          fi
+          test "$(inspect_digest "${sha_ref}")" = "${IMAGE_DIGEST}"
+          echo "Backend immutable reference: ${BACKEND_IMAGE}@${IMAGE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
+
+  publish-cloud-runtime:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [test, frontend-test, publish]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-trinyx-cloud-images.yml
+    with:
+      publish: true

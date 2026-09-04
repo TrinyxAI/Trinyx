@@ -62,7 +62,7 @@ public class OAuth2Engine {
      * descriptive agent is accepted by every provider, so it is set unconditionally rather than
      * gated on a provider name (keeping with "provider quirks are config, not code").
      */
-    static final String TOKEN_REQUEST_USER_AGENT = "LiveContext/1.0 (+https://livecontext.ai)";
+    static final String TOKEN_REQUEST_USER_AGENT = "Trinyx/1.0 (+https://trinyx.fr)";
 
     public record TokenRequest(
             String url,

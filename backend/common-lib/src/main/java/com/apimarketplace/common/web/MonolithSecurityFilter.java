@@ -156,6 +156,24 @@ public class MonolithSecurityFilter implements Filter {
         String claimedActiveOrgId = httpRequest.getHeader(ACTIVE_ORG_ID_HEADER);
         boolean loopbackRequest = isLoopbackRequest(httpRequest);
         boolean protectedMonolithPath = isProtectedMonolithPath(path);
+        boolean privateBillingWorkloadPath = isPrivateBillingWorkloadPath(httpRequest.getMethod(), path);
+
+        // The external billing authority has its own Ed25519 workload JWT verifier in the
+        // controller. The embedded-user JWT parser below must never consume that token.
+        // Only a genuine in-process loopback hop from the dedicated private reverse proxy
+        // may reach this exact surface. Public/same-host proxy traffic carries Forwarded/XFF
+        // and is deliberately treated as external by isLoopbackRequest().
+        if (privateBillingWorkloadPath) {
+            if (!loopbackRequest) {
+                httpResponse.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                httpResponse.setContentType("application/json");
+                httpResponse.getWriter().write("{\"error\":\"Not Found\"}");
+                return;
+            }
+            doFilterWithBoundRequest(new StrippedIdentityHeadersRequestWrapper(httpRequest),
+                    response, chain);
+            return;
+        }
 
         // SECURITY: /api/internal/** is the service-to-service surface (credential resolvers that
         // return DECRYPTED secrets, workspace purge, signal resolution, run/agent access checks,
@@ -656,6 +674,16 @@ public class MonolithSecurityFilter implements Filter {
     private boolean isProtectedMonolithPath(String path) {
         return path.startsWith("/api/internal/conversation/tools/execute") ||
                path.startsWith("/api/credentials/by-integration/");
+    }
+
+    private boolean isPrivateBillingWorkloadPath(String method, String path) {
+        if (!"POST".equals(method) || path == null) {
+            return false;
+        }
+        return path.equals("/internal/v1/credit-reservations")
+                || path.matches("^/internal/v1/credit-reservations/"
+                        + "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                        + "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(dispatching|commit|release|outcome-unknown)$");
     }
 
     /**

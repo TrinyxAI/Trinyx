@@ -21,6 +21,11 @@
             <artifactId>common-lib</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Cloud HMAC v2 replay protection requires a distributed nonce store. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
 
         <!-- Shared Trigger client DTOs -->
         <dependency>

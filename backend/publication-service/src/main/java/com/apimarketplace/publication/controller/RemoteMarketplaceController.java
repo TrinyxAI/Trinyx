@@ -98,7 +98,8 @@ public class RemoteMarketplaceController {
                     remoteMarketplaceService.createEditableWorkflowTwin(publicationId, tenantId, organizationId));
 
         } catch (CloudLinkService.CloudAccountNotLinkedException e) {
-            // The snapshot is re-fetched from the cloud, so an unlinked install can't copy.
+            // A public/free snapshot needs no linked Cloud account. This exception is
+            // reserved for a paid or otherwise auth-required snapshot path.
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", e.getMessage(), "code", "CLOUD_ACCOUNT_NOT_LINKED"));
 
@@ -124,7 +125,7 @@ public class RemoteMarketplaceController {
     }
 
     // =====================================================================
-    // Cloud-parity read proxies (2026-06-10) - a cloud-linked CE renders the
+    // Cloud-parity read proxies (2026-06-10) - a remote CE renders the
     // SAME marketplace UI as cloud; these endpoints forward the cloud's PUBLIC
     // marketplace reads through `marketplace.cloud-api-url` so the browser
     // never needs the cloud origin. All fail-soft (HTTP 200 + empty payload)
@@ -196,7 +197,7 @@ public class RemoteMarketplaceController {
     // =====================================================================
     // Cloud-parity PER-PUBLICATION read proxies - forward the cloud's PUBLIC
     // /publications/by-id/{id}/* reads (the detail page + every card thumbnail
-    // resource) and the publisher avatar so a cloud-linked CE renders cloud
+    // resource) and the publisher avatar so a remote CE renders cloud
     // publications fully (without these, every card thumbnail and the detail
     // page 404 because the cloud ids are absent from the local DB). The body is
     // forwarded verbatim with the cloud's status (NOT fail-soft-to-empty) so the
@@ -268,7 +269,7 @@ public class RemoteMarketplaceController {
 
     /**
      * GET /api/publications/remote/users/{userId}/profile - cloud publisher/reviewer
-     * public profile (resolves the {@code @handle}) so a cloud-linked CE can deep-link
+     * public profile (resolves the {@code @handle}) so a remote CE can deep-link
      * "View profile" on a cloud-sourced card to the cloud profile page. The cloud user
      * id is absent from the local auth DB, so the local by-id read would 404.
      */

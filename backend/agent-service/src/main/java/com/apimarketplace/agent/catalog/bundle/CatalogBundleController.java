@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>CE download endpoints live under {@code /api/catalog-bundles/*} and are
  * GATED behind an active cloud link: the gateway validates the CE's cloud-link
  * bearer token (injecting {@code X-User-ID}) and the handler additionally checks
- * {@code authClient.userOwnsActiveCeLink} on the {@code X-LiveContext-Install-Id}
+ * {@code authClient.userOwnsActiveCeLink} on the {@code X-Install-ID}
  * header - mirroring the LLM relay ({@code CloudLlmRelayController}). Catalog
  * freshness is therefore a benefit of being cloud-linked: an UNLINKED install gets
  * 401/403, never the bundle. Only {@code /api/catalog-bundles/signing-key} stays
@@ -41,7 +41,7 @@ import java.util.Optional;
 public class CatalogBundleController {
 
     /** Same header the LLM relay uses to carry the CE install id (see CloudLlmRelayController). */
-    static final String INSTALL_HEADER = "X-LiveContext-Install-Id";
+    static final String INSTALL_HEADER = "X-Install-ID";
 
     private final CatalogBundleService bundleService;
     private final CatalogBundleSigner signer;

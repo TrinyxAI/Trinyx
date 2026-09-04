@@ -374,7 +374,7 @@ public class ModelCatalogSyncService {
         String url = String.format(liteLlmUrlTemplate, liteLlmCommitSha);
         try {
             HttpHeaders h = new HttpHeaders();
-            h.set(HttpHeaders.USER_AGENT, "livecontext-catalog-sync/1.0");
+            h.set(HttpHeaders.USER_AGENT, "trinyx-catalog-sync/1.0");
             ResponseEntity<byte[]> resp = restTemplate.exchange(url, HttpMethod.GET,
                     new HttpEntity<>(h), byte[].class);
             byte[] body = resp.getBody();
@@ -390,7 +390,7 @@ public class ModelCatalogSyncService {
     FetchedFeed fetchOpenRouter() {
         try {
             HttpHeaders h = new HttpHeaders();
-            h.set(HttpHeaders.USER_AGENT, "livecontext-catalog-sync/1.0");
+            h.set(HttpHeaders.USER_AGENT, "trinyx-catalog-sync/1.0");
             h.set(HttpHeaders.ACCEPT, "application/json");
             ResponseEntity<byte[]> resp = restTemplate.exchange(openRouterUrl, HttpMethod.GET,
                     new HttpEntity<>(h), byte[].class);

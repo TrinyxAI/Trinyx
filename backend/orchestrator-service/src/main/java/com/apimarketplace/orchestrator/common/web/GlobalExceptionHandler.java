@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -166,6 +167,20 @@ public class GlobalExceptionHandler {
                 .body(errorResponse("INVALID_PARAMETER",
                     "Invalid value for parameter '" + paramName + "': expected " +
                     (ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "valid format")));
+    }
+
+    /**
+     * Preserve intentional HTTP errors without exposing nested exception details.
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+        String reason = ex.getReason();
+        String errorCode = reason != null && reason.matches("[A-Z][A-Z0-9_]*")
+                ? reason
+                : "REQUEST_FAILED";
+        logger.warn("Request failed with status {} and error code {}", ex.getStatusCode(), errorCode);
+        return ResponseEntity.status(ex.getStatusCode())
+                .body(errorResponse(errorCode, "Request failed"));
     }
 
     /**

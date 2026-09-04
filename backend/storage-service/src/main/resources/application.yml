@@ -86,10 +86,42 @@ gateway:
       - /health
       - /actuator
       - /api/internal/
-      # HMAC-signed marketplace showcase file proxy. The path is reachable
-      # without a JWT (signature is the auth) AND must skip the gateway-secret
-      # check downstream - both ends must allowlist it.
       - /api/files/proxy-signed
+    hmac-required-paths:
+      - /api/internal/storage/
+    service-authenticated-paths:
+      - /api/internal/storage/
+    service-secrets:
+      catalog-service: ${CATALOG_SERVICE_S2S_SECRET:}
+      orchestrator-service: ${ORCHESTRATOR_SERVICE_S2S_SECRET:}
+      publication-service: ${PUBLICATION_SERVICE_S2S_SECRET:}
+      auth-service: ${AUTH_SERVICE_S2S_SECRET:}
+    service-route-permissions:
+      catalog-service:
+        - "POST:/api/internal/storage/upload-bytes"
+        - "POST:/api/internal/storage/generic-upload"
+        - "POST:/api/internal/storage/generation-provenance"
+        - "GET:/api/internal/storage/exists"
+      orchestrator-service:
+        - "POST:/api/internal/storage/upload"
+        - "POST:/api/internal/storage/upload-bytes"
+        - "POST:/api/internal/storage/generic-upload"
+        - "POST:/api/internal/storage/adopt-run-context"
+        - "POST:/api/internal/storage/generation-provenance"
+        - "POST:/api/internal/storage/presign"
+        - "GET:/api/internal/storage/download"
+        - "GET:/api/internal/storage/exists"
+        - "DELETE:/api/internal/storage/delete"
+        - "DELETE:/api/internal/storage/delete-run-files"
+        - "DELETE:/api/internal/storage/delete-run-files-job"
+      publication-service:
+        - "POST:/api/internal/storage/presign"
+        - "GET:/api/internal/storage/download"
+        - "GET:/api/internal/storage/exists"
+      auth-service:
+        - "DELETE:/api/internal/storage/workspace-erasure"
+        - "POST:/api/internal/storage/quota/tenant/{tenantId}/limits"
+        - "POST:/api/internal/storage/quota/org/{organizationId}/limits"
 
 logging:
   level:

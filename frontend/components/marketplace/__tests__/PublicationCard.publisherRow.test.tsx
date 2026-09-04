@@ -49,7 +49,7 @@ function agentPub(overrides: Partial<WorkflowPublication> = {}): WorkflowPublica
     displayMode: 'AGENT',
     creditsPerUse: 0,
     publisherId: 'user-9',
-    publisherName: 'livecontext',
+    publisherName: 'trinyx',
     status: 'ACTIVE',
     visibility: 'PUBLIC',
     useCount: 0,
@@ -101,7 +101,7 @@ describe('PublicationCard - publisher row keeps its qualifiers on ONE line', () 
     })} />);
 
     const row = publisherRow();
-    expect(row.textContent).toContain('livecontext');
+    expect(row.textContent).toContain('trinyx');
     // The counts are agent-only: nothing numeric should have leaked into the row.
     expect(row.textContent).not.toMatch(/\d/);
   });

@@ -1,5 +1,5 @@
 /**
- * Typed analytics event names for LiveContext product analytics.
+ * Typed analytics event names for Trinyx product analytics.
  *
  * Full taxonomy & rationale: `the project docs`.
  * Naming convention: snake_case, `object_action`, past tense.

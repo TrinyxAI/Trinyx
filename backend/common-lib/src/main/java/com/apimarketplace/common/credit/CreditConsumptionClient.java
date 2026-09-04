@@ -2,12 +2,16 @@ package com.apimarketplace.common.credit;
 
 import com.apimarketplace.common.web.OrgContextHeaderForwarder;
 import com.apimarketplace.common.web.TenantResolver;
+import com.apimarketplace.common.web.GatewaySignatureV2;
+import com.apimarketplace.common.web.ServiceRequestSigningInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -17,6 +21,8 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.net.URI;
+import java.util.UUID;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,6 +69,46 @@ public class CreditConsumptionClient {
     private final String authServiceUrl;
     private final boolean enabled;
     private final String gatewaySecretKey;
+    private final ServiceRequestSigningInterceptor serviceRequestSigner;
+    private String billingAuthorityMode = "native-cloud";
+    private String gatewaySignatureVersion = "2";
+    private ExternalSettlementIntentStore settlementIntentStore;
+    private boolean requireProducerSettlementOutbox;
+
+    /**
+     * Injected from Spring's canonical configuration source. Directly constructed unit-test
+     * clients keep the safe native default and may override it explicitly.
+     */
+    @org.springframework.beans.factory.annotation.Value("${billing.authority.mode:native-cloud}")
+    public void setBillingAuthorityMode(String billingAuthorityMode) {
+        this.billingAuthorityMode = billingAuthorityMode == null ? "native-cloud" : billingAuthorityMode;
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${gateway.signature.version:2}")
+    public void setGatewaySignatureVersion(String gatewaySignatureVersion) {
+        this.gatewaySignatureVersion = gatewaySignatureVersion == null
+                ? "2" : gatewaySignatureVersion.trim();
+    }
+
+    @org.springframework.beans.factory.annotation.Value(
+            "${billing.external.require-producer-outbox:false}")
+    public void setRequireProducerSettlementOutbox(boolean required) {
+        this.requireProducerSettlementOutbox = required;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSettlementIntentStore(ExternalSettlementIntentStore store) {
+        this.settlementIntentStore = store;
+    }
+
+    @jakarta.annotation.PostConstruct
+    void validateExternalSettlementDurability() {
+        if (usesExternalAuthority() && requireProducerSettlementOutbox
+                && (settlementIntentStore == null || !settlementIntentStore.durable())) {
+            throw new IllegalStateException(
+                    "external-paid-monolith requires a durable producer settlement outbox");
+        }
+    }
 
     private final ConcurrentHashMap<String, CachedCheck> creditCheckCache = new ConcurrentHashMap<>();
 
@@ -101,7 +147,11 @@ public class CreditConsumptionClient {
             headers.set("X-User-ID", userId);
         }
         OrgContextHeaderForwarder.forward(headers);
-        applyGatewaySignature(headers, userId);
+        copyTrustedInboundHeader(headers, "X-Principal-ID");
+        copyTrustedInboundHeader(headers, "X-Billing-Subject-ID");
+        copyTrustedInboundHeader(headers, "X-Organization-Role");
+        copyTrustedInboundHeader(headers, "X-User-Roles");
+        copyTrustedInboundHeader(headers, "X-Install-ID");
         return headers;
     }
 
@@ -118,12 +168,28 @@ public class CreditConsumptionClient {
     }
 
     public CreditConsumptionClient(String authServiceUrl, boolean enabled, String gatewaySecretKey) {
+        this(authServiceUrl, enabled, gatewaySecretKey, null, null);
+    }
+
+    public CreditConsumptionClient(
+            String authServiceUrl, boolean enabled, String gatewaySecretKey,
+            String serviceId, String serviceSecret) {
         this.enabled = enabled;
         this.gatewaySecretKey = gatewaySecretKey;
+        boolean hasServiceId = serviceId != null && !serviceId.isBlank();
+        boolean hasServiceSecret = serviceSecret != null && !serviceSecret.isBlank();
+        if (hasServiceId != hasServiceSecret) {
+            throw new IllegalStateException(
+                    "Internal service identity and HMAC key must be configured together");
+        }
+        this.serviceRequestSigner = hasServiceId
+                ? new ServiceRequestSigningInterceptor(serviceId, serviceSecret)
+                : null;
         if (enabled) {
             this.restTemplate = new RestTemplateBuilder()
                     .connectTimeout(CONNECT_TIMEOUT)
                     .readTimeout(READ_TIMEOUT)
+                    .additionalInterceptors(this::applyGatewaySignature)
                     .build();
         } else {
             this.restTemplate = null;
@@ -796,6 +862,9 @@ public class CreditConsumptionClient {
         if (!enabled || userId == null) {
             return new ScopeReserveResult(true, null, false, BigDecimal.valueOf(999_999_999L));
         }
+        if (usesExternalAuthority()) {
+            return externalScopeReserve(userId, sourceId, provider, model, projected, scopeKind);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-reserve";
         HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
 
@@ -850,6 +919,9 @@ public class CreditConsumptionClient {
     /** Post-flight commit. Returns the outcome enum name (COMMITTED, ALREADY_COMMITTED, RESERVATION_EXPIRED, COMMITTED_PARTIAL, COMMITTED_FLOORED). */
     public String scopeCommit(String sourceId, BigDecimal actualAmount, String provider, String model) {
         if (!enabled) return "COMMITTED";
+        if (usesExternalAuthority()) {
+            return externalScopeCommit(sourceId, actualAmount, provider, model);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-commit";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
         Map<String, Object> body = new HashMap<>();
@@ -871,6 +943,9 @@ public class CreditConsumptionClient {
     /** Release. Returns the outcome enum name (RELEASED, ALREADY_RELEASED, ALREADY_COMMITTED). */
     public String scopeRelease(String sourceId, String reason) {
         if (!enabled) return "RELEASED";
+        if (usesExternalAuthority()) {
+            return externalScopeRelease(sourceId, reason);
+        }
         String url = authServiceUrl + "/api/credits/markup/scope-release";
         HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
         Map<String, Object> body = new HashMap<>();
@@ -887,6 +962,445 @@ public class CreditConsumptionClient {
         }
     }
 
+
+
+    private ScopeReserveResult externalScopeReserve(
+            Long userId, String sourceId, String provider, String model,
+            BigDecimal projected, String scopeKind) {
+        if (sourceId == null || sourceId.isBlank() || projected == null
+                || projected.signum() <= 0) {
+            return new ScopeReserveResult(false, "invalid external reservation", false,
+                    BigDecimal.ZERO);
+        }
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/reserve";
+        HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("operationId", operationId);
+        body.put("feature", externalFeature(provider, model));
+        body.put("sourceType", scopeKind == null || scopeKind.isBlank()
+                ? "PLATFORM_MARKUP" : scopeKind);
+        body.put("estimatedCredits", projected);
+        body.put("maximumCredits", projected);
+        body.put("provider", provider);
+        body.put("model", model);
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return new ScopeReserveResult(false, "external reservation rejected", false,
+                        BigDecimal.ZERO);
+            }
+            BigDecimal balance = BigDecimal.ZERO;
+            if (response.getBody() != null
+                    && response.getBody().get("authority") instanceof Map<?, ?> authority
+                    && authority.get("authoritativeBalance") != null) {
+                balance = new BigDecimal(authority.get("authoritativeBalance").toString());
+            }
+            Object requestHash = response.getBody() == null
+                    ? null : response.getBody().get("requestHash");
+            if (!registerExternalProviderOperation(operationId,
+                    requestHash == null ? "" : requestHash.toString(),
+                    provider, model, headers)) {
+                return new ScopeReserveResult(false,
+                        "provider dispatch journal unavailable", false, BigDecimal.ZERO);
+            }
+            return new ScopeReserveResult(true, null, false, balance);
+        } catch (org.springframework.web.client.HttpClientErrorException denied) {
+            return new ScopeReserveResult(false,
+                    denied.getStatusCode().value() == 402
+                            ? "insufficient credits" : denied.getMessage(),
+                    denied.getStatusCode().value() == 402, BigDecimal.ZERO);
+        } catch (Exception failure) {
+            log.warn("External scope reservation failed closed for {}: {}",
+                    sourceId, failure.getMessage());
+            return new ScopeReserveResult(false, failure.getMessage(), false, BigDecimal.ZERO);
+        }
+    }
+
+    private String externalScopeCommit(
+            String sourceId, BigDecimal actualAmount, String provider, String model) {
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/commit-amount";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("actualCredits", actualAmount);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("providerRequestId", "");
+        ExternalSettlementIntentStore.Intent intent =
+                settlementIntent("COMMIT_AMOUNT", operationId, url, body);
+        return deliverDurably(intent, headers) ? "COMMITTED" : "RETRY";
+    }
+
+    private String externalScopeRelease(String sourceId, String reason) {
+        UUID operationId = externalOperationId(sourceId);
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/release-local";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = Map.of(
+                "reason", reason == null ? "provider-not-called" : reason);
+        ExternalSettlementIntentStore.Intent intent =
+                settlementIntent("RELEASE_LOCAL", operationId, url, body);
+        return deliverDurably(intent, headers) ? "RELEASED" : "RETRY";
+    }
+
+    private static UUID externalOperationId(String sourceId) {
+        return UUID.nameUUIDFromBytes(
+                ("trinyx-external-credit:" + sourceId).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String externalFeature(String provider, String model) {
+        String value = (value(provider) + ":" + value(model)).toLowerCase(java.util.Locale.ROOT);
+        return value.contains("web") || value.contains("search")
+                ? "cloudWebSearchRelay" : "";
+    }
+
+    /**
+     * True when this runtime must reserve and settle against the external
+     * paid-monolith authority. Exposed for provider modules that must choose a
+     * pre-flight reservation path before any billable upstream call.
+     */
+    public boolean usesExternalAuthority() {
+        return "external-paid-monolith".equalsIgnoreCase(billingAuthorityMode);
+    }
+
+    public record ExternalReservationResult(boolean success, String requestHash, String error) {}
+
+    /**
+     * External-authority LLM hold. Must complete successfully before a provider call starts.
+     */
+    public ExternalReservationResult reserveExternalLlm(
+            Long userId, java.util.UUID operationId, String feature, String sourceType,
+            String provider, String model, int estimatedPromptTokens,
+            int maximumCompletionTokens) {
+        if (!enabled || userId == null) {
+            return new ExternalReservationResult(false, null, "external credit authority unavailable");
+        }
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/reserve-llm";
+        HttpHeaders headers = userHeaders(String.valueOf(userId), MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("operationId", operationId);
+        body.put("feature", feature);
+        body.put("sourceType", sourceType);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("estimatedPromptTokens", Math.max(0, estimatedPromptTokens));
+        body.put("maximumCompletionTokens", Math.max(0, maximumCompletionTokens));
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            Object requestHash = response.getBody() == null
+                    ? null : response.getBody().get("requestHash");
+            if (!response.getStatusCode().is2xxSuccessful() || requestHash == null) {
+                return new ExternalReservationResult(false, null, "reservation rejected");
+            }
+            if (!registerExternalProviderOperation(operationId, requestHash.toString(),
+                    provider, model, headers)) {
+                return new ExternalReservationResult(false, requestHash.toString(),
+                        "provider dispatch journal unavailable");
+            }
+            return new ExternalReservationResult(true, requestHash.toString(), null);
+        } catch (Exception failure) {
+            log.warn("External credit reservation failed closed for {}: {}",
+                    operationId, failure.getMessage());
+            return new ExternalReservationResult(false, null, failure.getMessage());
+        }
+    }
+
+    public boolean commitExternalLlm(
+            java.util.UUID operationId, String requestHash, String provider, String model,
+            String providerRequestId, int promptTokens, int completionTokens) {
+        return commitExternalLlm(operationId, requestHash, provider, model,
+                providerRequestId, promptTokens, completionTokens, null);
+    }
+
+    /**
+     * Cache-aware external-authority settlement. The paid-monolith recomputes the
+     * authoritative price from this raw provider usage; Cloud never gets to choose
+     * the amount charged.
+     */
+    public boolean commitExternalLlm(
+            java.util.UUID operationId, String requestHash, String provider, String model,
+            String providerRequestId, int promptTokens, int completionTokens,
+            LlmCacheTokens cacheTokens) {
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/commit-llm";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("requestHash", requestHash);
+        body.put("provider", provider);
+        body.put("model", model);
+        body.put("providerRequestId", providerRequestId == null ? "" : providerRequestId);
+        body.put("promptTokens", Math.max(0, promptTokens));
+        body.put("completionTokens", Math.max(0, completionTokens));
+        if (cacheTokens != null && cacheTokens.hasAny()) {
+            if (cacheTokens.cacheCreationTokens() != null) {
+                body.put("cacheCreationTokens", cacheTokens.cacheCreationTokens());
+            }
+            if (cacheTokens.cacheReadTokens() != null) {
+                body.put("cacheReadTokens", cacheTokens.cacheReadTokens());
+            }
+            if (cacheTokens.cachedTokens() != null) {
+                body.put("cachedTokens", cacheTokens.cachedTokens());
+            }
+            if (cacheTokens.reasoningTokens() != null) {
+                body.put("reasoningTokens", cacheTokens.reasoningTokens());
+            }
+        }
+        ExternalSettlementIntentStore.Intent intent =
+                settlementIntent("COMMIT_LLM", operationId, url, body);
+        return deliverDurably(intent, headers);
+    }
+
+    public boolean releaseExternal(
+            java.util.UUID operationId, String requestHash, String reason) {
+        String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                + operationId + "/release";
+        HttpHeaders headers = userHeaders(null, MediaType.APPLICATION_JSON);
+        Map<String, Object> body = new HashMap<>();
+        body.put("requestHash", requestHash);
+        body.put("reason", reason == null ? "provider-not-called" : reason);
+        ExternalSettlementIntentStore.Intent intent =
+                settlementIntent("RELEASE", operationId, url, body);
+        return deliverDurably(intent, headers);
+    }
+
+    /**
+     * Provider delivery became ambiguous after dispatch. Never release the hold:
+     * retain a durable reconciliation record keyed by the original operation.
+     */
+    public boolean markExternalScopeProviderDispatching(String sourceId) {
+        return sourceId != null && !sourceId.isBlank()
+                && markExternalProviderDispatching(externalOperationId(sourceId));
+    }
+
+    public void recordExternalScopeOutcomeUnknown(
+            String sourceId, String provider, String model, String reason) {
+        recordExternalOutcomeUnknown(externalOperationId(sourceId), "",
+                provider, model, reason);
+    }
+
+    public void recordExternalOutcomeUnknown(
+            UUID operationId, String requestHash, String provider, String model, String reason) {
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            log.error("CRITICAL: ambiguous provider outcome has no durable outbox operationId={}",
+                    operationId);
+            return;
+        }
+        Map<String, Object> details = Map.of(
+                "requestHash", value(requestHash),
+                "provider", value(provider),
+                "model", value(model),
+                "reason", value(reason));
+        try {
+            String url = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                    + operationId + "/outcome-unknown";
+            // The replayable delivery must exist before the audit marker can
+            // remove the DISPATCHING recovery lease.
+            settlementIntentStore.persist(settlementIntent(
+                    "OUTCOME_UNKNOWN", operationId, url, details));
+            settlementIntentStore.recordUnknown(operationId, details);
+        } catch (RuntimeException persistenceFailure) {
+            log.error("CRITICAL: ambiguous provider outcome could not be persisted operationId={}: {}",
+                    operationId, persistenceFailure.getMessage());
+        }
+    }
+
+    /**
+     * Records the provider boundary before any network dispatch. Returning false
+     * is fail-closed: callers must not invoke the provider.
+     */
+    public boolean markExternalProviderDispatching(UUID operationId) {
+        if (!usesExternalAuthority()) return true;
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            log.error("Provider dispatch blocked: durable journal unavailable operationId={}",
+                    operationId);
+            return false;
+        }
+        try {
+            ExternalSettlementIntentStore.ProviderOperation operation =
+                    settlementIntentStore.providerOperation(operationId);
+            if (operation == null) {
+                log.error("Provider dispatch blocked: operation metadata missing operationId={}",
+                        operationId);
+                return false;
+            }
+            boolean marked = settlementIntentStore.markProviderDispatching(operationId);
+            if (!marked) {
+                log.error("Provider dispatch blocked: operation missing or already dispatched operationId={}",
+                        operationId);
+                return false;
+            }
+
+            // The local durable journal is the first half of the point of no
+            // return. The paid wallet must acknowledge DISPATCHING synchronously
+            // before the provider may see any bytes. A queued/retryable response
+            // is deliberately not sufficient to authorize provider delivery.
+            Map<String, Object> body = new HashMap<>();
+            body.put("requestHash", value(operation.requestHash()));
+            body.put("provider", value(operation.provider()));
+            body.put("model", value(operation.model()));
+            ExternalSettlementIntentStore.Intent authorityDispatch =
+                    new ExternalSettlementIntentStore.Intent(
+                            "DISPATCHING", operationId,
+                            dispatchingUrl(operation.outcomeUnknownUrl()), body, 0,
+                            operation.trustedHeaders());
+            SettlementDelivery delivery = deliverPersistedSettlement(authorityDispatch);
+            if (delivery != SettlementDelivery.ACKNOWLEDGED) {
+                log.error("Provider dispatch blocked: paid authority did not acknowledge "
+                                + "DISPATCHING operationId={} result={}",
+                        operationId, delivery);
+                return false;
+            }
+            return true;
+        } catch (RuntimeException failure) {
+            log.error("Provider dispatch blocked: pre-dispatch handshake failed operationId={}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
+    private boolean registerExternalProviderOperation(
+            UUID operationId, String requestHash, String provider, String model,
+            HttpHeaders headers) {
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            return !requireProducerSettlementOutbox;
+        }
+        try {
+            String unknownUrl = authServiceUrl + "/api/internal/cloud-credit-proxy/"
+                    + operationId + "/outcome-unknown";
+            settlementIntentStore.registerProviderOperation(
+                    new ExternalSettlementIntentStore.ProviderOperation(
+                            operationId, value(requestHash), value(provider), value(model),
+                            unknownUrl, trustedSecurityHeaders(headers),
+                            "RESERVED", Instant.now()));
+            return true;
+        } catch (RuntimeException failure) {
+            log.error("Could not register provider operation operationId={}: {}",
+                    operationId, failure.getMessage());
+            return false;
+        }
+    }
+
+    private ExternalSettlementIntentStore.Intent settlementIntent(
+            String action, UUID operationId, String url, Map<String, Object> body) {
+        Map<String, String> trusted = settlementIntentStore == null
+                ? Map.of() : settlementIntentStore.trustedHeaders(operationId);
+        if (trusted.isEmpty()) {
+            trusted = trustedSecurityHeaders(userHeaders(null, MediaType.APPLICATION_JSON));
+        }
+        return new ExternalSettlementIntentStore.Intent(
+                action, operationId, url, body, 0, trusted);
+    }
+
+    private static String dispatchingUrl(String outcomeUnknownUrl) {
+        String suffix = "/outcome-unknown";
+        if (outcomeUnknownUrl == null || !outcomeUnknownUrl.endsWith(suffix)) {
+            throw new IllegalStateException("Provider operation has no valid outcome URL");
+        }
+        return outcomeUnknownUrl.substring(0,
+                outcomeUnknownUrl.length() - suffix.length()) + "/dispatching";
+    }
+
+    private static Map<String, String> trustedSecurityHeaders(HttpHeaders headers) {
+        Map<String, String> trusted = new java.util.LinkedHashMap<>();
+        for (String name : java.util.List.of(
+                "X-User-ID", "X-Principal-ID", "X-Billing-Subject-ID",
+                "X-Organization-ID", "X-Organization-Role", "X-User-Roles",
+                "X-Install-ID")) {
+            String value = headers == null ? null : headers.getFirst(name);
+            if (value != null && !value.isBlank()) trusted.put(name, value);
+        }
+        return trusted;
+    }
+
+    private boolean deliverDurably(ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
+        ExternalSettlementIntentStore.Intent deliveryIntent = intent;
+        if (settlementIntentStore == null || !settlementIntentStore.durable()) {
+            if (requireProducerSettlementOutbox) {
+                log.error("Settlement blocked: durable producer outbox unavailable operationId={}",
+                        intent.operationId());
+                return false;
+            }
+        } else {
+            try {
+                settlementIntentStore.persist(intent);
+                deliveryIntent = settlementIntentStore.claim(intent);
+                if (deliveryIntent == null) {
+                    // Another worker owns the fenced lease. The durable intent is
+                    // already accepted and that owner alone may mutate it.
+                    return true;
+                }
+            } catch (RuntimeException persistenceFailure) {
+                log.error("Settlement intent could not be persisted/claimed operationId={}: {}",
+                        intent.operationId(), persistenceFailure.getMessage());
+                return false;
+            }
+        }
+
+        SettlementDelivery result = deliverPersistedSettlement(deliveryIntent, headers);
+        if (settlementIntentStore != null && settlementIntentStore.durable()) {
+            switch (result) {
+                case ACKNOWLEDGED -> settlementIntentStore.acknowledge(deliveryIntent);
+                case DURABLY_QUEUED -> settlementIntentStore.retry(deliveryIntent,
+                        "auth-service accepted durable responsibility; awaiting authority decision");
+                case PERMANENT_FAILURE -> settlementIntentStore.dead(deliveryIntent,
+                        "permanent authority rejection");
+                case RETRYABLE_FAILURE -> settlementIntentStore.retry(deliveryIntent,
+                        "authority unavailable");
+            }
+        }
+        // A 202 transfers durable delivery responsibility to auth-service and
+        // is therefore accepted by the provider-facing caller. It is not a
+        // financial terminal: the producer intent remains scheduled until a
+        // later final response can ACK or reject it locally.
+        return result == SettlementDelivery.ACKNOWLEDGED
+                || result == SettlementDelivery.DURABLY_QUEUED;
+    }
+
+    SettlementDelivery deliverPersistedSettlement(ExternalSettlementIntentStore.Intent intent) {
+        return deliverPersistedSettlement(intent,
+                userHeaders(null, MediaType.APPLICATION_JSON));
+    }
+
+    private SettlementDelivery deliverPersistedSettlement(
+            ExternalSettlementIntentStore.Intent intent, HttpHeaders headers) {
+        try {
+            intent.trustedHeaders().forEach(headers::set);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    intent.url(), HttpMethod.POST,
+                    new HttpEntity<>(intent.body(), headers), Map.class);
+            if (response.getStatusCode() == HttpStatus.ACCEPTED) {
+                return SettlementDelivery.DURABLY_QUEUED;
+            }
+            return response.getStatusCode().is2xxSuccessful()
+                    ? SettlementDelivery.ACKNOWLEDGED
+                    : response.getStatusCode().is5xxServerError()
+                        ? SettlementDelivery.RETRYABLE_FAILURE
+                        : SettlementDelivery.PERMANENT_FAILURE;
+        } catch (org.springframework.web.client.HttpStatusCodeException status) {
+            int code = status.getStatusCode().value();
+            return code == 408 || code == 429 || code >= 500
+                    ? SettlementDelivery.RETRYABLE_FAILURE
+                    : SettlementDelivery.PERMANENT_FAILURE;
+        } catch (org.springframework.web.client.ResourceAccessException transport) {
+            return SettlementDelivery.RETRYABLE_FAILURE;
+        } catch (RuntimeException failure) {
+            log.error("External settlement delivery failed operationId={}: {}",
+                    intent.operationId(), failure.getMessage());
+            return SettlementDelivery.RETRYABLE_FAILURE;
+        }
+    }
+
+    enum SettlementDelivery {
+        ACKNOWLEDGED,
+        DURABLY_QUEUED,
+        RETRYABLE_FAILURE,
+        PERMANENT_FAILURE
+    }
+
     private static String stripTrailingSlash(String url) {
         if (url != null && url.endsWith("/")) {
             return url.substring(0, url.length() - 1);
@@ -894,22 +1408,79 @@ public class CreditConsumptionClient {
         return url;
     }
 
-    private void applyGatewaySignature(HttpHeaders headers, String userId) {
-        if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
-            return;
+    private org.springframework.http.client.ClientHttpResponse applyGatewaySignature(
+            org.springframework.http.HttpRequest request, byte[] body,
+            org.springframework.http.client.ClientHttpRequestExecution execution)
+            throws java.io.IOException {
+        String path = request.getURI().getRawPath();
+        if (path != null && path.startsWith("/api/internal/cloud-credit-proxy/")) {
+            if (serviceRequestSigner == null) {
+                throw new java.io.IOException(
+                        "Service-specific signing is required for the financial proxy");
+            }
+            return serviceRequestSigner.intercept(request, body, execution);
         }
+        if (gatewaySecretKey == null || gatewaySecretKey.isBlank()) {
+            return execution.execute(request, body);
+        }
+        HttpHeaders headers = request.getHeaders();
         String timestamp = String.valueOf(System.currentTimeMillis());
-        String organizationId = headers.getFirst("X-Organization-ID");
+        String userId = value(headers.getFirst("X-User-ID"));
+        String organizationId = value(headers.getFirst("X-Organization-ID"));
         headers.set("X-Provider-ID", INTERNAL_PROVIDER_ID);
+        if ("1".equals(gatewaySignatureVersion)) {
+            headers.set("X-Gateway-Timestamp", timestamp);
+            headers.set("X-Gateway-Secret", computeLegacyGatewaySignature(
+                    INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));
+            return execution.execute(request, body);
+        }
+
+        // Propagate only server-authenticated context. Browser-controlled values were stripped
+        // by the edge gateway before the inbound servlet request was created.
+        copyTrustedInboundHeader(headers, "X-Principal-ID");
+        copyTrustedInboundHeader(headers, "X-Billing-Subject-ID");
+        copyTrustedInboundHeader(headers, "X-Organization-Role");
+        copyTrustedInboundHeader(headers, "X-User-Roles");
+        copyTrustedInboundHeader(headers, "X-Install-ID");
+
+        URI uri = request.getURI();
+        String target = uri.getRawPath()
+                + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
+        String nonce = UUID.randomUUID().toString();
+        String bodyHash = GatewaySignatureV2.sha256Hex(body);
+        GatewaySignatureV2.Context context = new GatewaySignatureV2.Context(
+                timestamp, nonce, request.getMethod().name(), target, bodyHash,
+                INTERNAL_PROVIDER_ID, userId,
+                value(headers.getFirst("X-Principal-ID")),
+                value(headers.getFirst("X-Billing-Subject-ID")),
+                organizationId,
+                value(headers.getFirst("X-Organization-Role")),
+                value(headers.getFirst("X-User-Roles")),
+                value(headers.getFirst("X-Install-ID")));
+
+        headers.set("X-Gateway-Signature-Version", GatewaySignatureV2.VERSION);
         headers.set("X-Gateway-Timestamp", timestamp);
-        headers.set("X-Gateway-Secret", computeGatewaySignature(
-                INTERNAL_PROVIDER_ID, userId, organizationId, timestamp));
+        headers.set("X-Gateway-Nonce", nonce);
+        headers.set("X-Gateway-Body-SHA256", bodyHash);
+        headers.set("X-Gateway-Secret", GatewaySignatureV2.sign(gatewaySecretKey, context));
+        return execution.execute(request, body);
     }
 
-    private String computeGatewaySignature(String providerId, String userId, String organizationId, String timestamp) {
-        String safeUser = userId != null ? userId : "";
-        String safeOrg = organizationId != null ? organizationId : "";
-        String data = providerId + "|" + safeUser + "|" + safeOrg + "|" + timestamp;
+    private static void copyTrustedInboundHeader(HttpHeaders target, String name) {
+        if (target.containsKey(name)) {
+            return;
+        }
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            String value = attrs.getRequest().getHeader(name);
+            if (value != null && !value.isBlank()) {
+                target.set(name, value);
+            }
+        }
+    }
+
+    private String computeLegacyGatewaySignature(
+            String providerId, String userId, String organizationId, String timestamp) {
+        String data = providerId + "|" + value(userId) + "|" + value(organizationId) + "|" + timestamp;
         try {
             Mac mac = Mac.getInstance(HMAC_ALGO);
             mac.init(new SecretKeySpec(gatewaySecretKey.getBytes(StandardCharsets.UTF_8), HMAC_ALGO));
@@ -919,4 +1490,9 @@ public class CreditConsumptionClient {
             throw new IllegalStateException("HmacSHA256 unavailable", e);
         }
     }
+
+    private static String value(String value) {
+        return value == null ? "" : value;
+    }
+
 }

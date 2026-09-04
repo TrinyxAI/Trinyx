@@ -1073,7 +1073,7 @@ const ResourceManagerProvider: React.FC<{ children: ReactNode; queryClient: Quer
   const hasPermission = useCallback((permission: string): boolean => {
     if (!oidc.user?.profile) return false;
     const resourceAccess = (oidc.user.profile as any)?.resource_access;
-    const permissions = resourceAccess?.['livecontext-frontend']?.roles || [];
+    const permissions = resourceAccess?.['trinyx-frontend']?.roles || resourceAccess?.['livecontext-frontend']?.roles || [];
     return permissions.includes(permission);
   }, [oidc.user?.profile]);
 

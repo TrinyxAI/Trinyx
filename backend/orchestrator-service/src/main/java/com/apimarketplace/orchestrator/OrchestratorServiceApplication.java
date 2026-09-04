@@ -1,5 +1,6 @@
 package com.apimarketplace.orchestrator;
 
+import com.apimarketplace.common.credit.ExternalSettlementOutboxAutoConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
@@ -22,7 +23,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.apimarketplace.auth.client"
     },
     excludeFilters = {
-        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class)
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = TypeExcludeFilter.class),
+        @ComponentScan.Filter(
+                type = FilterType.ASSIGNABLE_TYPE,
+                classes = ExternalSettlementOutboxAutoConfiguration.class)
     }
 )
 @EnableJpaRepositories(basePackages = {
@@ -47,7 +51,3 @@ public class OrchestratorServiceApplication {
         logger.info("Orchestrator Service started successfully");
     }
 }
-
-
-
-

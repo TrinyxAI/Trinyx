@@ -16,6 +16,9 @@ public class UserResolutionResponse {
 
     private Long userId;
     private String providerId;
+    private String principalId;
+    private String billingSubjectId;
+    private String installId;
     private String email;
     /**
      * Legacy field - keeps the user's OWN subscription plan today.
@@ -95,6 +98,15 @@ public class UserResolutionResponse {
 
     public String getProviderId() { return providerId; }
     public void setProviderId(String providerId) { this.providerId = providerId; }
+
+    public String getPrincipalId() { return principalId; }
+    public void setPrincipalId(String principalId) { this.principalId = principalId; }
+
+    public String getBillingSubjectId() { return billingSubjectId; }
+    public void setBillingSubjectId(String billingSubjectId) { this.billingSubjectId = billingSubjectId; }
+
+    public String getInstallId() { return installId; }
+    public void setInstallId(String installId) { this.installId = installId; }
 
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }

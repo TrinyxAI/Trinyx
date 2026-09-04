@@ -62,7 +62,7 @@ spring:
     postgresql:
       transactional-lock: false
     locations: classpath:db/migration
-    schemas: orchestrator, storage, agent, "trigger", interface, publication, auth, datasource, catalog, conversation
+    schemas: orchestrator, storage, agent, trigger, interface, publication, auth, datasource, catalog, conversation
     default-schema: orchestrator
     table: flyway_schema_history_orchestrator
 

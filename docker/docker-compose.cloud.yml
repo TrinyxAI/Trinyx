@@ -10,19 +10,21 @@ x-java-service: &java-service
     DEPLOYMENT_MODE: microservice
     AUTH_MODE: keycloak
     MARKETPLACE_MODE: local
-    BILLING_PROVIDER: stripe
+    BILLING_PROVIDER: none
+    BILLING_AUTHORITY_MODE: external-paid-monolith
+    BILLING_EXTERNAL_REQUIRE_PRODUCER_OUTBOX: "true"
     CREDIT_UNLIMITED: "false"
     CREDIT_CONSUMPTION_ENABLED: "true"
     PLAN_LIMITS_ENABLED: "true"
     WORKFLOW_NODE_BILLING_ENABLED: "true"
     CREDENTIALS_PLATFORM_MARKUP_ENABLED: "true"
     MARKETPLACE_CE_DOWNLOAD_ENABLED: "true"
-    APP_PUBLIC_URL: https://cloud.trinyx.fr
-    WEBHOOK_BASE_URL: https://cloud.trinyx.fr
-    CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-    FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-    AGENT_WEBHOOK_BASE_URL: https://cloud.trinyx.fr
-    WEBSEARCH_PUBLIC_WS_BASE: https://cloud.trinyx.fr
+    APP_PUBLIC_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    WEBHOOK_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    CHAT_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    FORM_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    AGENT_WEBHOOK_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    WEBSEARCH_PUBLIC_WS_BASE: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
     ORCHESTRATOR_CATALOG_BASE_URL: http://catalog-service:8081
     ORCHESTRATOR_CONVERSATION_BASE_URL: http://conversation-service:8087
     AUTH_SERVICE_URL: http://auth-service:8083
@@ -35,9 +37,14 @@ x-java-service: &java-service
     TRIGGER_SERVICE_URL: http://trigger-service:8091
     PUBLICATION_SERVICE_URL: http://publication-service:8092
     ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099
-    GATEWAY_URL: http://cloud-edge:8080
+    GATEWAY_URL: http://gateway-service:8086
     GATEWAY_SECRET_KEY: ${CLOUD_GATEWAY_SECRET_KEY:?set CLOUD_GATEWAY_SECRET_KEY}
     GATEWAY_VERIFICATION_ENABLED: "true"
+    GATEWAY_FILTER_ACCEPT_V1: "false"
+    GATEWAY_FILTER_REQUIRE_DISTRIBUTED_NONCE_STORE: "true"
+    GATEWAY_FILTER_V2_TIMESTAMP_SKEW_MS: "60000"
+    GATEWAY_FILTER_NONCE_TTL_MS: "300000"
+    GATEWAY_FILTER_MAX_BODY_BYTES: "${CLOUD_GATEWAY_MAX_BODY_BYTES:-52428800}"
     SPRING_DATASOURCE_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
     SPRING_DATASOURCE_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
     SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${CLOUD_DB_POOL_MAX:-10}
@@ -45,9 +52,11 @@ x-java-service: &java-service
     SPRING_FLYWAY_ENABLED: "false"
     REDIS_HOST: cloud-redis
     REDIS_PORT: "6379"
+    SPRING_DATA_REDIS_HOST: cloud-redis
+    SPRING_DATA_REDIS_PORT: "6379"
     SPRING_DATA_REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
-    KEYCLOAK_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
-    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://auth.trinyx.fr/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    KEYCLOAK_ISSUER_URI: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
     SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
     KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
     KEYCLOAK_REALM: ${KEYCLOAK_REALM_NAME:-trinyx}
@@ -65,11 +74,11 @@ x-java-service: &java-service
     AUDIT_UA_PEPPER: ${AUDIT_UA_PEPPER:?set AUDIT_UA_PEPPER}
     CREDENTIAL_ENCRYPTION_PASSWORD: ${CREDENTIAL_ENCRYPTION_PASSWORD:?set CREDENTIAL_ENCRYPTION_PASSWORD}
     CREDENTIAL_ENCRYPTION_SALT: ${CREDENTIAL_ENCRYPTION_SALT:?set CREDENTIAL_ENCRYPTION_SALT}
+    # CE cloud-link IP privacy HMAC key rotation.
+    CLOUD_LINK_IP_HASH_KEY_V1: ${IP_HASH_HMAC_KEY_V1:?set IP_HASH_HMAC_KEY_V1}
+    CLOUD_LINK_IP_HASH_KEY_V2: ${IP_HASH_HMAC_KEY_V2:-}
+    CLOUD_LINK_IP_HASH_CURRENT_VERSION: ${KEY_HMAC_CURRENT_VERSION:-1}
     STORAGE_SHOWCASE_HMAC_SECRET: ${STORAGE_SHOWCASE_HMAC_SECRET:?set STORAGE_SHOWCASE_HMAC_SECRET}
-    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?set STRIPE_SECRET_KEY}
-    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?set STRIPE_WEBHOOK_SECRET}
-    STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:?set STRIPE_SUCCESS_URL}
-    STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:?set STRIPE_CANCEL_URL}
     SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
     SMTP_PORT: ${SMTP_PORT:-587}
     SMTP_USER: ${SMTP_USER:?set SMTP_USER}
@@ -81,6 +90,20 @@ x-java-service: &java-service
     CATALOG_BUNDLE_SIGNING_PUBLIC_KEY: ${CATALOG_BUNDLE_SIGNING_PUBLIC_KEY:?set CATALOG_BUNDLE_SIGNING_PUBLIC_KEY}
     CATALOG_BUNDLE_SIGNING_KEY_ID: ${CATALOG_BUNDLE_SIGNING_KEY_ID:-trinyx-cloud-1}
     CATALOG_BUNDLE_ISSUER: ${CATALOG_BUNDLE_ISSUER:-trinyx-cloud}
+    TRINYX_IDENTITY_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+    TRINYX_IDENTITY_AUDIENCE: trinyx-cloud
+    TRINYX_IDENTITY_VERIFICATION_KEYS: ${TRINYX_IDENTITY_VERIFICATION_KEYS:?set TRINYX_IDENTITY_VERIFICATION_KEYS}
+    TRINYX_ENTITLEMENT_ISSUER: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+    TRINYX_ENTITLEMENT_AUDIENCE: trinyx-cloud
+    TRINYX_ENTITLEMENT_VERIFICATION_KEYS: ${TRINYX_ENTITLEMENT_VERIFICATION_KEYS:?set TRINYX_ENTITLEMENT_VERIFICATION_KEYS}
+    PAID_MONOLITH_BILLING_URL: ${PAID_MONOLITH_BILLING_URL:-https://billing-internal.trinyx.private:8443}
+    TRINYX_S2S_SIGNING_ISSUER: trinyx-cloud
+    TRINYX_S2S_SIGNING_AUDIENCE: trinyx-billing-authority
+    TRINYX_S2S_SIGNING_KID: ${TRINYX_S2S_SIGNING_KID:-cloud-runtime-1}
+    TRINYX_S2S_SIGNING_KEY: ${TRINYX_S2S_SIGNING_KEY:?set TRINYX_S2S_SIGNING_KEY}
+    TRINYX_S2S_VERIFICATION_ISSUER: trinyx-paid-authority
+    TRINYX_S2S_VERIFICATION_AUDIENCE: trinyx-cloud-internal
+    TRINYX_S2S_VERIFICATION_KEYS: ${TRINYX_S2S_VERIFICATION_KEYS:?set paid-authority public verification keys}
     WEBSEARCH_SERVICE_URL: http://websearch-service:8085
     WEBSEARCH_ENABLED: "true"
     WEBSEARCH_GATEWAY_SECRET: ${WEBSEARCH_GATEWAY_SECRET:?set WEBSEARCH_GATEWAY_SECRET}
@@ -93,8 +116,17 @@ x-java-service: &java-service
     GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
     DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-    OAUTH2_FRONTEND_URL: https://cloud.trinyx.fr
-    OAUTH2_CALLBACK_URL: https://cloud.trinyx.fr/api/credentials/oauth2/callback
+    XAI_API_KEY: ${XAI_API_KEY:-}
+    PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+    COHERE_API_KEY: ${COHERE_API_KEY:-}
+    ZAI_API_KEY: ${ZAI_API_KEY:-}
+    OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    QWEN_API_KEY: ${QWEN_API_KEY:-}
+    MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+    MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+    MINIMAX_API_URL: ${MINIMAX_API_URL:-https://api.minimax.io/v1/chat/completions}
+    OAUTH2_FRONTEND_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+    OAUTH2_CALLBACK_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}/api/credentials/oauth2/callback
   depends_on: &java-dependencies
     migration-service:
       condition: service_completed_successfully
@@ -108,7 +140,7 @@ x-java-service: &java-service
 
 services:
   cloud-postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.1-pg16
     restart: unless-stopped
     networks: [cloud]
     command: ["postgres", "-c", "max_connections=250"]
@@ -129,16 +161,17 @@ services:
       start_period: 20s
 
   cloud-redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     networks: [cloud]
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction", "--requirepass", "${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--aof-use-rdb-preamble", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction", "--requirepass", "${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}"]
+    stop_grace_period: 30s
     volumes:
       - cloud-redis-data:/data
     environment:
       CLOUD_REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '$$CLOUD_REDIS_PASSWORD' ping | grep PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$CLOUD_REDIS_PASSWORD\" redis-cli ping | grep -q '^PONG$'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -198,7 +231,11 @@ services:
       KC_DB_USERNAME: ${CLOUD_DB_USERNAME:?set CLOUD_DB_USERNAME}
       KC_DB_PASSWORD: ${CLOUD_DB_PASSWORD:?set CLOUD_DB_PASSWORD}
       KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME: https://auth.trinyx.fr
+      # Keycloak expands these values inside the imported realm JSON.
+      CLOUD_PUBLIC_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}
+      PAID_PUBLIC_URL: ${PAID_PUBLIC_URL:-https://app.trinyx.fr}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
@@ -253,6 +290,24 @@ services:
       <<: *cloud-environment
       PORT: "8083"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=auth
+      PAID_MONOLITH_TRUSTSTORE_FILE: /run/secrets/paid-monolith-truststore.p12
+      PAID_MONOLITH_TRUSTSTORE_PASSWORD_FILE: /run/secrets/paid-monolith-truststore-password
+      INTERNAL_S2S_SERVICE_SECRET: ${AUTH_SERVICE_S2S_SECRET:?set AUTH_SERVICE_S2S_SECRET}
+      TRINYX_TENANT_DELEGATION_SECRET: ${TRINYX_TENANT_DELEGATION_SECRET:?set TRINYX_TENANT_DELEGATION_SECRET}
+      CATALOG_SERVICE_S2S_SECRET: ${CATALOG_SERVICE_S2S_SECRET:?set CATALOG_SERVICE_S2S_SECRET}
+      ORCHESTRATOR_SERVICE_S2S_SECRET: ${ORCHESTRATOR_SERVICE_S2S_SECRET:?set ORCHESTRATOR_SERVICE_S2S_SECRET}
+      AGENT_SERVICE_S2S_SECRET: ${AGENT_SERVICE_S2S_SECRET:?set AGENT_SERVICE_S2S_SECRET}
+      DATASOURCE_SERVICE_S2S_SECRET: ${DATASOURCE_SERVICE_S2S_SECRET:?set DATASOURCE_SERVICE_S2S_SECRET}
+      INTERFACE_SERVICE_S2S_SECRET: ${INTERFACE_SERVICE_S2S_SECRET:?set INTERFACE_SERVICE_S2S_SECRET}
+      PUBLICATION_SERVICE_S2S_SECRET: ${PUBLICATION_SERVICE_S2S_SECRET:?set PUBLICATION_SERVICE_S2S_SECRET}
+      STORAGE_SERVICE_S2S_SECRET: ${STORAGE_SERVICE_S2S_SECRET:?set STORAGE_SERVICE_S2S_SECRET}
+      TRIGGER_SERVICE_S2S_SECRET: ${TRIGGER_SERVICE_S2S_SECRET:?set TRIGGER_SERVICE_S2S_SECRET}
+      GATEWAY_SERVICE_S2S_SECRET: ${GATEWAY_SERVICE_S2S_SECRET:?set GATEWAY_SERVICE_S2S_SECRET}
+      AUTH_SERVICE_S2S_SECRET: ${AUTH_SERVICE_S2S_SECRET:?set AUTH_SERVICE_S2S_SECRET}
+    volumes:
+      - ${PAID_MONOLITH_TRUSTSTORE_PATH:?set PAID_MONOLITH_TRUSTSTORE_PATH}:/run/secrets/paid-monolith-truststore.p12:ro
+    secrets:
+      - paid-monolith-truststore-password
     depends_on:
       <<: *java-dependencies
       keycloak: {condition: service_healthy}
@@ -270,6 +325,7 @@ services:
       PORT: "8081"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=catalog
       CATALOG_HIKARI_MAX: ${CLOUD_DB_POOL_MAX:-10}
+      INTERNAL_S2S_SERVICE_SECRET: ${CATALOG_SERVICE_S2S_SECRET:?set CATALOG_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
@@ -282,6 +338,12 @@ services:
       <<: *cloud-environment
       PORT: "8082"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=storage
+      INTERNAL_S2S_SERVICE_SECRET: ${STORAGE_SERVICE_S2S_SECRET:?set STORAGE_SERVICE_S2S_SECRET}
+      TRINYX_TENANT_DELEGATION_SECRET: ${TRINYX_TENANT_DELEGATION_SECRET:?set TRINYX_TENANT_DELEGATION_SECRET}
+      CATALOG_SERVICE_S2S_SECRET: ${CATALOG_SERVICE_S2S_SECRET:?set CATALOG_SERVICE_S2S_SECRET}
+      ORCHESTRATOR_SERVICE_S2S_SECRET: ${ORCHESTRATOR_SERVICE_S2S_SECRET:?set ORCHESTRATOR_SERVICE_S2S_SECRET}
+      PUBLICATION_SERVICE_S2S_SECRET: ${PUBLICATION_SERVICE_S2S_SECRET:?set PUBLICATION_SERVICE_S2S_SECRET}
+      AUTH_SERVICE_S2S_SECRET: ${AUTH_SERVICE_S2S_SECRET:?set AUTH_SERVICE_S2S_SECRET}
     depends_on:
       <<: *java-dependencies
       cloud-minio-init: {condition: service_completed_successfully}
@@ -309,6 +371,7 @@ services:
       <<: *cloud-environment
       PORT: "8088"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=datasource
+      INTERNAL_S2S_SERVICE_SECRET: ${DATASOURCE_SERVICE_S2S_SECRET:?set DATASOURCE_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8088/actuator/health"]
@@ -321,6 +384,7 @@ services:
       <<: *cloud-environment
       PORT: "8089"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=interface
+      INTERNAL_S2S_SERVICE_SECRET: ${INTERFACE_SERVICE_S2S_SECRET:?set INTERFACE_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8089/actuator/health"]
@@ -334,6 +398,7 @@ services:
       PORT: "8090"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=agent
       MODEL_AUDIT_HMAC_KEY: ${MODEL_AUDIT_HMAC_KEY:?set MODEL_AUDIT_HMAC_KEY}
+      INTERNAL_S2S_SERVICE_SECRET: ${AGENT_SERVICE_S2S_SECRET:?set AGENT_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health"]
@@ -346,8 +411,9 @@ services:
       <<: *cloud-environment
       PORT: "8091"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=trigger
-      ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
-      ORCHESTRATOR_FORM_ENDPOINT_BASE_URL: https://cloud.trinyx.fr
+      ORCHESTRATOR_CHAT_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      ORCHESTRATOR_FORM_ENDPOINT_BASE_URL: ${CLOUD_PUBLIC_URL:-https://cloud.trinyx.fr}
+      INTERNAL_S2S_SERVICE_SECRET: ${TRIGGER_SERVICE_S2S_SECRET:?set TRIGGER_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8091/actuator/health"]
@@ -360,6 +426,7 @@ services:
       <<: *cloud-environment
       PORT: "8092"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=publication
+      INTERNAL_S2S_SERVICE_SECRET: ${PUBLICATION_SERVICE_S2S_SECRET:?set PUBLICATION_SERVICE_S2S_SECRET}
     healthcheck:
       <<: *java-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8092/actuator/health"]
@@ -372,7 +439,11 @@ services:
       <<: *cloud-environment
       PORT: "8099"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cloud-postgres:5432/${CLOUD_DB_NAME:-trinyx_cloud}?currentSchema=orchestrator
-      PISTON_URL: ${PISTON_URL:?set PISTON_URL to a compatible code-execution service}
+      # Remote code execution is opt-in. Cloud never falls back to the CE host executor.
+      PISTON_ENABLED: "${PISTON_ENABLED:-false}"
+      PISTON_EMBEDDED: "false"
+      PISTON_URL: "${PISTON_URL:-}"
+      INTERNAL_S2S_SERVICE_SECRET: ${ORCHESTRATOR_SERVICE_S2S_SECRET:?set ORCHESTRATOR_SERVICE_S2S_SECRET}
     depends_on:
       <<: *java-dependencies
       websearch-service: {condition: service_healthy}
@@ -427,6 +498,46 @@ services:
       retries: 10
       start_period: 30s
 
+  gateway-service:
+    restart: unless-stopped
+    networks: [cloud]
+    build: {context: ../backend, dockerfile: gateway-service/Dockerfile}
+    image: trinyx-cloud/gateway-service:${TRINYX_CLOUD_IMAGE_TAG:-local}
+    depends_on:
+      keycloak: {condition: service_healthy}
+      auth-service: {condition: service_healthy}
+      cloud-redis: {condition: service_healthy}
+    environment:
+      TZ: UTC
+      APP_EDITION: cloud
+      DEPLOYMENT_MODE: microservice
+      AUTH_MODE: keycloak
+      AUTH_SERVICE_URL: http://auth-service:8083
+      CATALOG_SERVICE_URL: http://catalog-service:8081
+      AGENT_SERVICE_URL: http://agent-service:8090
+      ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8099
+      CONVERSATION_WS_URL: ws://conversation-service:8087
+      WEBSEARCH_SERVICE_URL: http://websearch-service:8085
+      GATEWAY_SECRET_KEY: ${CLOUD_GATEWAY_SECRET_KEY:?set CLOUD_GATEWAY_SECRET_KEY}
+      INTERNAL_S2S_SERVICE_SECRET: ${GATEWAY_SERVICE_S2S_SECRET:?set GATEWAY_SERVICE_S2S_SECRET}
+      TRINYX_TENANT_DELEGATION_SECRET: ${TRINYX_TENANT_DELEGATION_SECRET:?set TRINYX_TENANT_DELEGATION_SECRET}
+      CLOUD_GATEWAY_MAX_BODY_BYTES: ${CLOUD_GATEWAY_MAX_BODY_BYTES:-52428800}
+      CLOUD_GATEWAY_MAX_BUFFERED_REQUESTS: ${CLOUD_GATEWAY_MAX_BUFFERED_REQUESTS:-8}
+      CLOUD_GATEWAY_RATE_LIMIT_REQUESTS: ${CLOUD_GATEWAY_RATE_LIMIT_REQUESTS:-120}
+      CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS: ${CLOUD_GATEWAY_RATE_LIMIT_WINDOW_MS:-60000}
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM_NAME:-trinyx}/protocol/openid-connect/certs
+      KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-https://auth.trinyx.fr}/realms/${KEYCLOAK_REALM_NAME:-trinyx}
+      KEYCLOAK_AUDIENCE: ${KEYCLOAK_FRONTEND_CLIENT_ID:-trinyx-frontend}
+      REDIS_HOST: cloud-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${CLOUD_REDIS_PASSWORD:?set CLOUD_REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8086/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
   cloud-edge:
     image: caddy:2.11.4-alpine
     restart: unless-stopped
@@ -434,20 +545,15 @@ services:
     ports:
       - "${CLOUD_EDGE_BIND:-127.0.0.1}:${CLOUD_EDGE_PORT:-8188}:8080"
       - "${KEYCLOAK_EDGE_BIND:-127.0.0.1}:${KEYCLOAK_EDGE_PORT:-8280}:8180"
+      - "${CLOUD_INTERNAL_BIND:-127.0.0.1}:${CLOUD_INTERNAL_PORT:-8443}:8443"
+    environment:
+      CLOUD_INTERNAL_HOST: ${CLOUD_INTERNAL_HOST:-cloud-internal.trinyx.private}
     volumes:
       - ./cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - cloud-caddy-data:/data
     depends_on:
+      gateway-service: {condition: service_healthy}
       keycloak: {condition: service_healthy}
-      auth-service: {condition: service_healthy}
-      catalog-service: {condition: service_healthy}
-      storage-service: {condition: service_healthy}
-      conversation-service: {condition: service_healthy}
-      datasource-service: {condition: service_healthy}
-      interface-service: {condition: service_healthy}
-      agent-service: {condition: service_healthy}
-      trigger-service: {condition: service_healthy}
-      publication-service: {condition: service_healthy}
-      orchestrator-service: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 15s
@@ -462,3 +568,8 @@ volumes:
   cloud-postgres-data:
   cloud-redis-data:
   cloud-minio-data:
+  cloud-caddy-data:
+
+secrets:
+  paid-monolith-truststore-password:
+    file: ${PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH:?set PAID_MONOLITH_TRUSTSTORE_PASSWORD_PATH}

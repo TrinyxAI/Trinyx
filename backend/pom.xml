@@ -101,6 +101,7 @@
         <module>catalog-service</module>
         <module>conversation-service</module>
         <module>auth-service</module>
+        <module>gateway-service</module>
         <module>common-storage-service</module>
         <module>storage-service</module>
         <module>datasource-service</module>

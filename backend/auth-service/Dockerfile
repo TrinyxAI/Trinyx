@@ -26,6 +26,7 @@ FROM ${JRE_IMAGE}
 # curl pour le healthcheck docker-compose
 RUN apk add --no-cache curl
 RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+RUN mkdir -p /app/logs && chown 1001:1001 /app/logs && chmod 0750 /app/logs
 WORKDIR /app
 
 # Copier le JAR bootable au nom connu

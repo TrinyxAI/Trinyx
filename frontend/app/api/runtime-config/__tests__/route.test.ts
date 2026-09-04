@@ -51,17 +51,17 @@ describe('GET /api/runtime-config', () => {
     });
 
     it('serves GATEWAY_PUBLIC_URL for the reverse-proxy case', async () => {
-        process.env.GATEWAY_PUBLIC_URL = 'https://livecontext.example.com';
+        process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
         process.env.BACKEND_PORT = '18080';
         await expect(body(true)).resolves.toEqual({
-            gatewayUrl: 'https://livecontext.example.com',
+            gatewayUrl: 'https://gateway.example.com',
             gatewayPort: 18080,
         });
     });
 
     it('strips a trailing slash, which would otherwise produce a "//ws" handshake', async () => {
-        process.env.GATEWAY_PUBLIC_URL = 'https://livecontext.example.com/';
-        await expect(body(true)).resolves.toMatchObject({ gatewayUrl: 'https://livecontext.example.com' });
+        process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com/';
+        await expect(body(true)).resolves.toMatchObject({ gatewayUrl: 'https://gateway.example.com' });
     });
 
     it('accepts a plain http URL, which is what the docs tell LAN operators to use', async () => {
@@ -119,7 +119,7 @@ describe('GET /api/runtime-config', () => {
     it('returns nulls on cloud, where the build-time gateway URL is the real one', async () => {
         // Not merely "gatewayPort is null": cloud must not publish an unauthenticated
         // endpoint echoing configuration that no client reads.
-        process.env.GATEWAY_PUBLIC_URL = 'https://livecontext.example.com';
+        process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
         process.env.BACKEND_PORT = '18080';
         await expect(body(false)).resolves.toEqual({ gatewayUrl: null, gatewayPort: null });
     });

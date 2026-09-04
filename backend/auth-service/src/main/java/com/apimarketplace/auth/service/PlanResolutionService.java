@@ -301,10 +301,14 @@ public class PlanResolutionService {
             if (workspaceMembership.isEmpty()) return executorUserId;
 
             Organization workspaceOrg = workspaceMembership.get().getOrganization();
-            if (workspaceOrg == null || workspaceOrg.isDeleted()) return executorUserId;
+            if (workspaceOrg == null || workspaceOrg.isDeleted()) {
+                return executorUserId;
+            }
 
             User owner = workspaceOrg.getOwner();
-            if (owner == null || owner.getId() == null) return executorUserId;
+            if (owner == null || owner.getId() == null) {
+                return executorUserId;
+            }
 
             // Executor IS the owner - no redirect, same wallet. Covers both
             // solo workspaces (owner==self) AND owner running in their own
@@ -314,8 +318,9 @@ public class PlanResolutionService {
             if (executorUserId.equals(owner.getId())) return executorUserId;
 
             return owner.getId();
-        } catch (Exception e) {
-            // Hot path - fall back to self-billing on any lookup glitch.
+        } catch (RuntimeException e) {
+            // Native billing historically falls back to self-pay on a transient
+            // workspace lookup failure. External authority bypasses this resolver.
             return executorUserId;
         }
     }

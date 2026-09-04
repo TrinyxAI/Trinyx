@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -153,6 +155,40 @@ class ComposeConfigHashCollectionTests(unittest.TestCase):
                     self.assertEqual(["config", "--hash", service], argv[-3:])
                     self.assertEqual(1, len(argv[argv.index("--hash") + 1:]))
                     self.assertIsNone(input_text)
+
+    def test_real_docker_compose_hashes_two_services_independently(self) -> None:
+        docker = shutil.which("docker")
+        if docker is None:
+            if os.environ.get("CI"):
+                self.fail("Docker CLI is required for the real Compose config-hash contract")
+            self.skipTest("Docker CLI is unavailable")
+
+        compose_version = subprocess.run(
+            [docker, "compose", "version"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+        if compose_version.returncode != 0:
+            if os.environ.get("CI"):
+                self.fail("Docker Compose is required for the real config-hash contract")
+            self.skipTest("Docker Compose is unavailable")
+
+        services = ("service-a", "service-b")
+        model = {
+            "name": "trinyx-compose-hash-contract",
+            "services": {
+                "service-a": {"image": "example.invalid/trinyx/service-a:test"},
+                "service-b": {"image": "example.invalid/trinyx/service-b:test"},
+            },
+        }
+        hashes = ShellAdapter(timeout_seconds=30).compose_model_hashes(model, services)
+
+        self.assertEqual(list(services), list(hashes))
+        self.assertEqual(set(services), set(hashes))
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes.values()))
+        self.assertNotEqual(hashes["service-a"], hashes["service-b"])
 
     def test_rendered_model_is_replayed_via_stdin_once_per_service(self) -> None:
         services = tuple(SERVICES["paid"])

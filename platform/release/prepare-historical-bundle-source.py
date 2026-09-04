@@ -106,6 +106,18 @@ def source_path(root: Path, relative: str) -> Path:
     return current
 
 
+def safe_destination(destination: Path, historical_repo: Path) -> Path:
+    if destination.is_symlink() or destination.exists():
+        fail("historical bundle destination already exists or is a symlink")
+    parent = destination.parent.resolve()
+    resolved = parent / destination.name
+    try:
+        resolved.relative_to(historical_repo)
+    except ValueError:
+        return resolved
+    fail("historical bundle destination may not be inside the historical repository")
+
+
 def copy_safe(source: Path, destination: Path) -> None:
     if source.is_symlink():
         fail(f"historical bundle source may not be a symlink: {source}")
@@ -168,8 +180,7 @@ def prepare(
 
     historical_repo = verify_historical_checkout(historical_repo)
     trusted_repo = verified_trusted_repo(trusted_repo)
-    if destination.exists():
-        fail("historical bundle destination already exists")
+    destination = safe_destination(destination, historical_repo)
     destination.mkdir(parents=True, mode=0o755)
 
     for relative in historical_paths:

@@ -125,6 +125,7 @@ def normalize_bundle(document: Any) -> dict[str, Any]:
             if (
                 not isinstance(file_path, str)
                 or not file_path
+                or file_path == "."
                 or file_path.startswith("/")
                 or "\\" in file_path
                 or any(ord(char) < 0x20 for char in file_path)

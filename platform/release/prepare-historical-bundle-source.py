@@ -44,6 +44,13 @@ def path_list(value: Any, label: str) -> list[str]:
     return result
 
 
+def require_no_path_overlap(paths: list[str], label: str) -> None:
+    for index, left in enumerate(paths):
+        for right in paths[index + 1:]:
+            if left.startswith(right + "/") or right.startswith(left + "/"):
+                fail(f"{label} contains overlapping paths")
+
+
 def source_path(root: Path, relative: str) -> Path:
     current = root
     for part in PurePosixPath(relative).parts:
@@ -86,20 +93,26 @@ def prepare(
     }
     if not isinstance(source_doc, dict) or set(source_doc) != required:
         fail("historical bundle source contract schema mismatch")
-    if source_doc["schemaVersion"] != 1 or source_doc["historicalSourceCommit"] != SOURCE_COMMIT:
+    if (
+        type(source_doc["schemaVersion"]) is not int
+        or source_doc["schemaVersion"] != 1
+        or source_doc["historicalSourceCommit"] != SOURCE_COMMIT
+    ):
         fail("historical bundle source identity mismatch")
 
     historical_paths = path_list(source_doc["historicalPaths"], "historicalPaths")
     trusted_overlays = path_list(source_doc["trustedBuilderOverlays"], "trustedBuilderOverlays")
+    require_no_path_overlap(historical_paths, "historicalPaths")
+    require_no_path_overlap(trusted_overlays, "trustedBuilderOverlays")
     if set(trusted_overlays) != APPROVED_TRUSTED_OVERLAYS:
         fail("unapproved historical bundle trusted overlay")
-    if set(historical_paths) & set(trusted_overlays):
-        fail("historical and trusted bundle sources overlap")
+    require_no_path_overlap(historical_paths + trusted_overlays, "historical/trusted bundle sources")
 
     bundle_doc = load_json(bundle_contract)
     if (
         not isinstance(bundle_doc, dict)
         or set(bundle_doc) != {"schemaVersion", "paths"}
+        or type(bundle_doc["schemaVersion"]) is not int
         or bundle_doc["schemaVersion"] != 1
     ):
         fail("deployment bundle file contract schema mismatch")

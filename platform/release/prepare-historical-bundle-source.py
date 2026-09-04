@@ -27,12 +27,14 @@ def load_json(path: Path) -> Any:
 def normalized_relative(value: Any) -> str:
     if not isinstance(value, str) or not value or value.startswith("/"):
         fail("historical bundle paths must be non-empty relative paths")
+    if any(ord(char) < 0x20 or char == "\\" for char in value):
+        fail(f"unsafe historical bundle path: {value}")
     path = PurePosixPath(value)
     if "." in path.parts or ".." in path.parts:
         fail(f"unsafe historical bundle path: {value}")
-    normalized = path.as_posix().rstrip("/")
-    if not normalized:
-        fail("historical bundle path is empty after normalization")
+    normalized = path.as_posix()
+    if normalized in {"", "."} or normalized != value:
+        fail(f"historical bundle path is not canonical: {value}")
     return normalized
 
 
@@ -107,6 +109,8 @@ def source_path(root: Path, relative: str) -> Path:
 
 
 def safe_destination(destination: Path, historical_repo: Path) -> Path:
+    destination = Path(os.path.abspath(destination))
+    reject_symlinked_repository_root(destination.parent, "historical bundle destination")
     if destination.is_symlink() or destination.exists():
         fail("historical bundle destination already exists or is a symlink")
     parent = destination.parent.resolve()

@@ -46,7 +46,7 @@ def canonical_json(value: Any) -> bytes:
 
 def require_image_identity(item: dict[str, Any], label: str) -> None:
     keys = set(item)
-    if keys not in {IMAGE_KEYS, IMAGE_KEYS_WITH_ROLE}:
+    if keys != IMAGE_KEYS and keys != IMAGE_KEYS_WITH_ROLE:
         fail(f"invalid image entry schema in {label}")
     if any(not isinstance(item[key], str) for key in keys):
         fail(f"invalid image entry types in {label}")

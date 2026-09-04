@@ -288,6 +288,7 @@ class StagingQualificationIdempotenceTests(unittest.TestCase):
                 {
                     "SIGNER_WORKFLOW": "build-release-candidate.yml",
                     "SIGNER_DIGEST": FROZEN["SOURCE_COMMIT"],
+                    "ATTESTATION_SOURCE_DIGEST": FROZEN["SOURCE_COMMIT"],
                     "COMPATIBILITY": "frozen-historical-builder",
                     "REQUIRE_INTERNAL_ATTESTATIONS": "false",
                 }
@@ -295,6 +296,7 @@ class StagingQualificationIdempotenceTests(unittest.TestCase):
                 else {
                     "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
                     "SIGNER_DIGEST": env["BUILDER_WORKFLOW_COMMIT"],
+                    "ATTESTATION_SOURCE_DIGEST": env[f"{prefix}_SOURCE_COMMIT"],
                     "COMPATIBILITY": "pinned-reusable-builder",
                     "REQUIRE_INTERNAL_ATTESTATIONS": "true",
                 }

@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/staging-release-register-impl.yml"
 HISTORICAL_SOURCE = "f3a4c1ddcf6a17bfc837071f9046ac4c38a38b47"
 BUILDER_COMMIT = "114a2613e8090f034925a1bcf148f055653c3a06"
+AEB2_SOURCE = "aeb2a447ea7ce0436a60549713636225dfe1a2c1"
+AEB2_CALLER_HEAD = "b883685a513795e6224f4166fef65a72bc120a87"
+AEB2_BUILDER = "22f1e593c36eaf1d70197db91bd54e31844a7eef"
 
 
 class ReleaseRegistrationProvenanceTests(unittest.TestCase):
@@ -106,6 +109,58 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         }
         return artifact, run, env
 
+    def approved_baseline_fixture(self) -> tuple[dict, dict, dict[str, str]]:
+        repository = {
+            "id": 1342032975,
+            "full_name": "TrinyxAI/Trinyx",
+            "owner": {"id": 319253481},
+        }
+        artifact = {
+            "id": 9931132603,
+            "name": "trinyx-historical-staging-baseline-" + AEB2_SOURCE,
+            "expired": False,
+            "digest": "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
+            "workflow_run": {
+                "id": 33858423626,
+                "head_sha": AEB2_CALLER_HEAD,
+                "head_branch": "main",
+                "repository_id": 1342032975,
+                "head_repository_id": 1342032975,
+            },
+        }
+        run = {
+            "id": 33858423626,
+            "head_sha": AEB2_CALLER_HEAD,
+            "head_branch": "main",
+            "event": "workflow_dispatch",
+            "run_attempt": 1,
+            "path": ".github/workflows/build-historical-staging-baseline.yml",
+            "conclusion": "success",
+            "created_at": "2026-09-04T09:17:01Z",
+            "repository": repository,
+            "head_repository": copy.deepcopy(repository),
+            "referenced_workflows": [{
+                "path": (
+                    "TrinyxAI/Trinyx/.github/workflows/"
+                    "build-historical-staging-baseline-impl.yml@" + AEB2_BUILDER
+                ),
+                "sha": AEB2_BUILDER,
+            }],
+        }
+        env = {
+            "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
+            "GITHUB_REPOSITORY_ID": "1342032975",
+            "GITHUB_REPOSITORY_OWNER_ID": "319253481",
+            "ARTIFACT_ID": "9931132603",
+            "RUN_ID": "33858423626",
+            "ARTIFACT_DIGEST": artifact["digest"],
+            "SOURCE_COMMIT": AEB2_SOURCE,
+            "RELEASE_ID": "rel-v1-61d902b8c3f36f7b23873cab31427243",
+            "BUNDLE_DIGEST": "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047",
+            "BUILDER_WORKFLOW_COMMIT": BUILDER_COMMIT,
+        }
+        return artifact, run, env
+
     def execute(self, artifact: dict, run: dict, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
@@ -135,6 +190,32 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         artifact, run, env = self.historical_fixture()
         result = self.execute(artifact, run, env)
         self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_exact_approved_historical_baseline_run_is_accepted(self) -> None:
+        artifact, run, env = self.approved_baseline_fixture()
+        result = self.execute(artifact, run, env)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_each_approved_historical_baseline_identity_drift_is_rejected(self) -> None:
+        mutations = (
+            lambda a, r, e: e.__setitem__("RUN_ID", "33858423627"),
+            lambda a, r, e: r.__setitem__("head_sha", "0" * 40),
+            lambda a, r, e: e.__setitem__("ARTIFACT_ID", "9931132604"),
+            lambda a, r, e: a.__setitem__("name", "trinyx-release-candidate-" + AEB2_SOURCE),
+            lambda a, r, e: a.__setitem__("digest", "sha256:" + "0" * 64),
+            lambda a, r, e: e.__setitem__("SOURCE_COMMIT", "0" * 40),
+            lambda a, r, e: e.__setitem__("RELEASE_ID", "rel-v1-" + "0" * 32),
+            lambda a, r, e: e.__setitem__("BUNDLE_DIGEST", "sha256:" + "0" * 64),
+            lambda a, r, e: r.__setitem__("path", ".github/workflows/build-release-candidate.yml"),
+            lambda a, r, e: r["referenced_workflows"][0].__setitem__("path", "wrong"),
+            lambda a, r, e: r["referenced_workflows"][0].__setitem__("sha", "0" * 40),
+            lambda a, r, e: r["repository"].__setitem__("full_name", "other/repo"),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                artifact, run, env = self.approved_baseline_fixture()
+                mutate(artifact, run, env)
+                self.assert_rejected(artifact, run, env)
 
     def test_historical_wrong_caller_path_is_rejected(self) -> None:
         artifact, run, env = self.historical_fixture()
@@ -241,6 +322,20 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
         policy = namespace["resolve_attestation_policy"](env, Path("candidate"))
         return policy, namespace
 
+    def test_exact_approved_baseline_requires_internal_attestations(self) -> None:
+        _, _, env = self.approved_baseline_fixture()
+        policy, _ = self.compatibility_policy(env, {})
+        self.assertEqual(
+            {
+                "SIGNER_WORKFLOW": "build-historical-staging-baseline-impl.yml",
+                "SIGNER_DIGEST": AEB2_BUILDER,
+                "ATTESTATION_SOURCE_DIGEST": AEB2_CALLER_HEAD,
+                "COMPATIBILITY": "pinned-reusable-builder",
+                "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+            },
+            policy,
+        )
+
     def test_exact_historical_tuple_accepts_only_exact_internal_hashes(self) -> None:
         _, _, env = self.historical_fixture()
         namespace = self.compatibility_namespace()
@@ -316,15 +411,23 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
             )
             fake_gh.chmod(0o755)
             env = os.environ.copy()
+            frozen = compatibility == "frozen-historical-builder"
+            source_digest = HISTORICAL_SOURCE if frozen else "a" * 40
             env.update(
                 {
                     "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
                     "REQUIRE_INTERNAL_ATTESTATIONS": require_attestations,
                     "COMPATIBILITY": compatibility,
                     "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
-                    "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
-                    "SIGNER_DIGEST": BUILDER_COMMIT,
-                    "SOURCE_COMMIT": "a" * 40,
+                    "BUILDER_WORKFLOW_COMMIT": BUILDER_COMMIT,
+                    "SIGNER_WORKFLOW": (
+                        "build-release-candidate.yml"
+                        if frozen
+                        else "build-release-candidate-impl.yml"
+                    ),
+                    "SIGNER_DIGEST": HISTORICAL_SOURCE if frozen else BUILDER_COMMIT,
+                    "ATTESTATION_SOURCE_DIGEST": source_digest,
+                    "SOURCE_COMMIT": source_digest,
                 }
             )
             return subprocess.run(

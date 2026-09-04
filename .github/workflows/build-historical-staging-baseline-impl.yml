@@ -131,6 +131,67 @@ jobs:
             --out release-images.json
           python3 platform/release/validate-runtime-images.py \
             --contract platform/release/runtime-inventory.json --images release-images.json
+      - name: Verify Paid runtime render from authenticated bundle origins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - release-images.json historical-input/paid/images.env <<'PY'
+          import json
+          import re
+          import sys
+
+          images_path, output_path = sys.argv[1:]
+          document = json.load(open(images_path, encoding="utf-8"))
+          expected = {
+              item["service"]: (item["environment"], item["immutableRef"])
+              for item in document["images"]
+              if item["role"] == "paid"
+          }
+          if len(expected) != 8:
+              raise SystemExit("ERROR: canonical Paid runtime inventory is not exactly eight services")
+          if len({environment for environment, _ in expected.values()}) != len(expected):
+              raise SystemExit("ERROR: canonical Paid runtime environment bindings are not unique")
+          if any(
+              not re.fullmatch(r"[A-Z][A-Z0-9_]*", environment)
+              or not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", immutable_ref)
+              for environment, immutable_ref in expected.values()
+          ):
+              raise SystemExit("ERROR: canonical Paid runtime image binding is invalid")
+          with open(output_path, "w", encoding="utf-8") as output:
+              for _, (environment, immutable_ref) in sorted(expected.items()):
+                  output.write(f"{environment}={immutable_ref}\\n")
+          PY
+          docker compose --env-file historical-input/paid/images.env \
+            -f historical-bundle-source/docker-compose.yml \
+            -f platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml \
+            -f historical-bundle-source/docker/docker-compose.paid.runtime.yml \
+            config --format json > historical-input/paid/rendered-compose.json
+          python3 - release-images.json historical-input/paid/rendered-compose.json <<'PY'
+          import json
+          import re
+          import sys
+
+          images_path, rendered_path = sys.argv[1:]
+          images = json.load(open(images_path, encoding="utf-8"))["images"]
+          rendered = json.load(open(rendered_path, encoding="utf-8"))
+          expected = {
+              item["service"]: item["immutableRef"]
+              for item in images
+              if item["role"] == "paid"
+          }
+          services = rendered.get("services")
+          if not isinstance(services, dict) or len(expected) != 8:
+              raise SystemExit("ERROR: canonical Paid runtime render schema mismatch")
+          for service, immutable_ref in expected.items():
+              actual = services.get(service, {}).get("image")
+              if actual != immutable_ref or not re.fullmatch(
+                  r"[^@\\s]+@sha256:[0-9a-f]{64}", actual or ""
+              ):
+                  raise SystemExit(
+                      f"ERROR: canonical Paid runtime image render mismatch: {service}"
+                  )
+          print("HISTORICAL_PAID_RUNTIME_RENDER_OK services=8")
+          PY
       - name: Build deterministic bundle from authenticated source origins
         shell: bash
         run: |

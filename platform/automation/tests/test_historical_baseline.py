@@ -234,6 +234,17 @@ class HistoricalBaselineTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     hb.canonical_cloud_manifest(drift, inventory, historical_inventory)
 
+        for mutate in (
+            lambda document: document.__setitem__("schemaVersion", True),
+            lambda document: document.__setitem__("generatedAt", "2026-08-31T22:02:04+00:00"),
+            lambda document: document["images"][0].__setitem__("package", 1),
+            lambda document: document.__setitem__("unexpected", "value"),
+        ):
+            drift = copy.deepcopy(manifest)
+            mutate(drift)
+            with self.assertRaises(ValueError):
+                hb.canonical_cloud_manifest(drift, inventory, historical_inventory)
+
     def test_artifact_digest_is_the_exact_real_github_value(self) -> None:
         self.assertEqual(
             "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0",
@@ -564,12 +575,15 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertNotIn("{{json .Image}}", workflow)
         self.assertNotIn("index .Image", workflow)
         self.assertIn(".manifest.digest", workflow)
-        self.assertIn('.image | select(type == "object")', workflow)
+        self.assertIn('.image | select(type == "object" and (.config | type == "object"))', workflow)
         self.assertIn("HISTORICAL_PAID_INSPECT package=%s", workflow)
         self.assertIn("(.config.Labels // {})", workflow)
         self.assertIn("--argjson platform", workflow)
         self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)
         self.assertIn("sha256sum --check --strict", workflow)
+        self.assertIn("platform/release/validate-historical-artifact.py", workflow)
+        self.assertIn("--expected-file cloud-image-manifest.json", workflow)
+        self.assertNotIn("unzip -q", workflow)
         backend_log_download = (
             f"gh api --allow-escape-sequences /repos/{hb.REPOSITORY}/actions/jobs/"
             f"{hb.BACKEND_PUBLISH_JOB_ID}/logs > historical-input/backend-publish.log"
@@ -614,14 +628,19 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn('["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all", "--ignored"]', helper_source)
         self.assertIn("repository root may not traverse a symlink", helper_source)
         self.assertIn("destination may not be inside the historical repository", helper_source)
+        self.assertIn("read_regular_file_no_follow", helper_source)
+        self.assertIn("trusted repository tracked content is not clean", helper_source)
+        self.assertIn("HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK", helper_source)
+        self.assertIn("--trusted-commit \"$TRUSTED_BUILDER_COMMIT\"", workflow)
+        self.assertIn("--approved-environment-config", workflow)
         self.assertIn("Prepare authenticated historical bundle source", workflow)
         self.assertIn("git -C historical-source rev-parse HEAD", workflow)
-        self.assertIn("git -C historical-source status --porcelain=v1 --untracked-files=all", workflow)
+        self.assertIn("git -C historical-source status --porcelain=v1 --untracked-files=all --ignored", workflow)
         self.assertIn("Verify Paid runtime render from authenticated bundle origins", workflow)
         self.assertIn("docker compose --env-file historical-input/paid/images.env", workflow)
         self.assertIn("HISTORICAL_PAID_RUNTIME_RENDER_OK services=8", workflow)
         self.assertIn("postgres redis minio minio-init bridge livecontext frontend paid-edge", workflow)
-        self.assertIn("set(services) != set(expected)", workflow)
+        self.assertIn("set(services) != expected_services", workflow)
         self.assertLess(
             workflow.index("Prepare authenticated historical bundle source"),
             workflow.index("Verify Paid runtime render from authenticated bundle origins"),

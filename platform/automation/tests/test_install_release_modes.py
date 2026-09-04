@@ -137,6 +137,31 @@ class InstallReleaseModeTests(unittest.TestCase):
                     non_frozen_release, non_frozen_manifest, non_frozen_tar
                 )
 
+    def test_bundle_schema_and_paths_are_strictly_typed_and_canonical(self) -> None:
+        installer = load_installer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest_path, tar_path, release = write_case(
+                root,
+                name="strict",
+                release_id="rel-test-modern",
+                entries=[("plain.txt", b"plain\n", 0o644)],
+                include_mode=True,
+            )
+            document = json.loads(manifest_path.read_text(encoding="utf-8"))
+            document["schemaVersion"] = True
+            manifest_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "invalid deployment bundle manifest"):
+                installer.validate_bundle(release, manifest_path, tar_path)
+
+            document["schemaVersion"] = 1
+            for bad_path in (".", "./plain.txt", "plain.txt/", "plain\\txt", "plain//txt"):
+                document["files"][0]["path"] = bad_path
+                manifest_path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "unsafe"):
+                    installer.validate_bundle(release, manifest_path, tar_path)
+                document["files"][0]["path"] = "plain.txt"
+
     def test_modern_modes_are_authenticated_and_extract_read_only(self) -> None:
         installer = load_installer()
         with tempfile.TemporaryDirectory() as directory:

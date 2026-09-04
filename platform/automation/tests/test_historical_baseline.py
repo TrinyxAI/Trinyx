@@ -792,6 +792,13 @@ class HistoricalBaselineTests(unittest.TestCase):
                 prepare("overlapping-source")
             source_document["historicalPaths"] = ["docker-compose.yml", "catalog-seeds"]
 
+            source.write_text(json.dumps(source_document))
+            bundle.write_text(json.dumps(bundle_document))
+            with self.assertRaisesRegex(
+                SystemExit, "destination may not be inside the historical repository"
+            ):
+                helper.prepare(historical, trusted, source, bundle, historical / "out")
+
             (historical / "dirty.txt").write_text("not tracked\n")
             with self.assertRaisesRegex(SystemExit, "historical repository is not clean"):
                 prepare("dirty")

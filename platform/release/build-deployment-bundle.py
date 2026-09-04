@@ -5,9 +5,10 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -25,24 +26,48 @@ def sha256_bytes(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def normalized_relative(value: Any) -> str:
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        fail("bundle paths must be non-empty relative paths")
+    if any(ord(char) < 0x20 or char == "\\" for char in value):
+        fail(f"unsafe bundle path: {value}")
+    path = PurePosixPath(value)
+    if "." in path.parts or ".." in path.parts:
+        fail(f"unsafe bundle path: {value}")
+    normalized = path.as_posix()
+    if normalized in {"", "."} or normalized != value:
+        fail(f"bundle path is not canonical: {value}")
+    return normalized
+
+
+def reject_symlinked_root(path: Path) -> None:
+    current = Path(os.path.abspath(path))
+    while True:
+        if current.is_symlink():
+            fail("bundle repository root may not traverse a symlink")
+        if current.parent == current:
+            return
+        current = current.parent
+
+
 def load_contract(path: Path) -> list[str]:
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         fail(f"cannot read bundle file contract: {exc}")
-    if set(doc) != {"schemaVersion", "paths"} or doc["schemaVersion"] != 1:
+    if (
+        not isinstance(doc, dict)
+        or set(doc) != {"schemaVersion", "paths"}
+        or type(doc.get("schemaVersion")) is not int
+        or doc["schemaVersion"] != 1
+    ):
         fail("invalid deployment bundle file contract")
     paths = doc["paths"]
     if not isinstance(paths, list) or not paths:
         fail("deployment bundle file contract must contain paths")
     clean: list[str] = []
     for value in paths:
-        if not isinstance(value, str) or not value or value.startswith("/"):
-            fail("bundle paths must be non-empty relative paths")
-        p = Path(value)
-        if ".." in p.parts or "." in p.parts:
-            fail(f"unsafe bundle path: {value}")
-        normalized = p.as_posix().rstrip("/")
+        normalized = normalized_relative(value)
         if normalized in clean:
             fail(f"duplicate bundle path: {normalized}")
         clean.append(normalized)
@@ -64,6 +89,8 @@ def collect_files(repo: Path, contract_paths: list[str]) -> list[Path]:
                     fail(f"bundle may not contain symlink: {child.relative_to(repo)}")
                 if child.is_file():
                     files.add(child.relative_to(repo))
+                elif not child.is_dir():
+                    fail(f"bundle may not contain special file: {child.relative_to(repo)}")
             continue
         fail(f"bundle contract path does not exist: {relative}")
     if not files:
@@ -101,8 +128,9 @@ def main() -> None:
     parser.add_argument("--manifest-out", type=Path, required=True)
     args = parser.parse_args()
 
+    reject_symlinked_root(args.repo)
     repo = args.repo.resolve()
-    if not repo.is_dir():
+    if not repo.is_dir() or repo.is_symlink():
         fail("--repo must be a directory")
     files = collect_files(repo, load_contract(args.contract))
 

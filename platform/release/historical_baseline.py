@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import re
 from pathlib import Path
@@ -34,6 +35,7 @@ FRONTEND_WORKFLOW = ".github/workflows/build-trinyx-frontend.yml"
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ANSI_SGR_RE = re.compile(r"\x1b\[[0-?]*[ -/]*m")
 UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+UTC_RFC3339_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
 def require(condition: bool, message: str) -> None:
@@ -56,6 +58,15 @@ def validate_run(run: Any, *, run_id: int, workflow: str, cloud_reusable: bool) 
     require(run.get("head_sha") == SOURCE_COMMIT, "historical run source mismatch")
     require(run.get("head_branch") == SOURCE_BRANCH, "historical run branch mismatch")
     require(run.get("event") == HISTORICAL_EVENT, "historical run event mismatch")
+    created_at = run.get("created_at")
+    require(
+        isinstance(created_at, str) and UTC_RFC3339_RE.fullmatch(created_at) is not None,
+        "historical run created_at is not strict UTC RFC3339",
+    )
+    try:
+        datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ValueError("historical run created_at is invalid") from exc
     require(
         type(run.get("run_attempt")) is int
         and run.get("run_attempt") == HISTORICAL_RUN_ATTEMPT,

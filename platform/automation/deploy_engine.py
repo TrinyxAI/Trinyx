@@ -359,12 +359,23 @@ class ShellAdapter:
             raise InvariantError("Compose render returned invalid JSON") from exc
 
     def compose_config_hashes(self, base: Path, release_dir: Path, plan: HostPlan) -> dict[str, str]:
-        result = self._run(
-            [*self._compose_argv(base, release_dir, plan), "config", "--hash", *plan.services],
-            timeout=60,
-            capture=True,
+        hashes: dict[str, str] = {}
+        require(
+            plan.services and len(plan.services) == len(set(plan.services)),
+            "Compose config-hash request inventory missing/duplicate",
         )
-        return self._parse_compose_hashes(result.stdout, plan.services)
+        compose_argv = self._compose_argv(base, release_dir, plan)
+        for service in plan.services:
+            result = self._run(
+                [*compose_argv, "config", "--hash", service],
+                timeout=60,
+                capture=True,
+            )
+            service_hash = self._parse_compose_hashes(result.stdout, (service,))
+            require(service not in hashes, "duplicate Compose config-hash service")
+            hashes.update(service_hash)
+        require(set(hashes) == set(plan.services), "Compose config-hash inventory mismatch")
+        return hashes
 
     @staticmethod
     def _parse_compose_hashes(output: str, services: tuple[str, ...]) -> dict[str, str]:
@@ -383,15 +394,24 @@ class ShellAdapter:
         """Hash an already-rendered model without writing expanded secrets to disk."""
         require(isinstance(model, dict) and isinstance(model.get("services"), dict),
                 "invalid rendered Compose model")
+        require(services and len(services) == len(set(services)),
+                "Compose model config-hash request inventory missing/duplicate")
         require(set(services).issubset(model["services"]),
                 "rendered Compose model lacks required services")
-        result = self._run(
-            ["docker", "compose", "-f", "-", "config", "--hash", *services],
-            timeout=60,
-            capture=True,
-            input_text=json.dumps(model, sort_keys=True, separators=(",", ":")),
-        )
-        return self._parse_compose_hashes(result.stdout, services)
+        model_json = json.dumps(model, sort_keys=True, separators=(",", ":"))
+        hashes: dict[str, str] = {}
+        for service in services:
+            result = self._run(
+                ["docker", "compose", "-f", "-", "config", "--hash", service],
+                timeout=60,
+                capture=True,
+                input_text=model_json,
+            )
+            service_hash = self._parse_compose_hashes(result.stdout, (service,))
+            require(service not in hashes, "duplicate Compose model config-hash service")
+            hashes.update(service_hash)
+        require(set(hashes) == set(services), "Compose config-hash inventory mismatch")
+        return hashes
 
     def current_compose_runtime(self, plan: HostPlan) -> dict[str, dict[str, Any]]:
         inventory = self._run(

@@ -91,8 +91,6 @@ def collect_files(repo: Path, contract_paths: list[str]) -> list[Path]:
         if path.is_file():
             files.add(Path(relative))
             continue
-        if path.exists():
-            fail(f"bundle contract path is a special file: {relative}")
         if path.is_dir():
             for child in path.rglob("*"):
                 if child.is_symlink():
@@ -102,6 +100,8 @@ def collect_files(repo: Path, contract_paths: list[str]) -> list[Path]:
                 elif not child.is_dir():
                     fail(f"bundle may not contain special file: {child.relative_to(repo)}")
             continue
+        if path.exists():
+            fail(f"bundle contract path is a special file: {relative}")
         fail(f"bundle contract path does not exist: {relative}")
     if not files:
         fail("deployment bundle contains no files")

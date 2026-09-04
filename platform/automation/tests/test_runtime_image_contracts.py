@@ -93,6 +93,16 @@ class RuntimeImageContractTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "invalid runtime image entry"):
             validator.validate_images(invalid)
 
+        tagged = copy.deepcopy(document)
+        tagged["images"][0]["package"] = "ghcr.io/trinyxai/fixture:mutable"
+        tagged["images"][0]["immutableRef"] = (
+            tagged["images"][0]["package"] + "@" + tagged["images"][0]["digest"]
+        )
+        with self.assertRaisesRegex(SystemExit, "canonical and tagless"):
+            validator.validate_images(tagged)
+        with self.assertRaisesRegex(SystemExit, "canonical and tagless"):
+            assembler.require_image_identity(tagged["images"][0], "fixture")
+
 
 if __name__ == "__main__":
     unittest.main()

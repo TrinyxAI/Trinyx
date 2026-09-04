@@ -31,6 +31,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TRUSTED_BUILDER_COMMIT"
           [[ "$TRUSTED_BUILDER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test -z "$(git status --porcelain=v1 --untracked-files=all --ignored)"
       - name: Checkout exact historical source as data
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -45,7 +46,7 @@ jobs:
           set -euo pipefail
           source_commit=aeb2a447ea7ce0436a60549713636225dfe1a2c1
           test "$(git -C historical-source rev-parse HEAD)" = "$source_commit"
-          mkdir -p historical-input/cloud historical-input/paid
+          mkdir -p historical-input/paid
           gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417 > historical-input/backend-run.json
           gh api /repos/TrinyxAI/Trinyx/actions/runs/33444302902 > historical-input/frontend-run.json
           gh api /repos/TrinyxAI/Trinyx/actions/jobs/99660712771 > historical-input/backend-publish-job.json
@@ -60,10 +61,9 @@ jobs:
             '8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0' \
             historical-input/cloud.zip | sha256sum --check --strict
           python3 platform/release/validate-historical-artifact.py \
-            --zip historical-input/cloud.zip
-          unzip -q historical-input/cloud.zip -d historical-input/cloud
-          python3 platform/release/validate-historical-artifact.py \
-            --extracted historical-input/cloud
+            --zip historical-input/cloud.zip \
+            --out historical-input/cloud \
+            --expected-file cloud-image-manifest.json
           test -f historical-input/cloud/cloud-image-manifest.json
       - name: Authenticate to GHCR for read-only metadata inspection
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -147,6 +147,37 @@ jobs:
             --source-contract platform/release/historical-deployment-bundle-sources.json \
             --bundle-contract platform/release/deployment-bundle-files.json \
             --out historical-bundle-source
+      - name: Verify approved trusted Paid environment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import stat
+          from pathlib import Path
+
+          relative = "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml"
+          root = Path.cwd()
+          if root.is_symlink() or not root.is_dir():
+              raise SystemExit("ERROR: trusted builder root is unsafe")
+          path = root / relative
+          if path.is_symlink() or not path.exists():
+              raise SystemExit("ERROR: approved Paid environment configuration is missing or symlinked")
+          info = path.stat()
+          if not stat.S_ISREG(info.st_mode):
+              raise SystemExit("ERROR: approved Paid environment configuration is not a regular file")
+          resolved = path.resolve(strict=True)
+          try:
+              resolved.relative_to(root.resolve(strict=True))
+          except ValueError as exc:
+              raise SystemExit("ERROR: approved Paid environment configuration escapes trusted builder") from exc
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          print(
+              "HISTORICAL_PAID_TRUSTED_CONFIG_OK "
+              f"path={relative} sha256={digest}"
+          )
+          PY
       - name: Verify Paid runtime render from authenticated bundle origins
         shell: bash
         run: |
@@ -157,12 +188,26 @@ jobs:
           import sys
 
           images_path, output_path = sys.argv[1:]
-          if not isinstance(document, dict) or not isinstance(document.get("images"), list):
+          document = json.load(open(images_path, encoding="utf-8"))
+          if not isinstance(document, dict) or set(document) != {"schemaVersion", "sourceCommit", "images"}:
+              raise SystemExit("ERROR: canonical Paid runtime inventory schema mismatch")
+          if type(document["schemaVersion"]) is not int or document["schemaVersion"] != 1:
+              raise SystemExit("ERROR: canonical Paid runtime inventory schema version mismatch")
+          if not isinstance(document["sourceCommit"], str) or not re.fullmatch(r"[0-9a-f]{40}", document["sourceCommit"]):
+              raise SystemExit("ERROR: canonical Paid runtime inventory source binding is invalid")
+          if not isinstance(document.get("images"), list):
               raise SystemExit("ERROR: canonical Paid runtime inventory is not an object with images")
-          paid_items = [
-              item for item in document["images"]
-              if isinstance(item, dict) and item.get("role") == "paid"
-          ]
+          image_keys = {
+              "name", "role", "service", "package", "environment", "digest", "immutableRef",
+          }
+          if any(
+              not isinstance(item, dict)
+              or set(item) != image_keys
+              or any(not isinstance(item[key], str) for key in image_keys)
+              for item in document["images"]
+          ):
+              raise SystemExit("ERROR: canonical runtime image entry schema mismatch")
+          paid_items = [item for item in document["images"] if item["role"] == "paid"]
           if len(paid_items) != 8:
               raise SystemExit("ERROR: canonical Paid runtime inventory is not exactly eight services")
           services = [item.get("service") for item in paid_items]
@@ -180,8 +225,11 @@ jobs:
               item["service"]: (item["environment"], item["immutableRef"])
               for item in paid_items
           }
-          if len({environment for environment, _ in expected.values()}) != len(expected):
-              raise SystemExit("ERROR: canonical Paid runtime environment bindings are not unique")
+          if (
+              len(expected) != len(paid_items)
+              or len({environment for environment, _ in expected.values()}) != len(expected)
+          ):
+              raise SystemExit("ERROR: canonical Paid runtime bindings are not unique")
           if any(
               not re.fullmatch(r"[A-Z][A-Z0-9_]*", environment)
               or not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", immutable_ref)
@@ -208,6 +256,8 @@ jobs:
           document = json.load(open(images_path, encoding="utf-8"))
           images = document.get("images") if isinstance(document, dict) else None
           rendered = json.load(open(rendered_path, encoding="utf-8"))
+          if not isinstance(rendered, dict) or set(rendered) != {"services"}:
+              raise SystemExit("ERROR: canonical Paid runtime render schema mismatch")
           expected_services = {
               "postgres", "redis", "minio", "minio-init",
               "bridge", "livecontext", "frontend", "paid-edge",
@@ -230,9 +280,14 @@ jobs:
           ):
               raise SystemExit("ERROR: canonical Paid runtime service inventory mismatch")
           for service, immutable_ref in expected.items():
-              actual = services.get(service, {}).get("image")
-              if actual != immutable_ref or not re.fullmatch(
-                  r"[^@\s]+@sha256:[0-9a-f]{64}", actual or ""
+              rendered_service = services[service]
+              if not isinstance(rendered_service, dict) or set(rendered_service) < {"image"}:
+                  raise SystemExit(
+                      f"ERROR: canonical Paid runtime rendered service schema mismatch: {service}"
+                  )
+              actual = rendered_service["image"]
+              if not isinstance(actual, str) or actual != immutable_ref or not re.fullmatch(
+                  r"[^@\s]+@sha256:[0-9a-f]{64}", actual
               ):
                   raise SystemExit(
                       f"ERROR: canonical Paid runtime image render mismatch: {service}"

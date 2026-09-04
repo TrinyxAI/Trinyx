@@ -194,8 +194,8 @@ jobs:
               if item["role"] == "paid"
           }
           services = rendered.get("services")
-          if not isinstance(services, dict) or len(expected) != 8:
-              raise SystemExit("ERROR: canonical Paid runtime render schema mismatch")
+          if not isinstance(services, dict) or set(services) != set(expected):
+              raise SystemExit("ERROR: canonical Paid runtime service inventory mismatch")
           for service, immutable_ref in expected.items():
               actual = services.get(service, {}).get("image")
               if actual != immutable_ref or not re.fullmatch(

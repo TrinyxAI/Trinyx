@@ -570,8 +570,122 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("platform/release/release.py create", workflow)
         self.assertIn("created_at=$(jq -er", workflow)
         self.assertIn("--created-at \"$created_at\"", workflow)
-        self.assertIn("--repo historical-source", workflow)
+        self.assertIn("platform/release/prepare-historical-bundle-source.py", workflow)
+        self.assertIn("--historical-repo historical-source", workflow)
+        self.assertIn("--trusted-repo .", workflow)
+        self.assertIn("--repo historical-bundle-source", workflow)
+        self.assertNotIn("--repo historical-source \\", workflow)
+        self.assertIn("historical-deployment-bundle-sources.json", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)
+
+    def test_historical_bundle_source_is_explicit_and_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            historical = root / "historical"
+            trusted = root / "trusted"
+            output = root / "output"
+            (historical / "catalog-seeds").mkdir(parents=True)
+            (historical / "docker-compose.yml").write_text("services: {}\n")
+            (historical / "catalog-seeds" / "seed.json").write_text("{}\n")
+            overlay = trusted / "docker" / "docker-compose.paid.runtime.yml"
+            overlay.parent.mkdir(parents=True)
+            overlay.write_text("services: {}\n")
+            source_contract = root / "sources.json"
+            source_contract.write_text(json.dumps({
+                "schemaVersion": 1,
+                "historicalSourceCommit": hb.SOURCE_COMMIT,
+                "historicalPaths": ["docker-compose.yml", "catalog-seeds"],
+                "trustedBuilderOverlays": ["docker/docker-compose.paid.runtime.yml"],
+            }))
+            bundle_contract = root / "bundle.json"
+            bundle_contract.write_text(json.dumps({
+                "schemaVersion": 1,
+                "paths": [
+                    "docker-compose.yml",
+                    "catalog-seeds",
+                    "docker/docker-compose.paid.runtime.yml",
+                ],
+            }))
+            script = ROOT / "platform/release/prepare-historical-bundle-source.py"
+            result = subprocess.run([
+                sys.executable, str(script),
+                "--historical-repo", str(historical),
+                "--trusted-repo", str(trusted),
+                "--source-contract", str(source_contract),
+                "--bundle-contract", str(bundle_contract),
+                "--out", str(output),
+            ], check=True, capture_output=True, text=True)
+            self.assertIn("HISTORICAL_BUNDLE_SOURCE_OK", result.stdout)
+            self.assertEqual(
+                (output / "docker-compose.yml").read_bytes(),
+                (historical / "docker-compose.yml").read_bytes(),
+            )
+            self.assertEqual(
+                (output / "catalog-seeds" / "seed.json").read_bytes(),
+                (historical / "catalog-seeds" / "seed.json").read_bytes(),
+            )
+            self.assertEqual(
+                (output / "docker" / "docker-compose.paid.runtime.yml").read_bytes(),
+                overlay.read_bytes(),
+            )
+
+    def test_historical_bundle_source_rejects_shadow_and_contract_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            historical = root / "historical"
+            trusted = root / "trusted"
+            (historical / "catalog-seeds").mkdir(parents=True)
+            (historical / "docker-compose.yml").write_text("services: {}\n")
+            (historical / "catalog-seeds" / "seed.json").write_text("{}\n")
+            overlay = trusted / "docker" / "docker-compose.paid.runtime.yml"
+            overlay.parent.mkdir(parents=True)
+            overlay.write_text("services: {}\n")
+            source_contract = root / "sources.json"
+            source_contract.write_text(json.dumps({
+                "schemaVersion": 1,
+                "historicalSourceCommit": hb.SOURCE_COMMIT,
+                "historicalPaths": ["docker-compose.yml", "catalog-seeds"],
+                "trustedBuilderOverlays": ["docker/docker-compose.paid.runtime.yml"],
+            }))
+            bundle_contract = root / "bundle.json"
+            bundle_contract.write_text(json.dumps({
+                "schemaVersion": 1,
+                "paths": [
+                    "docker-compose.yml",
+                    "catalog-seeds",
+                    "docker/docker-compose.paid.runtime.yml",
+                ],
+            }))
+            script = ROOT / "platform/release/prepare-historical-bundle-source.py"
+
+            shadow = historical / "docker" / "docker-compose.paid.runtime.yml"
+            shadow.parent.mkdir(parents=True)
+            shadow.write_text("shadow\n")
+            result = subprocess.run([
+                sys.executable, str(script),
+                "--historical-repo", str(historical),
+                "--trusted-repo", str(trusted),
+                "--source-contract", str(source_contract),
+                "--bundle-contract", str(bundle_contract),
+                "--out", str(root / "shadow-output"),
+            ], capture_output=True, text=True)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("trusted overlay would shadow historical source", result.stderr)
+
+            shadow.unlink()
+            document = json.loads(source_contract.read_text())
+            document["trustedBuilderOverlays"] = ["docker/unapproved.yml"]
+            source_contract.write_text(json.dumps(document))
+            result = subprocess.run([
+                sys.executable, str(script),
+                "--historical-repo", str(historical),
+                "--trusted-repo", str(trusted),
+                "--source-contract", str(source_contract),
+                "--bundle-contract", str(bundle_contract),
+                "--out", str(root / "drift-output"),
+            ], capture_output=True, text=True)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("unapproved historical bundle trusted overlay", result.stderr)
 
     def test_release_id_is_generated_and_validated_by_canonical_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

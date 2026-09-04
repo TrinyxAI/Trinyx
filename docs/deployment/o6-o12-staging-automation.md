@@ -275,10 +275,17 @@ services to the canonical immutable image inventory. The `paid-edge` service
 definition remains approved environment configuration; the overlay supplies its
 immutable image binding and no other current release content. A closed source contract therefore admits
 that one file only from the exact trusted builder checkout, independently
-rechecks historical Git HEAD/clean status, rejects root or descendant symlinks,
-historical shadowing, unapproved overlays and incomplete bundle coverage, and
-never substitutes any other current application/deployment content. Modern
-bundle entries include their normalized mode. The four canonical files receive
+rechecks historical Git HEAD/clean status before and after byte-safe reads,
+binds the trusted checkout to the exact `job.workflow_sha` with no tracked
+drift, rejects root or descendant symlinks, historical shadowing, unapproved
+overlays and incomplete bundle coverage, and never substitutes any other
+current application/deployment content. The one environment-specific input used
+only for the read-only Paid Compose render is separately allowlisted as
+`platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml`;
+it is required to be a regular non-symlinked file in that same trusted checkout
+and its SHA-256 is recorded in the job log. It is not copied into the baseline
+bundle and never claims historical aeb2 provenance. Modern bundle entries include
+their normalized mode. The four canonical files receive
 GitHub build provenance attestations. Do not register or install a baseline
 built with this modern bundle schema while the active C3/W7 control plane is
 still installed: C3's installer accepts only the old three-field bundle entry
@@ -304,7 +311,11 @@ binding one-to-one to the current canonical inventory, and preserves the
 original digest and immutable reference. The downloaded ZIP is checked against
 GitHub artifact digest
 `sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0`
-before extraction.
+before extraction. Extraction is then performed by an exact-member
+safe extractor rather than `unzip`: it permits only the contracted
+`cloud-image-manifest.json` regular file in a fresh non-symlinked destination,
+and rejects duplicate, traversal, absolute, backslash, encrypted, special-file,
+ancestor-collision and unexpected-member forms before writing any bytes.
 
 This is not baseline observation and it never imports identities from EC2.
 Live runtime evidence cannot replace missing historical publication provenance.

@@ -430,6 +430,47 @@ class HistoricalBaselineTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "terminal"):
                     hb.historical_paid_digest(log_text, package=package)
 
+    def test_buildx_single_snapshot_digest_and_image_extraction_fail_closed(self) -> None:
+        digest_filter = (
+            '.manifest.digest | select(type == "string" '
+            'and test("^sha256:[0-9a-f]{64}$"))'
+        )
+        image_filter = '.image | select(type == "object")'
+        valid = {
+            "manifest": {"digest": BACKEND_HISTORICAL_DIGEST},
+            "image": {
+                "os": "linux",
+                "architecture": "amd64",
+                "config": {"Labels": {}},
+            },
+        }
+
+        def jq(filter_text: str, document: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["jq", "-er", filter_text],
+                input=json.dumps(document),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, jq(digest_filter, valid).returncode)
+        self.assertEqual(0, jq(image_filter, valid).returncode)
+
+        invalid_snapshots = (
+            {"manifest": {}, "image": valid["image"]},
+            {"manifest": {"digest": "mutable"}, "image": valid["image"]},
+            {"manifest": {"digest": "sha256:" + "A" * 64}, "image": valid["image"]},
+            {"manifest": {"digest": BACKEND_HISTORICAL_DIGEST}, "image": []},
+        )
+        for document in invalid_snapshots:
+            with self.subTest(document=document):
+                digest_result = jq(digest_filter, document)
+                image_result = jq(image_filter, document)
+                self.assertTrue(
+                    digest_result.returncode != 0 or image_result.returncode != 0
+                )
+
     def test_workflow_is_metadata_only_and_release_id_is_not_supplied(self) -> None:
         wrapper = (ROOT / ".github/workflows/build-historical-staging-baseline.yml").read_text()
         workflow = (ROOT / ".github/workflows/build-historical-staging-baseline-impl.yml").read_text()
@@ -441,9 +482,12 @@ class HistoricalBaselineTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
-        self.assertIn("image=$(docker buildx imagetools inspect", workflow)
-        self.assertIn("--format '{{json .Image}}'", workflow)
+        self.assertEqual(1, workflow.count('docker buildx imagetools inspect "$tag"'))
+        self.assertIn("--format '{{json .}}'", workflow)
+        self.assertNotIn("{{json .Image}}", workflow)
         self.assertNotIn("index .Image", workflow)
+        self.assertIn(".manifest.digest", workflow)
+        self.assertIn('.image | select(type == "object")', workflow)
         self.assertIn("HISTORICAL_PAID_INSPECT package=%s", workflow)
         self.assertIn("(.config.Labels // {})", workflow)
         self.assertIn("--argjson platform", workflow)

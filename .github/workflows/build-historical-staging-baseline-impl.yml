@@ -74,10 +74,14 @@ jobs:
           inspect() {
             local package="$1" out="$2"
             local tag="${package}:aeb2a447ea7ce0436a60549713636225dfe1a2c1"
-            local digest image platform labels
+            local inspection digest image platform labels
             printf 'HISTORICAL_PAID_INSPECT package=%s\n' "$package"
-            digest=$(docker buildx imagetools inspect "$tag" | awk '$1 == "Digest:" {print $2; exit}')
-            image=$(docker buildx imagetools inspect "$tag" --format '{{json .Image}}')
+            inspection=$(docker buildx imagetools inspect "$tag" --format '{{json .}}')
+            digest=$(jq -er '
+              .manifest.digest
+              | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))
+            ' <<<"$inspection")
+            image=$(jq -ce '.image | select(type == "object")' <<<"$inspection")
             platform=$(jq -ce '
               select(type == "object")
               | {os: .os, architecture: .architecture}

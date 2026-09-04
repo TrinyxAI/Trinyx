@@ -656,6 +656,11 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("HISTORICAL_PAID_RUNTIME_RENDER_OK services=8", workflow)
         self.assertIn("postgres redis minio minio-init bridge livecontext frontend paid-edge", workflow)
         self.assertIn("set(services) != expected_services", workflow)
+        self.assertIn(
+            'not isinstance(rendered, dict) or not isinstance(rendered.get("services"), dict)',
+            workflow,
+        )
+        self.assertNotIn('set(rendered) != {"services"}', workflow)
         self.assertLess(
             workflow.index("Prepare authenticated historical bundle source"),
             workflow.index("Verify Paid runtime render from authenticated bundle origins"),

@@ -77,6 +77,7 @@ def paid_fixture(package: str, digest: str) -> dict:
         "package": package,
         "tag": f"{package}:{hb.SOURCE_COMMIT}",
         "digest": digest,
+        "platform": {"os": "linux", "architecture": "amd64"},
         "labels": {
             "org.opencontainers.image.source": f"https://github.com/{hb.REPOSITORY}",
             "org.opencontainers.image.revision": hb.SOURCE_COMMIT,
@@ -221,6 +222,93 @@ class HistoricalBaselineTests(unittest.TestCase):
                              name="paid-backend", service="livecontext",
                              environment="BACKEND_IMAGE", package=package)
 
+    def test_paid_platform_and_per_image_label_policy_are_fail_closed(self) -> None:
+        backend_package = "ghcr.io/trinyxai/trinyx-backend"
+        frontend_package = "ghcr.io/trinyxai/trinyx-frontend"
+
+        backend = hb.paid_manifest(
+            paid_fixture(backend_package, BACKEND_HISTORICAL_DIGEST),
+            historical_digest=BACKEND_HISTORICAL_DIGEST,
+            name="paid-backend", service="livecontext",
+            environment="BACKEND_IMAGE", package=backend_package,
+            require_oci_labels=True,
+        )
+        self.assertEqual(BACKEND_HISTORICAL_DIGEST, backend["images"][0]["digest"])
+
+        for name, labels in (
+            ("absent", {}),
+            ("wrong-source", {
+                "org.opencontainers.image.source": "https://github.com/other/repo",
+                "org.opencontainers.image.revision": hb.SOURCE_COMMIT,
+            }),
+            ("wrong-revision", {
+                "org.opencontainers.image.source": f"https://github.com/{hb.REPOSITORY}",
+                "org.opencontainers.image.revision": "f" * 40,
+            }),
+        ):
+            with self.subTest(backend_labels=name):
+                item = paid_fixture(backend_package, BACKEND_HISTORICAL_DIGEST)
+                item["labels"] = labels
+                with self.assertRaises(ValueError):
+                    hb.paid_manifest(
+                        item, historical_digest=BACKEND_HISTORICAL_DIGEST,
+                        name="paid-backend", service="livecontext",
+                        environment="BACKEND_IMAGE", package=backend_package,
+                        require_oci_labels=True,
+                    )
+
+        frontend_item = paid_fixture(frontend_package, FRONTEND_HISTORICAL_DIGEST)
+        frontend_item["labels"] = {}
+        frontend = hb.paid_manifest(
+            frontend_item, historical_digest=FRONTEND_HISTORICAL_DIGEST,
+            name="paid-frontend", service="frontend",
+            environment="FRONTEND_IMAGE", package=frontend_package,
+            require_oci_labels=False,
+        )
+        self.assertEqual(FRONTEND_HISTORICAL_DIGEST, frontend["images"][0]["digest"])
+
+        moved_frontend = copy.deepcopy(frontend_item)
+        moved_frontend["digest"] = "sha256:" + "f" * 64
+        with self.assertRaisesRegex(ValueError, "tag moved"):
+            hb.paid_manifest(
+                moved_frontend, historical_digest=FRONTEND_HISTORICAL_DIGEST,
+                name="paid-frontend", service="frontend",
+                environment="FRONTEND_IMAGE", package=frontend_package,
+                require_oci_labels=False,
+            )
+
+        for field, value in (("architecture", "arm64"), ("os", "windows")):
+            with self.subTest(platform_field=field):
+                item = copy.deepcopy(frontend_item)
+                item["platform"][field] = value
+                with self.assertRaisesRegex(ValueError, "platform"):
+                    hb.paid_manifest(
+                        item, historical_digest=FRONTEND_HISTORICAL_DIGEST,
+                        name="paid-frontend", service="frontend",
+                        environment="FRONTEND_IMAGE", package=frontend_package,
+                        require_oci_labels=False,
+                    )
+
+        missing_platform = copy.deepcopy(frontend_item)
+        del missing_platform["platform"]
+        with self.assertRaisesRegex(ValueError, "schema"):
+            hb.paid_manifest(
+                missing_platform, historical_digest=FRONTEND_HISTORICAL_DIGEST,
+                name="paid-frontend", service="frontend",
+                environment="FRONTEND_IMAGE", package=frontend_package,
+                require_oci_labels=False,
+            )
+
+        malformed_labels = copy.deepcopy(frontend_item)
+        malformed_labels["labels"] = []
+        with self.assertRaisesRegex(ValueError, "labels"):
+            hb.paid_manifest(
+                malformed_labels, historical_digest=FRONTEND_HISTORICAL_DIGEST,
+                name="paid-frontend", service="frontend",
+                environment="FRONTEND_IMAGE", package=frontend_package,
+                require_oci_labels=False,
+            )
+
     def test_paid_digest_is_rooted_in_exact_authenticated_historical_job_logs(self) -> None:
         backend_job = job_fixture(hb.BACKEND_PUBLISH_JOB_ID, hb.BACKEND_RUN_ID, "publish")
         frontend_job = job_fixture(
@@ -353,6 +441,10 @@ class HistoricalBaselineTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
+        self.assertIn('{{json (index .Image "linux/amd64")}}', workflow)
+        self.assertNotIn("{{json .Image}}", workflow)
+        self.assertIn("(.config.Labels // {})", workflow)
+        self.assertIn("--argjson platform", workflow)
         self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)
         self.assertIn("sha256sum --check --strict", workflow)
         backend_log_download = (

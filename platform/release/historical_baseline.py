@@ -264,9 +264,14 @@ def canonical_cloud_manifest(
 
 
 def paid_manifest(document: Any, *, historical_digest: str, name: str, service: str,
-                  environment: str, package: str) -> dict[str, Any]:
-    require(isinstance(document, dict) and set(document) == {"package", "tag", "digest", "labels"},
-            "Paid image inspection schema mismatch")
+                  environment: str, package: str,
+                  require_oci_labels: bool = True) -> dict[str, Any]:
+    require(
+        isinstance(document, dict)
+        and set(document) == {"package", "tag", "digest", "platform", "labels"},
+        "Paid image inspection schema mismatch",
+    )
+    require(type(require_oci_labels) is bool, "Paid OCI label policy is invalid")
     require(document["package"] == package, "Paid image package mismatch")
     require(document["tag"] == f"{package}:{SOURCE_COMMIT}", "Paid immutable tag mismatch")
     digest = str(document["digest"])
@@ -275,13 +280,22 @@ def paid_manifest(document: Any, *, historical_digest: str, name: str, service: 
             "historical Paid image digest is invalid")
     require(digest == historical_digest,
             "current Paid tag moved from authenticated historical digest")
-    labels = document["labels"]
+    platform = document["platform"]
     require(
-        isinstance(labels, dict)
-        and labels.get("org.opencontainers.image.source") == f"https://github.com/{REPOSITORY}"
-        and labels.get("org.opencontainers.image.revision") == SOURCE_COMMIT,
-        "Paid image OCI provenance mismatch",
+        isinstance(platform, dict)
+        and set(platform) == {"os", "architecture"}
+        and platform["os"] == "linux"
+        and platform["architecture"] == "amd64",
+        "Paid image linux/amd64 platform mismatch",
     )
+    labels = document["labels"]
+    require(isinstance(labels, dict), "Paid image OCI labels are not an object")
+    if require_oci_labels:
+        require(
+            labels.get("org.opencontainers.image.source") == f"https://github.com/{REPOSITORY}"
+            and labels.get("org.opencontainers.image.revision") == SOURCE_COMMIT,
+            "Paid image OCI provenance mismatch",
+        )
     return {
         "schemaVersion": 1,
         "commit": SOURCE_COMMIT,
@@ -353,11 +367,13 @@ def main() -> None:
         load(args.backend_inspect), historical_digest=backend_digest,
         name="paid-backend", service="livecontext",
         environment="BACKEND_IMAGE", package="ghcr.io/trinyxai/trinyx-backend",
+        require_oci_labels=True,
     ))
     write_canonical(args.out / "frontend.json", paid_manifest(
         load(args.frontend_inspect), historical_digest=frontend_digest,
         name="paid-frontend", service="frontend",
         environment="FRONTEND_IMAGE", package="ghcr.io/trinyxai/trinyx-frontend",
+        require_oci_labels=False,
     ))
     print(f"HISTORICAL_BASELINE_PROVENANCE_OK source_commit={SOURCE_COMMIT}")
 

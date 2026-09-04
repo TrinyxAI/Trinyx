@@ -74,13 +74,24 @@ jobs:
           inspect() {
             local package="$1" out="$2"
             local tag="${package}:aeb2a447ea7ce0436a60549713636225dfe1a2c1"
-            local digest image labels
+            local digest platform_image platform labels
             digest=$(docker buildx imagetools inspect "$tag" | awk '$1 == "Digest:" {print $2; exit}')
-            image=$(docker buildx imagetools inspect "$tag" --format '{{json .Image}}')
-            labels=$(jq -ce '.config.Labels | select(type == "object")' <<<"$image")
+            platform_image=$(docker buildx imagetools inspect "$tag" \
+              --format '{{json (index .Image "linux/amd64")}}')
+            platform=$(jq -ce '
+              select(type == "object")
+              | {os: .os, architecture: .architecture}
+              | select(.os == "linux" and .architecture == "amd64")
+            ' <<<"$platform_image")
+            labels=$(jq -ce '
+              select(type == "object")
+              | (.config.Labels // {})
+              | select(type == "object")
+            ' <<<"$platform_image")
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             jq -n --arg package "$package" --arg tag "$tag" --arg digest "$digest" \
-              --argjson labels "$labels" '{package:$package,tag:$tag,digest:$digest,labels:$labels}' > "$out"
+              --argjson platform "$platform" --argjson labels "$labels" \
+              '{package:$package,tag:$tag,digest:$digest,platform:$platform,labels:$labels}' > "$out"
           }
           inspect ghcr.io/trinyxai/trinyx-backend historical-input/paid/backend-inspect.json
           inspect ghcr.io/trinyxai/trinyx-frontend historical-input/paid/frontend-inspect.json

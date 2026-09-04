@@ -38,6 +38,8 @@ grep -Fq -- '--repo historical-bundle-source' "$HISTORICAL_WORKFLOW"
 grep -Fq 'historical-deployment-bundle-sources.json' "$HISTORICAL_WORKFLOW"
 grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
 grep -Fq 'git -C historical-source status --porcelain=v1 --untracked-files=all' "$HISTORICAL_WORKFLOW"
+grep -Fq 'postgres redis minio minio-init bridge livecontext frontend paid-edge' "$HISTORICAL_WORKFLOW"
+grep -Fq 'set(services) != set(expected)' "$HISTORICAL_WORKFLOW"
 
 python3 - "$HISTORICAL_SOURCE_CONTRACT" "$BUNDLE_CONTRACT" "$SOURCE" <<'PY'
 import json, sys
@@ -137,6 +139,27 @@ fi
 
 python3 "$BUNDLE_BUILDER" --repo "$ROOT" --contract "$BUNDLE_CONTRACT" --out "$TMP/bundle-a.tar" --manifest-out "$TMP/bundle-a.json" |
   grep -Fq 'DEPLOYMENT_BUNDLE_BUILD_OK digest=sha256:'
+
+# Contract paths must be canonical and schemaVersion must be a real integer.
+python3 - "$BUNDLE_CONTRACT" "$TMP/bool-contract.json" "$TMP/dot-contract.json" <<'PY'
+import json, sys
+source, bool_path, dot_path = sys.argv[1:]
+doc = json.load(open(source, encoding="utf-8"))
+bool_doc = dict(doc)
+bool_doc["schemaVersion"] = True
+json.dump(bool_doc, open(bool_path, "w", encoding="utf-8"))
+dot_doc = dict(doc)
+dot_doc["paths"] = ["."]
+json.dump(dot_doc, open(dot_path, "w", encoding="utf-8"))
+PY
+if python3 "$BUNDLE_BUILDER" --repo "$ROOT" --contract "$TMP/bool-contract.json" --out "$TMP/bool.tar" --manifest-out "$TMP/bool.json" >/dev/null 2>&1; then
+  echo ERROR_BOOL_BUNDLE_SCHEMA_ACCEPTED >&2
+  exit 1
+fi
+if python3 "$BUNDLE_BUILDER" --repo "$ROOT" --contract "$TMP/dot-contract.json" --out "$TMP/dot.tar" --manifest-out "$TMP/dot.json" >/dev/null 2>&1; then
+  echo ERROR_DOT_BUNDLE_PATH_ACCEPTED >&2
+  exit 1
+fi
 PYTHONHASHSEED=8675309 python3 "$BUNDLE_BUILDER" --repo "$ROOT" --contract "$BUNDLE_CONTRACT" --out "$TMP/bundle-b.tar" --manifest-out "$TMP/bundle-b.json" >/dev/null
 cmp -s "$TMP/bundle-a.tar" "$TMP/bundle-b.tar"
 cmp -s "$TMP/bundle-a.json" "$TMP/bundle-b.json"

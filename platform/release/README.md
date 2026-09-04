@@ -20,7 +20,9 @@ The separate public staging Caddy container is classified as platform/edge state
 
 ## Deterministic deployment bundle
 
-Images alone are not sufficient for a reproducible Compose deployment. `deployment-bundle-files.json` lists the environment-independent Compose files and local runtime assets required by the hosted Cloud/Paid stacks. `build-deployment-bundle.py` packages them into a deterministic uncompressed tar archive with normalized ownership, modes and timestamps.
+Images alone are not sufficient for a reproducible Compose deployment. `deployment-bundle-files.json` lists the environment-independent Compose files and local runtime assets required by the hosted Cloud/Paid stacks. `build-deployment-bundle.py` packages them into a deterministic uncompressed tar archive with normalized ownership, explicit per-file modes and timestamps.
+
+The historical aeb2 baseline uses `historical-deployment-bundle-sources.json` to authenticate each bundle path's origin. Nine contracted paths come byte-for-byte from the exact historical tree. The sole trusted-builder overlay is `docker/docker-compose.paid.runtime.yml`, which postdates aeb2 and supplies only the canonical immutable image bindings required by the current exact eight-service Paid deployment plan. Preparation rejects an overlay that shadows historical content, an unapproved overlay, a missing path, a symlink or incomplete coverage of the normal bundle contract. No other current-tree deployment content may replace historical source data.
 
 The bundle SHA-256 is part of `releaseId`. Changing a Compose file, Keycloak realm, SearXNG settings, catalog seed, Caddyfile or other contracted deployment asset therefore creates a different release even when every container digest is unchanged.
 

@@ -31,7 +31,10 @@ grep -Fq 'docker buildx imagetools inspect' "$HISTORICAL_WORKFLOW"
 grep -Fq 'ref: ${{ job.workflow_sha }}' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--platform-commit "$TRUSTED_BUILDER_COMMIT"' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--manifest historical-input/paid/cloud.json' "$HISTORICAL_WORKFLOW"
-grep -Fq -- '--repo historical-source' "$HISTORICAL_WORKFLOW"
+grep -Fq 'platform/release/prepare-historical-bundle-source.py' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--historical-repo historical-source' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--repo historical-bundle-source' "$HISTORICAL_WORKFLOW"
+grep -Fq 'historical-deployment-bundle-sources.json' "$HISTORICAL_WORKFLOW"
 grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
 if grep -Eq 'docker build(x build)? |docker/build-push-action|docker pull|docker push|imagetools create|packages: write|--release-id' "$HISTORICAL_WORKFLOW"; then
   echo ERROR_HISTORICAL_BASELINE_IS_NOT_METADATA_ONLY >&2

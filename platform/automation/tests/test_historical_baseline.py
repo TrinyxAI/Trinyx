@@ -709,6 +709,66 @@ class HistoricalBaselineTests(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("path traverses a symlink", result.stderr)
 
+    def test_historical_bundle_source_rejects_bool_versions_and_path_overlaps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            historical = root / "historical"
+            trusted = root / "trusted"
+            (historical / "catalog-seeds").mkdir(parents=True)
+            (historical / "catalog-seeds" / "seed.json").write_text("{}\n")
+            (historical / "docker-compose.yml").write_text("services: {}\n")
+            overlay = trusted / "docker" / "docker-compose.paid.runtime.yml"
+            overlay.parent.mkdir(parents=True)
+            overlay.write_text("services: {}\n")
+            source_contract = root / "sources.json"
+            bundle_contract = root / "bundle.json"
+            source_document = {
+                "schemaVersion": 1,
+                "historicalSourceCommit": hb.SOURCE_COMMIT,
+                "historicalPaths": ["docker-compose.yml", "catalog-seeds"],
+                "trustedBuilderOverlays": ["docker/docker-compose.paid.runtime.yml"],
+            }
+            bundle_document = {
+                "schemaVersion": 1,
+                "paths": [
+                    "docker-compose.yml",
+                    "catalog-seeds",
+                    "docker/docker-compose.paid.runtime.yml",
+                ],
+            }
+            script = ROOT / "platform/release/prepare-historical-bundle-source.py"
+
+            def invoke(name: str) -> subprocess.CompletedProcess[str]:
+                source_contract.write_text(json.dumps(source_document))
+                bundle_contract.write_text(json.dumps(bundle_document))
+                return subprocess.run([
+                    sys.executable, str(script),
+                    "--historical-repo", str(historical),
+                    "--trusted-repo", str(trusted),
+                    "--source-contract", str(source_contract),
+                    "--bundle-contract", str(bundle_contract),
+                    "--out", str(root / name),
+                ], capture_output=True, text=True)
+
+            source_document["schemaVersion"] = True
+            result = invoke("bool-source")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("identity mismatch", result.stderr)
+            source_document["schemaVersion"] = 1
+
+            bundle_document["schemaVersion"] = True
+            result = invoke("bool-bundle")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("file contract schema mismatch", result.stderr)
+            bundle_document["schemaVersion"] = 1
+
+            source_document["historicalPaths"] = [
+                "docker-compose.yml", "catalog-seeds", "catalog-seeds/seed.json",
+            ]
+            result = invoke("overlapping-source")
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("overlapping paths", result.stderr)
+
     def test_release_id_is_generated_and_validated_by_canonical_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -71,6 +71,10 @@ def collect_files(repo: Path, contract_paths: list[str]) -> list[Path]:
     return sorted(files, key=lambda p: p.as_posix())
 
 
+def normalized_mode(source: Path) -> int:
+    return 0o755 if source.stat().st_mode & 0o111 else 0o644
+
+
 def build_tar(repo: Path, files: list[Path]) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
@@ -84,8 +88,7 @@ def build_tar(repo: Path, files: list[Path]) -> bytes:
             info.gid = 0
             info.uname = ""
             info.gname = ""
-            mode = source.stat().st_mode
-            info.mode = 0o755 if mode & 0o111 else 0o644
+            info.mode = normalized_mode(source)
             tar.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
 
@@ -106,7 +109,12 @@ def main() -> None:
     entries: list[dict[str, Any]] = []
     for relative in files:
         data = (repo / relative).read_bytes()
-        entries.append({"path": relative.as_posix(), "digest": sha256_bytes(data), "sizeBytes": len(data)})
+        entries.append({
+            "path": relative.as_posix(),
+            "digest": sha256_bytes(data),
+            "sizeBytes": len(data),
+            "mode": normalized_mode(repo / relative),
+        })
 
     payload = build_tar(repo, files)
     digest = sha256_bytes(payload)

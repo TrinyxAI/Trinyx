@@ -59,10 +59,10 @@ def make_release(base: Path, role: str, version: int) -> tuple[str, Path, dict[s
             content = bundle_files[name]
             info = tarfile.TarInfo(name)
             info.size = len(content)
-            info.mode = 0o444
+            info.mode = 0o644
             info.mtime = 0
             archive.addfile(info, io.BytesIO(content))
-            entries.append({"path": name, "digest": sha256_bytes(content), "sizeBytes": len(content), "mode": 0o444})
+            entries.append({"path": name, "digest": sha256_bytes(content), "sizeBytes": len(content), "mode": 0o644})
     tar_bytes = tar_buffer.getvalue()
     bundle_manifest = {
         "schemaVersion": 1,
@@ -96,6 +96,13 @@ def make_release(base: Path, role: str, version: int) -> tuple[str, Path, dict[s
         target = release_dir / "bundle" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
+        os.chmod(target, 0o444)
+    for directory in sorted(
+        [release_dir / "bundle", *[path for path in (release_dir / "bundle").rglob("*") if path.is_dir()]],
+        key=lambda item: len(item.parts),
+        reverse=True,
+    ):
+        os.chmod(directory, 0o555)
     selected = [image for image in manifest["images"] if image["role"] == role]
     (release_dir / "images.env").write_text(
         "".join(f"{item['environment']}={item['immutableRef']}\n" for item in sorted(selected, key=lambda x: x["environment"])),

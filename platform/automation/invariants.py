@@ -14,14 +14,22 @@ import os
 import re
 import stat
 import tarfile
-from pathlib import Path
+from datetime import datetime
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 RELEASE_RE = re.compile(r"^rel-v1-[0-9a-f]{32}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+RFC3339_UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 SERVICE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
+FROZEN_CANDIDATE_RELEASE_ID = "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4"
+FROZEN_CANDIDATE_BUNDLE_DIGEST = "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892"
 SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -78,10 +86,30 @@ def sha256_bytes(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
+def require_utc_timestamp(value: Any, label: str) -> None:
+    require(
+        isinstance(value, str) and RFC3339_UTC_RE.fullmatch(value) is not None,
+        f"{label} is not strict UTC RFC3339",
+    )
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise InvariantError(f"{label} is invalid") from exc
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise InvariantError(f"invalid JSON {path}: {exc}") from exc
 
 
@@ -92,7 +120,8 @@ def environment_config_digest(base: Path, role: str) -> str:
     plan = read_json(plan_path)
     require(
         isinstance(plan, dict)
-        and plan.get("schemaVersion") == 1
+        and type(plan.get("schemaVersion")) is int
+        and plan["schemaVersion"] == 1
         and plan.get("role") == role
         and isinstance(plan.get("requiredFiles"), list),
         "invalid deployment plan for environment config digest",
@@ -147,17 +176,18 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
         "images",
     }
     require(set(manifest) == required, "release manifest keys do not match schema v1")
-    require(manifest["schemaVersion"] == 1, "unsupported release schema")
+    require(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 1, "unsupported release schema")
     require(isinstance(manifest["releaseId"], str) and RELEASE_RE.fullmatch(manifest["releaseId"]), "bad release ID")
     require(isinstance(manifest["sourceCommit"], str) and SHA_RE.fullmatch(manifest["sourceCommit"]), "bad source commit")
     require(isinstance(manifest["platformCommit"], str) and SHA_RE.fullmatch(manifest["platformCommit"]), "bad platform commit")
     require(isinstance(manifest["sourceRef"], str) and 0 < len(manifest["sourceRef"]) <= 255, "bad source ref")
+    require_utc_timestamp(manifest["createdAt"], "release createdAt")
     bundle = manifest["deploymentBundle"]
     require(isinstance(bundle, dict) and set(bundle) == {"format", "digest", "sizeBytes", "fileCount"}, "bad bundle identity")
     require(bundle["format"] == "tar", "bundle must be tar")
     require(isinstance(bundle["digest"], str) and DIGEST_RE.fullmatch(bundle["digest"]), "bad bundle digest")
-    require(isinstance(bundle["sizeBytes"], int) and bundle["sizeBytes"] > 0, "bad bundle size")
-    require(isinstance(bundle["fileCount"], int) and bundle["fileCount"] > 0, "bad bundle file count")
+    require(type(bundle["sizeBytes"]) is int and bundle["sizeBytes"] > 0, "bad bundle size")
+    require(type(bundle["fileCount"]) is int and bundle["fileCount"] > 0, "bad bundle file count")
     images = manifest["images"]
     require(isinstance(images, list) and len(images) == 28, "runtime inventory must contain exactly 28 images")
     seen_names: set[str] = set()
@@ -166,15 +196,16 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
     exact_fields = {"name", "role", "service", "package", "environment", "digest", "immutableRef"}
     for image in images:
         require(isinstance(image, dict) and set(image) == exact_fields, "bad image entry schema")
+        require(all(isinstance(image[key], str) for key in exact_fields), "runtime image fields must be strings")
         role = image["role"]
         require(role in counts, f"unsupported runtime role: {role}")
-        require(SERVICE_RE.fullmatch(str(image["name"])) is not None, "bad image name")
-        require(SERVICE_RE.fullmatch(str(image["service"])) is not None, "bad service name")
-        require(ENV_RE.fullmatch(str(image["environment"])) is not None, "bad image environment binding")
-        require(DIGEST_RE.fullmatch(str(image["digest"])) is not None, "runtime image is not digest pinned")
+        require(SERVICE_RE.fullmatch(image["name"]) is not None, "bad image name")
+        require(SERVICE_RE.fullmatch(image["service"]) is not None, "bad service name")
+        require(ENV_RE.fullmatch(image["environment"]) is not None, "bad image environment binding")
+        require(PACKAGE_RE.fullmatch(image["package"]) is not None, "runtime image repository is not canonical/tagless")
+        require(DIGEST_RE.fullmatch(image["digest"]) is not None, "runtime image is not digest pinned")
         expected = f"{image['package']}@{image['digest']}"
         require(image["immutableRef"] == expected, "image binding/digest mismatch")
-        require(":latest" not in expected, "mutable latest image is forbidden")
         require(image["name"] not in seen_names, "duplicate image name")
         binding = (role, image["environment"])
         require(binding not in seen_bindings, "duplicate image binding")
@@ -206,6 +237,45 @@ def parse_images_env(path: Path) -> dict[str, str]:
     return bindings
 
 
+def _bundle_path_is_canonical(value: Any) -> bool:
+    if not isinstance(value, str) or not value or value == "." or value.startswith("/") or "\\" in value:
+        return False
+    if any(ord(char) < 0x20 for char in value):
+        return False
+    path = PurePosixPath(value)
+    return "." not in path.parts and ".." not in path.parts and path.as_posix() == value
+
+
+def _bundle_directories(paths: set[str]) -> set[str]:
+    return {
+        parent.as_posix()
+        for name in paths
+        for parent in PurePosixPath(name).parents
+        if parent.as_posix() != "."
+    }
+
+
+def _validate_installed_bundle_tree(root: Path, expected_paths: set[str]) -> None:
+    require(root.is_dir() and not root.is_symlink(), "installed bundle root missing or unsafe")
+    files: set[str] = set()
+    directories: set[str] = set()
+    try:
+        for path in root.rglob("*"):
+            relative = path.relative_to(root).as_posix()
+            info = os.lstat(path)
+            require(not stat.S_ISLNK(info.st_mode), "installed bundle contains symlink")
+            if stat.S_ISREG(info.st_mode):
+                files.add(relative)
+            elif stat.S_ISDIR(info.st_mode):
+                directories.add(relative)
+            else:
+                require(False, "installed bundle contains special file")
+    except OSError as exc:
+        raise InvariantError(f"cannot inspect installed bundle tree: {exc}") from exc
+    require(files == expected_paths, "installed bundle file tree mismatch")
+    require(directories == _bundle_directories(expected_paths), "installed bundle directory tree mismatch")
+
+
 def validate_bundle(release_dir: Path, manifest: dict[str, Any]) -> None:
     bundle_manifest = read_json(release_dir / "deployment-bundle.json")
     require(
@@ -213,14 +283,38 @@ def validate_bundle(release_dir: Path, manifest: dict[str, Any]) -> None:
         and set(bundle_manifest) == {"schemaVersion", "format", "digest", "sizeBytes", "files"},
         "bad deployment bundle manifest schema",
     )
-    require(bundle_manifest["schemaVersion"] == 1 and bundle_manifest["format"] == "tar", "bad deployment bundle manifest")
+    require(
+        type(bundle_manifest["schemaVersion"]) is int
+        and bundle_manifest["schemaVersion"] == 1
+        and bundle_manifest["format"] == "tar",
+        "bad deployment bundle manifest",
+    )
     files = bundle_manifest["files"]
     require(isinstance(files, list) and len(files) == manifest["deploymentBundle"]["fileCount"], "bundle file count mismatch")
+    frozen_legacy_bundle = (
+        manifest["releaseId"] == FROZEN_CANDIDATE_RELEASE_ID
+        and manifest["deploymentBundle"]["digest"] == FROZEN_CANDIDATE_BUNDLE_DIGEST
+    )
+    expected_fields = {"path", "digest", "sizeBytes"} if frozen_legacy_bundle else {"path", "digest", "sizeBytes", "mode"}
+    names: set[str] = set()
+    for expected in files:
+        require(isinstance(expected, dict) and set(expected) == expected_fields, "bad bundle file entry schema")
+        name = expected["path"]
+        require(_bundle_path_is_canonical(name), "unsafe bundle path")
+        require(name not in names and not any(name.startswith(old + "/") or old.startswith(name + "/") for old in names), "duplicate or overlapping bundle path")
+        require(isinstance(expected["digest"], str) and DIGEST_RE.fullmatch(expected["digest"]), "bad bundle file digest")
+        require(type(expected["sizeBytes"]) is int and expected["sizeBytes"] >= 0, "bad bundle file size")
+        mode = 0o644 if frozen_legacy_bundle else expected["mode"]
+        require(type(mode) is int and mode in {0o644, 0o755}, "bad bundle file mode")
+        names.add(name)
+
     tar_path = release_dir / "deployment-bundle.tar"
     try:
         tar_bytes = tar_path.read_bytes()
     except OSError as exc:
         raise InvariantError(f"missing deployment bundle: {exc}") from exc
+    require(type(bundle_manifest["sizeBytes"]) is int and bundle_manifest["sizeBytes"] > 0, "bad bundle size")
+    require(isinstance(bundle_manifest["digest"], str) and DIGEST_RE.fullmatch(bundle_manifest["digest"]), "bad bundle digest")
     require(len(tar_bytes) == bundle_manifest["sizeBytes"], "bundle size mismatch")
     require(sha256_bytes(tar_bytes) == bundle_manifest["digest"], "bundle SHA mismatch")
     expected_identity = {
@@ -230,26 +324,27 @@ def validate_bundle(release_dir: Path, manifest: dict[str, Any]) -> None:
         "fileCount": len(files),
     }
     require(manifest["deploymentBundle"] == expected_identity, "bundle identity differs from release")
-    names: set[str] = set()
+    _validate_installed_bundle_tree(release_dir / "bundle", names)
     try:
         with tarfile.open(tar_path, "r") as archive:
             members = archive.getmembers()
             require(len(members) == len(files), "bundle member count mismatch")
             for member, expected in zip(members, files):
-                name = expected.get("path") if isinstance(expected, dict) else None
-                require(isinstance(name, str) and name and not name.startswith("/") and ".." not in Path(name).parts, "unsafe bundle path")
-                require(name not in names, "duplicate bundle path")
+                name = expected["path"]
                 require(member.isfile() and member.name == name, "bundle member type/order/path mismatch")
-                require(stat.S_IMODE(member.mode) == expected.get("mode"), "bundle member mode mismatch")
+                mode = 0o644 if frozen_legacy_bundle else expected["mode"]
+                require(stat.S_IMODE(member.mode) == mode, "bundle member mode mismatch")
                 extracted = archive.extractfile(member)
                 require(extracted is not None, "cannot read bundle member")
                 content = extracted.read()
-                require(len(content) == expected.get("sizeBytes"), "internal bundle size mismatch")
-                require(sha256_bytes(content) == expected.get("digest"), "internal bundle file hash mismatch")
+                require(len(content) == expected["sizeBytes"], "internal bundle size mismatch")
+                require(sha256_bytes(content) == expected["digest"], "internal bundle file hash mismatch")
                 installed = release_dir / "bundle" / name
-                require(installed.is_file() and not installed.is_symlink(), "installed bundle member missing/unsafe")
+                info = os.lstat(installed)
+                require(stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode), "installed bundle member missing/unsafe")
                 require(installed.read_bytes() == content, "installed bundle member differs")
-                names.add(name)
+                expected_installed_mode = 0o555 if mode & 0o111 else 0o444
+                require(stat.S_IMODE(info.st_mode) == expected_installed_mode, "installed bundle member mode mismatch")
     except (OSError, tarfile.TarError) as exc:
         raise InvariantError(f"invalid deployment bundle tar: {exc}") from exc
 
@@ -325,7 +420,7 @@ def validate_compose_model(model: dict[str, Any], role: str, expected_images: di
 
 def validate_deployment_record(record: Any) -> dict[str, Any]:
     require(isinstance(record, dict) and set(record) == DEPLOYMENT_KEYS, "deployment record schema mismatch")
-    require(record["schemaVersion"] == 2, "unsupported deployment record schema")
+    require(type(record["schemaVersion"]) is int and record["schemaVersion"] == 2, "unsupported deployment record schema")
     require(re.fullmatch(r"^dep-[0-9a-f]{32}$", str(record["deploymentId"])) is not None, "bad deployment ID")
     require(record["environment"] == "staging", "deployment environment must be staging")
     require(RELEASE_RE.fullmatch(str(record["releaseId"])) is not None, "bad deployment release ID")

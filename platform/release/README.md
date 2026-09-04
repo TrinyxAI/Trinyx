@@ -20,9 +20,13 @@ The separate public staging Caddy container is classified as platform/edge state
 
 ## Deterministic deployment bundle
 
-Images alone are not sufficient for a reproducible Compose deployment. `deployment-bundle-files.json` lists the environment-independent Compose files and local runtime assets required by the hosted Cloud/Paid stacks. `build-deployment-bundle.py` packages them into a deterministic uncompressed tar archive with normalized ownership, modes and timestamps.
+Images alone are not sufficient for a reproducible Compose deployment. `deployment-bundle-files.json` lists the environment-independent Compose files and local runtime assets required by the hosted Cloud/Paid stacks. `build-deployment-bundle.py` packages them into a deterministic uncompressed tar archive with normalized ownership, explicit per-file modes and timestamps.
+
+The historical aeb2 baseline uses `historical-deployment-bundle-sources.json` to authenticate each bundle path's origin. Nine contracted paths come byte-for-byte from the exact historical tree. The sole trusted-builder overlay is `docker/docker-compose.paid.runtime.yml`, which postdates aeb2 and is a fixed trusted service-and-image overlay: it binds the exact canonical immutable images for all eight Paid services. The `paid-edge` service definition itself remains approved environment-specific deployment configuration; no other current release content is imported. Preparation independently verifies the historical Git HEAD and clean status, rejects symlinked repository roots or path traversal, and rejects an overlay that shadows historical content, an unapproved overlay, a missing path or incomplete coverage of the normal bundle contract. No other current-tree deployment content may replace historical source data.
 
 The bundle SHA-256 is part of `releaseId`. Changing a Compose file, Keycloak realm, SearXNG settings, catalog seed, Caddyfile or other contracted deployment asset therefore creates a different release even when every container digest is unchanged.
+
+The deployment-bundle manifest intentionally remains `schemaVersion: 1` while modern file entries carry the authenticated `mode` field. This is a compatibility boundary, not an unversioned relaxation: every modern entry must contain exactly `path`, `digest`, `sizeBytes` and `mode`; only the exact frozen historical release is allowed its legacy mode-less shape. A schema-number bump would change the release/registry contract and requires a coordinated, separately reviewed control-plane migration, so no implicit v2 is introduced here.
 
 The bundle contains no environment inventory or runtime secret material. Environment overrides, private addresses, TLS/PKI paths and secret namespaces remain deployment state.
 

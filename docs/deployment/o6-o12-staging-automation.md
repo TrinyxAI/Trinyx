@@ -266,9 +266,39 @@ backend `sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e
 and frontend `sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e`.
 The builder combines those inputs with the reviewed static
 third-party inventory. The trusted current packaging tools build the bundle
-from the exact historical source tree as data and `release.py` computes the
-content-derived release ID. The four canonical files receive GitHub build
-provenance attestations.
+from explicitly authenticated source origins and `release.py` computes the
+content-derived release ID. Nine contracted paths come byte-for-byte from the
+exact aeb2 tree. The exact tree predates
+`docker/docker-compose.paid.runtime.yml`, while the current Paid deployment
+plan requires that fixed trusted service-and-image overlay to bind all eight
+services to the canonical immutable image inventory. The `paid-edge` service
+definition remains approved environment configuration; the overlay supplies its
+immutable image binding and no other current release content. A closed source contract therefore admits
+that one file only from the exact trusted builder checkout, independently
+rechecks historical Git HEAD/clean status before and after byte-safe reads,
+binds the trusted checkout to the exact `job.workflow_sha` with no tracked
+drift, rejects root or descendant symlinks, historical shadowing, unapproved
+overlays and incomplete bundle coverage, and never substitutes any other
+current application/deployment content. The one environment-specific input used
+only for the read-only Paid Compose render is separately allowlisted as
+`platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml`;
+it is required to be a regular non-symlinked file in that same trusted checkout,
+then copied once to a fresh read-only snapshot. The logged SHA-256 identifies the
+exact snapshot consumed by `docker compose config`; the mutable checkout path is
+never passed to Compose after verification. The snapshot is not copied into the
+baseline bundle and never claims historical aeb2 provenance. Modern bundle entries include
+their normalized mode. The four canonical files receive
+GitHub build provenance attestations. Do not register or install a baseline
+built with this modern bundle schema while the active C3/W7 control plane is
+still installed: C3's installer accepts only the old three-field bundle entry
+schema. A later reviewed control-plane anchor must authorize this builder and
+consume the mode-bearing schema before the separately reviewed W8 activation.
+The bundle manifest deliberately keeps `schemaVersion: 1` for this compatibility
+release: modern entries are nevertheless closed to exactly `path`, `digest`,
+`sizeBytes` and `mode`, while only the exact frozen historical identity may
+use the legacy mode-less entry shape. A numeric schema migration would alter
+the release/registry identity contract and must be designed and reviewed as a
+separate control-plane change; it is not inferred from the presence of `mode`.
 Both historical runs must also report branch
 `codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
 before the builder may emit `release.sourceRef` as
@@ -283,7 +313,11 @@ binding one-to-one to the current canonical inventory, and preserves the
 original digest and immutable reference. The downloaded ZIP is checked against
 GitHub artifact digest
 `sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0`
-before extraction.
+before extraction. Extraction is then performed by an exact-member
+safe extractor rather than `unzip`: it permits only the contracted
+`cloud-image-manifest.json` regular file in a fresh non-symlinked destination,
+and rejects duplicate, traversal, absolute, backslash, encrypted, special-file,
+ancestor-collision and unexpected-member forms before writing any bytes.
 
 This is not baseline observation and it never imports identities from EC2.
 Live runtime evidence cannot replace missing historical publication provenance.

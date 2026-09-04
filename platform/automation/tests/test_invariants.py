@@ -65,6 +65,44 @@ class InvariantTests(unittest.TestCase):
         with self.assertRaisesRegex(InvariantError, "internal bundle file hash"):
             validate_release_directory(release, "paid")
 
+    def test_rejects_boolean_schema_and_extra_immutable_tree_entries(self) -> None:
+        release = self.base / "releases" / self.releases[0]
+        manifest_path = release / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["schemaVersion"] = True
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(InvariantError, "unsupported release schema"):
+            validate_release_directory(release, "paid")
+
+        manifest["schemaVersion"] = 1
+        manifest["createdAt"] = "2026-99-01T00:00:00Z"
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(InvariantError, "createdAt is invalid"):
+            validate_release_directory(release, "paid")
+        manifest["createdAt"] = "2026-09-01T00:00:00Z"
+        write_json(manifest_path, manifest)
+        bundle_manifest_path = release / "deployment-bundle.json"
+        bundle_manifest = json.loads(bundle_manifest_path.read_text())
+        bundle_manifest["schemaVersion"] = True
+        write_json(bundle_manifest_path, bundle_manifest)
+        with self.assertRaisesRegex(InvariantError, "bad deployment bundle manifest"):
+            validate_release_directory(release, "paid")
+
+        bundle_manifest["schemaVersion"] = 1
+        original_path = bundle_manifest["files"][0]["path"]
+        bundle_manifest["files"][0]["path"] = "."
+        write_json(bundle_manifest_path, bundle_manifest)
+        with self.assertRaisesRegex(InvariantError, "unsafe bundle path"):
+            validate_release_directory(release, "paid")
+        bundle_manifest["files"][0]["path"] = original_path
+        write_json(bundle_manifest_path, bundle_manifest)
+        bundle_root = release / "bundle"
+        os.chmod(bundle_root, 0o755)
+        (bundle_root / "unexpected-empty-directory").mkdir()
+        os.chmod(bundle_root, 0o555)
+        with self.assertRaisesRegex(InvariantError, "directory tree mismatch"):
+            validate_release_directory(release, "paid")
+
     def test_no_checkout_dependency_and_no_mutable_image(self) -> None:
         model = deepcopy(self.models[self.releases[0]])
         expected = {name: service["image"] for name, service in model["services"].items() if service.get("image")}

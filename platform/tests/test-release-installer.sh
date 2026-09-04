@@ -39,6 +39,42 @@ EXPECTED_RELEASE="$RID"
 BUNDLE_DIGEST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["digest"])' "$BUNDLE_MANIFEST")
 BUNDLE_FILES=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["files"]))' "$BUNDLE_MANIFEST")
 
+# Modern bundles must declare the exact normalized mode for every file.
+python3 - "$BUNDLE_MANIFEST" "$TMP/missing-mode.json" <<'PY'
+import json, sys
+source, target = sys.argv[1:]
+document = json.load(open(source, encoding="utf-8"))
+for item in document["files"]:
+    item.pop("mode")
+with open(target, "w", encoding="utf-8") as output:
+    json.dump(document, output)
+PY
+if python3 "$INSTALLER" \
+  --role paid --environment staging \
+  --manifest "$MANIFEST" --bundle-manifest "$TMP/missing-mode.json" --bundle "$BUNDLE" \
+  --contract "$CONTRACT" --release-tool "$TOOL" \
+  --root "$TMP/missing-mode-root" --apply >/dev/null 2>&1; then
+  echo ERROR_MODERN_BUNDLE_WITHOUT_MODES_ACCEPTED >&2
+  exit 1
+fi
+
+python3 - "$BUNDLE_MANIFEST" "$TMP/wrong-mode.json" <<'PY'
+import json, sys
+source, target = sys.argv[1:]
+document = json.load(open(source, encoding="utf-8"))
+document["files"][0]["mode"] = 0o755 if document["files"][0]["mode"] == 0o644 else 0o644
+with open(target, "w", encoding="utf-8") as output:
+    json.dump(document, output)
+PY
+if python3 "$INSTALLER" \
+  --role paid --environment staging \
+  --manifest "$MANIFEST" --bundle-manifest "$TMP/wrong-mode.json" --bundle "$BUNDLE" \
+  --contract "$CONTRACT" --release-tool "$TOOL" \
+  --root "$TMP/wrong-mode-root" --apply >/dev/null 2>&1; then
+  echo ERROR_BUNDLE_MODE_MISMATCH_ACCEPTED >&2
+  exit 1
+fi
+
 do_install() {
   local role="$1" apply="${2:-no}"
   local args=(
@@ -82,6 +118,16 @@ for ROLE in cloud paid; do
   POST=$(do_install "$ROLE")
   printf '%s\n' "$POST" | grep -Fq "RELEASE_INSTALL_PLAN_OK role=$ROLE environment=staging release_id=$EXPECTED_RELEASE changes=0"
 done
+
+# An installed file's immutable mode must also match the authenticated bundle mode.
+TARGET="$FAKE/etc/trinyx/staging/paid/releases/$EXPECTED_RELEASE"
+MODE_DRIFT="$TARGET/bundle/docker-compose.yml"
+chmod 555 "$MODE_DRIFT"
+if do_install paid >/dev/null 2>&1; then
+  echo ERROR_IMMUTABLE_RELEASE_BUNDLE_MODE_DRIFT_ACCEPTED >&2
+  exit 1
+fi
+chmod 444 "$MODE_DRIFT"
 
 # Any drift inside the immutable extracted bundle must be rejected.
 TARGET="$FAKE/etc/trinyx/staging/cloud/releases/$EXPECTED_RELEASE"

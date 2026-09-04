@@ -6,14 +6,19 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 RELEASE_RE = re.compile(r"^rel-v1-[0-9a-f]{32}$")
+RFC3339_UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 ROLES = {"cloud", "paid", "shared"}
 IMAGE_FIELDS = (
     "name",
@@ -25,16 +30,26 @@ IMAGE_FIELDS = (
     "immutableRef",
 )
 BUNDLE_FIELDS = ("format", "digest", "sizeBytes", "fileCount")
+BUNDLE_FILE_FIELDS = {"path", "digest", "sizeBytes", "mode"}
 
 
 def fail(message: str) -> None:
     raise SystemExit(f"ERROR: {message}")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         fail(f"cannot read JSON {path}: {exc}")
 
 
@@ -42,22 +57,22 @@ def canonical_json(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def normalize_image(item: dict[str, Any]) -> dict[str, str]:
+def normalize_image(item: Any) -> dict[str, str]:
     required = set(IMAGE_FIELDS)
-    if set(item) != required:
+    if not isinstance(item, dict) or set(item) != required:
         fail("image entry keys must be exactly: " + ",".join(sorted(required)))
+    if any(not isinstance(item[key], str) for key in IMAGE_FIELDS):
+        fail("image entry values must be strings")
 
-    result = {key: str(item[key]) for key in IMAGE_FIELDS}
+    result = {key: item[key] for key in IMAGE_FIELDS}
     if not NAME_RE.fullmatch(result["name"]):
         fail(f"invalid image name: {result['name']}")
     if result["role"] not in ROLES:
         fail(f"invalid image role for {result['name']}")
     if not NAME_RE.fullmatch(result["service"]):
         fail(f"invalid service for {result['name']}")
-    if not result["package"] or "@" in result["package"] or any(ch.isspace() for ch in result["package"]):
-        fail(f"invalid package for {result['name']}")
-    if ":latest" in result["package"] or result["package"].endswith(":latest"):
-        fail(f"mutable latest package is forbidden for {result['name']}")
+    if not PACKAGE_RE.fullmatch(result["package"]):
+        fail(f"image repository must be canonical and tagless for {result['name']}")
     if not ENV_RE.fullmatch(result["environment"]):
         fail(f"invalid environment variable for {result['name']}")
     if not DIGEST_RE.fullmatch(result["digest"]):
@@ -76,7 +91,7 @@ def normalize_images(document: Any) -> list[dict[str, str]]:
     else:
         fail("image input must be an array or an object containing images[]")
 
-    images = [normalize_image(dict(item)) for item in raw_images]
+    images = [normalize_image(item) for item in raw_images]
     if not images:
         fail("release must contain at least one image")
 
@@ -99,11 +114,46 @@ def normalize_bundle(document: Any) -> dict[str, Any]:
         required = {"schemaVersion", "format", "digest", "sizeBytes", "files"}
         if set(document) != required:
             fail("deployment bundle manifest keys do not match schema v1")
-        if document["schemaVersion"] != 1:
+        if type(document["schemaVersion"]) is not int or document["schemaVersion"] != 1:
             fail("unsupported deployment bundle schemaVersion")
         files = document["files"]
         if not isinstance(files, list) or not files:
             fail("deployment bundle must contain files")
+        paths: list[str] = []
+        for item in files:
+            if not isinstance(item, dict) or set(item) != BUNDLE_FILE_FIELDS:
+                fail("deployment bundle file entry schema mismatch")
+            file_path = item["path"]
+            if (
+                not isinstance(file_path, str)
+                or not file_path
+                or file_path == "."
+                or file_path.startswith("/")
+                or "\\" in file_path
+                or any(ord(char) < 0x20 for char in file_path)
+            ):
+                fail("invalid deployment bundle file path")
+            normalized = PurePosixPath(file_path)
+            if "." in normalized.parts or ".." in normalized.parts or normalized.as_posix() != file_path:
+                fail("invalid deployment bundle file path")
+            if not isinstance(item["digest"], str) or not DIGEST_RE.fullmatch(item["digest"]):
+                fail("invalid deployment bundle file digest")
+            if (
+                type(item["sizeBytes"]) is not int
+                or item["sizeBytes"] < 0
+                or type(item["mode"]) is not int
+                or item["mode"] not in {0o644, 0o755}
+            ):
+                fail("invalid deployment bundle file metadata")
+            paths.append(file_path)
+        if len(paths) != len(set(paths)) or paths != sorted(paths):
+            fail("deployment bundle file paths must be unique and sorted")
+        if any(
+            left.startswith(right + "/") or right.startswith(left + "/")
+            for index, left in enumerate(paths)
+            for right in paths[index + 1:]
+        ):
+            fail("deployment bundle file paths may not overlap")
         file_count = len(files)
     else:
         required = set(BUNDLE_FIELDS)
@@ -162,7 +212,7 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
     }
     if set(manifest) != required:
         fail("release manifest keys do not match schema v1")
-    if manifest["schemaVersion"] != 1:
+    if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1:
         fail("unsupported schemaVersion")
 
     for key in ("sourceCommit", "platformCommit"):
@@ -174,12 +224,12 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         fail("invalid sourceRef")
 
     created = manifest["createdAt"]
-    if not isinstance(created, str):
-        fail("invalid createdAt")
+    if not isinstance(created, str) or not RFC3339_UTC_RE.fullmatch(created):
+        fail("createdAt must be UTC RFC3339 seconds")
     try:
         datetime.fromisoformat(created.replace("Z", "+00:00"))
     except ValueError:
-        fail("createdAt must be RFC3339/ISO-8601")
+        fail("createdAt must be UTC RFC3339 seconds")
 
     manifest = dict(manifest)
     manifest["deploymentBundle"] = normalize_bundle(manifest["deploymentBundle"])

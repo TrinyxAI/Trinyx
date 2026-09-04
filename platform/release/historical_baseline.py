@@ -36,6 +36,8 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ANSI_SGR_RE = re.compile(r"\x1b\[[0-?]*[ -/]*m")
 UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 UTC_RFC3339_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+PACKAGE_RE = re.compile(r"^ghcr\.io/trinyxai/[a-z0-9][a-z0-9._/-]*$")
 
 
 def require(condition: bool, message: str) -> None:
@@ -43,10 +45,19 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def load(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"cannot read JSON: {path}") from exc
 
 
@@ -54,7 +65,7 @@ def validate_run(run: Any, *, run_id: int, workflow: str, cloud_reusable: bool) 
     require(isinstance(run, dict), "historical run is not an object")
     repository = run.get("repository")
     head_repository = run.get("head_repository")
-    require(run.get("id") == run_id, "historical run ID mismatch")
+    require(type(run.get("id")) is int and run["id"] == run_id, "historical run ID mismatch")
     require(run.get("head_sha") == SOURCE_COMMIT, "historical run source mismatch")
     require(run.get("head_branch") == SOURCE_BRANCH, "historical run branch mismatch")
     require(run.get("event") == HISTORICAL_EVENT, "historical run event mismatch")
@@ -76,23 +87,27 @@ def validate_run(run: Any, *, run_id: int, workflow: str, cloud_reusable: bool) 
     require(run.get("path") == workflow, "historical workflow path mismatch")
     require(
         isinstance(repository, dict)
+        and type(repository.get("id")) is int
         and repository.get("id") == REPOSITORY_ID
         and repository.get("full_name") == REPOSITORY,
         "historical run repository mismatch",
     )
     require(
         isinstance(repository.get("owner"), dict)
+        and type(repository["owner"].get("id")) is int
         and repository["owner"].get("id") == OWNER_ID,
         "historical run repository owner mismatch",
     )
     require(
         isinstance(head_repository, dict)
+        and type(head_repository.get("id")) is int
         and head_repository.get("id") == REPOSITORY_ID
         and head_repository.get("full_name") == REPOSITORY,
         "historical run head repository mismatch",
     )
     require(
         isinstance(head_repository.get("owner"), dict)
+        and type(head_repository["owner"].get("id")) is int
         and head_repository["owner"].get("id") == OWNER_ID,
         "historical run head repository owner mismatch",
     )
@@ -114,15 +129,25 @@ def validate_run(run: Any, *, run_id: int, workflow: str, cloud_reusable: bool) 
 def validate_artifact(artifact: Any) -> None:
     require(isinstance(artifact, dict), "historical artifact is not an object")
     workflow_run = artifact.get("workflow_run")
-    require(artifact.get("id") == CLOUD_ARTIFACT_ID, "historical artifact ID mismatch")
+    require(
+        type(artifact.get("id")) is int and artifact["id"] == CLOUD_ARTIFACT_ID,
+        "historical artifact ID mismatch",
+    )
     require(artifact.get("name") == CLOUD_ARTIFACT_NAME, "historical artifact name mismatch")
-    require(artifact.get("expired") is False, "historical artifact is expired")
-    require(artifact.get("digest") == CLOUD_ARTIFACT_DIGEST,
-            "historical artifact digest mismatch")
+    require(type(artifact.get("expired")) is bool and artifact["expired"] is False,
+            "historical artifact is expired")
+    require(
+        isinstance(artifact.get("digest"), str)
+        and artifact["digest"] == CLOUD_ARTIFACT_DIGEST,
+        "historical artifact digest mismatch",
+    )
     require(
         isinstance(workflow_run, dict)
+        and type(workflow_run.get("id")) is int
         and workflow_run.get("id") == BACKEND_RUN_ID
+        and type(workflow_run.get("repository_id")) is int
         and workflow_run.get("repository_id") == REPOSITORY_ID
+        and type(workflow_run.get("head_repository_id")) is int
         and workflow_run.get("head_repository_id") == REPOSITORY_ID
         and workflow_run.get("head_sha") == SOURCE_COMMIT,
         "historical artifact/run binding mismatch",
@@ -131,8 +156,10 @@ def validate_artifact(artifact: Any) -> None:
 
 def validate_job(job: Any, *, job_id: int, run_id: int, name: str) -> None:
     require(isinstance(job, dict), "historical publication job is not an object")
-    require(job.get("id") == job_id, "historical publication job ID mismatch")
-    require(job.get("run_id") == run_id, "historical publication job/run mismatch")
+    require(type(job.get("id")) is int and job["id"] == job_id,
+            "historical publication job ID mismatch")
+    require(type(job.get("run_id")) is int and job["run_id"] == run_id,
+            "historical publication job/run mismatch")
     require(job.get("head_sha") == SOURCE_COMMIT,
             "historical publication job source mismatch")
     require(job.get("conclusion") == "success",
@@ -190,6 +217,18 @@ def historical_paid_digest(log_text: str, *, package: str) -> str:
     return expected_digest
 
 
+def validate_utc_timestamp(value: Any, label: str) -> str:
+    require(
+        isinstance(value, str) and UTC_RFC3339_RE.fullmatch(value) is not None,
+        f"{label} is not strict UTC RFC3339",
+    )
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ValueError(f"{label} is invalid") from exc
+    return value
+
+
 def canonical_cloud_manifest(
     document: Any,
     inventory: Any,
@@ -200,15 +239,31 @@ def canonical_cloud_manifest(
         set(document) == {"schemaVersion", "commit", "generatedAt", "images"},
         "Cloud manifest schema mismatch",
     )
-    require(document.get("schemaVersion") == 1, "Cloud manifest schema mismatch")
-    require(document.get("commit") == SOURCE_COMMIT, "Cloud manifest source mismatch")
+    require(
+        type(document.get("schemaVersion")) is int and document["schemaVersion"] == 1,
+        "Cloud manifest schema mismatch",
+    )
+    require(
+        isinstance(document.get("commit"), str) and document["commit"] == SOURCE_COMMIT,
+        "Cloud manifest source mismatch",
+    )
+    generated_at = validate_utc_timestamp(document.get("generatedAt"), "Cloud manifest generatedAt")
     images = document.get("images")
     require(isinstance(images, list) and len(images) == 14, "Cloud manifest cardinality mismatch")
-    require(isinstance(inventory, dict) and isinstance(inventory.get("images"), list),
-            "runtime inventory is invalid")
+
+    require(
+        isinstance(inventory, dict)
+        and set(inventory) == {"schemaVersion", "images"}
+        and type(inventory.get("schemaVersion")) is int
+        and inventory["schemaVersion"] == 1
+        and isinstance(inventory.get("images"), list),
+        "runtime inventory is invalid",
+    )
     require(
         isinstance(historical_inventory, dict)
-        and historical_inventory.get("schemaVersion") == 1
+        and set(historical_inventory) == {"schemaVersion", "images"}
+        and type(historical_inventory.get("schemaVersion")) is int
+        and historical_inventory["schemaVersion"] == 1
         and isinstance(historical_inventory.get("images"), list)
         and len(historical_inventory["images"]) == 14,
         "historical Cloud inventory is invalid",
@@ -223,10 +278,17 @@ def canonical_cloud_manifest(
         }
     ]
     require(len(current) == 14, "canonical Cloud inventory cardinality mismatch")
-    canonical_by_binding: dict[tuple[str, str], dict[str, Any]] = {}
+    canonical_by_binding: dict[tuple[str, str], dict[str, str]] = {}
     for item in current:
         require(
-            set(item) == {"name", "role", "service", "environment"},
+            set(item) == {"name", "role", "service", "environment"}
+            and all(isinstance(item[key], str) for key in item),
+            "canonical Cloud inventory entry is invalid",
+        )
+        require(
+            NAME_RE.fullmatch(item["name"]) is not None
+            and NAME_RE.fullmatch(item["service"]) is not None
+            and re.fullmatch(r"[A-Z][A-Z0-9_]*", item["environment"]) is not None,
             "canonical Cloud inventory entry is invalid",
         )
         binding = (item["service"], item["environment"])
@@ -237,16 +299,19 @@ def canonical_cloud_manifest(
     for raw in historical_inventory["images"]:
         required = {"name", "service", "package", "environment"}
         require(
-            isinstance(raw, dict) and required.issubset(raw),
+            isinstance(raw, dict)
+            and set(raw) == required
+            and all(isinstance(raw[key], str) for key in required),
             "historical Cloud inventory entry is invalid",
         )
-        item = {key: str(raw[key]) for key in required}
+        item = {key: raw[key] for key in required}
         require(item["name"] not in historical_by_name, "duplicate historical Cloud name")
         require(
-            item["package"].startswith("ghcr.io/trinyxai/")
-            and "@" not in item["package"]
-            and not any(ch.isspace() for ch in item["package"]),
-            "historical Cloud package is invalid",
+            NAME_RE.fullmatch(item["name"]) is not None
+            and NAME_RE.fullmatch(item["service"]) is not None
+            and re.fullmatch(r"[A-Z][A-Z0-9_]*", item["environment"]) is not None
+            and PACKAGE_RE.fullmatch(item["package"]) is not None,
+            "historical Cloud inventory entry is invalid",
         )
         historical_by_name[item["name"]] = item
     require(len(historical_by_name) == 14, "historical Cloud name cardinality mismatch")
@@ -256,18 +321,22 @@ def canonical_cloud_manifest(
     seen_historical: set[str] = set()
     for raw in images:
         required = {"name", "service", "package", "environment", "digest", "immutableRef"}
-        require(isinstance(raw, dict) and set(raw) == required,
-                "historical Cloud manifest entry is invalid")
-        legacy_name = str(raw["name"])
+        require(
+            isinstance(raw, dict)
+            and set(raw) == required
+            and all(isinstance(raw[key], str) for key in required),
+            "historical Cloud manifest entry is invalid",
+        )
+        legacy_name = raw["name"]
         require(legacy_name not in seen_historical, "duplicate historical Cloud manifest name")
         seen_historical.add(legacy_name)
         source_binding = historical_by_name.get(legacy_name)
         require(source_binding is not None, "unexpected historical Cloud manifest name")
         for key in ("service", "environment", "package"):
-            require(str(raw[key]) == source_binding[key],
+            require(raw[key] == source_binding[key],
                     f"historical Cloud manifest binding mismatch:{legacy_name}:{key}")
-        digest = str(raw["digest"])
-        immutable_ref = str(raw["immutableRef"])
+        digest = raw["digest"]
+        immutable_ref = raw["immutableRef"]
         require(DIGEST_RE.fullmatch(digest) is not None,
                 f"historical Cloud digest mismatch:{legacy_name}")
         require(immutable_ref == source_binding["package"] + "@" + digest,
@@ -276,7 +345,7 @@ def canonical_cloud_manifest(
             (source_binding["service"], source_binding["environment"])
         )
         require(canonical is not None, f"missing canonical Cloud binding:{legacy_name}")
-        canonical_name = str(canonical["name"])
+        canonical_name = canonical["name"]
         require(canonical_name not in used_canonical, "duplicate canonical Cloud mapping")
         used_canonical.add(canonical_name)
         canonical_images.append({
@@ -290,12 +359,12 @@ def canonical_cloud_manifest(
 
     require(set(seen_historical) == set(historical_by_name),
             "missing historical Cloud manifest image")
-    require(set(used_canonical) == {str(item["name"]) for item in current},
+    require(set(used_canonical) == set(canonical_by_binding[name]["name"] for name in canonical_by_binding),
             "missing canonical Cloud mapping")
     return {
         "schemaVersion": 1,
         "commit": SOURCE_COMMIT,
-        "generatedAt": document["generatedAt"],
+        "generatedAt": generated_at,
         "images": sorted(canonical_images, key=lambda item: item["name"]),
     }
 
@@ -309,11 +378,21 @@ def paid_manifest(document: Any, *, historical_digest: str, name: str, service: 
         "Paid image inspection schema mismatch",
     )
     require(type(require_oci_labels) is bool, "Paid OCI label policy is invalid")
-    require(document["package"] == package, "Paid image package mismatch")
-    require(document["tag"] == f"{package}:{SOURCE_COMMIT}", "Paid immutable tag mismatch")
-    digest = str(document["digest"])
-    require(DIGEST_RE.fullmatch(digest) is not None, "Paid image digest mismatch")
-    require(DIGEST_RE.fullmatch(historical_digest) is not None,
+    require(
+        isinstance(document["package"], str)
+        and document["package"] == package
+        and PACKAGE_RE.fullmatch(document["package"]) is not None,
+        "Paid image package mismatch",
+    )
+    require(
+        isinstance(document["tag"], str)
+        and document["tag"] == f"{package}:{SOURCE_COMMIT}",
+        "Paid immutable tag mismatch",
+    )
+    digest = document["digest"]
+    require(isinstance(digest, str) and DIGEST_RE.fullmatch(digest) is not None,
+            "Paid image digest mismatch")
+    require(isinstance(historical_digest, str) and DIGEST_RE.fullmatch(historical_digest) is not None,
             "historical Paid image digest is invalid")
     require(digest == historical_digest,
             "current Paid tag moved from authenticated historical digest")
@@ -321,12 +400,18 @@ def paid_manifest(document: Any, *, historical_digest: str, name: str, service: 
     require(
         isinstance(platform, dict)
         and set(platform) == {"os", "architecture"}
+        and isinstance(platform["os"], str)
+        and isinstance(platform["architecture"], str)
         and platform["os"] == "linux"
         and platform["architecture"] == "amd64",
         "Paid image linux/amd64 platform mismatch",
     )
     labels = document["labels"]
-    require(isinstance(labels, dict), "Paid image OCI labels are not an object")
+    require(
+        isinstance(labels, dict)
+        and all(isinstance(key, str) and isinstance(value, str) for key, value in labels.items()),
+        "Paid image OCI labels are not an object",
+    )
     if require_oci_labels:
         require(
             labels.get("org.opencontainers.image.source") == f"https://github.com/{REPOSITORY}"

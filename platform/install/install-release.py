@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -16,16 +17,27 @@ from typing import Any
 ENVIRONMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ROLES = {"cloud", "paid"}
+FROZEN_CANDIDATE_RELEASE_ID = "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4"
+FROZEN_CANDIDATE_BUNDLE_DIGEST = "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892"
 
 
 def fail(message: str) -> None:
     raise SystemExit(f"ERROR: {message}")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         fail(f"cannot read JSON {path}: {exc}")
 
 
@@ -40,15 +52,41 @@ def load_release_module(path: Path):
 
 def validate_complete_runtime(contract_path: Path, manifest: dict[str, Any]) -> None:
     contract = load_json(contract_path)
-    if contract.get("schemaVersion") != 1 or not isinstance(contract.get("images"), list):
+    entry_keys = {"name", "role", "service", "environment"}
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schemaVersion", "images"}
+        or type(contract.get("schemaVersion")) is not int
+        or contract["schemaVersion"] != 1
+        or not isinstance(contract.get("images"), list)
+        or len(contract["images"]) != 28
+    ):
         fail("invalid runtime inventory contract")
+
     expected: dict[str, tuple[str, str, str]] = {}
+    expected_bindings: set[tuple[str, str]] = set()
+    expected_counts = {"cloud": 0, "paid": 0}
     for item in contract["images"]:
-        name = str(item.get("name", ""))
-        binding = (str(item.get("role", "")), str(item.get("service", "")), str(item.get("environment", "")))
-        if not name or name in expected:
-            fail("duplicate/empty runtime contract image name")
-        expected[name] = binding
+        if (
+            not isinstance(item, dict)
+            or set(item) != entry_keys
+            or any(not isinstance(item[key], str) for key in entry_keys)
+            or item["role"] not in expected_counts
+            or not item["name"]
+            or not item["service"]
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]*", item["environment"])
+        ):
+            fail("invalid runtime inventory contract image entry")
+        name = item["name"]
+        binding = (item["role"], item["environment"])
+        if name in expected or binding in expected_bindings:
+            fail("duplicate runtime inventory contract binding")
+        expected[name] = (item["role"], item["service"], item["environment"])
+        expected_bindings.add(binding)
+        expected_counts[item["role"]] += 1
+    if expected_counts != {"cloud": 20, "paid": 8}:
+        fail("runtime inventory contract role cardinality mismatch")
+
     actual: dict[str, tuple[str, str, str]] = {}
     for item in manifest["images"]:
         name = item["name"]
@@ -118,10 +156,21 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     required = {"schemaVersion", "format", "digest", "sizeBytes", "files"}
     if not isinstance(bundle_manifest, dict) or set(bundle_manifest) != required:
         fail("deployment bundle manifest keys do not match schema v1")
-    if bundle_manifest["schemaVersion"] != 1 or bundle_manifest["format"] != "tar":
+    if (
+        type(bundle_manifest.get("schemaVersion")) is not int
+        or bundle_manifest["schemaVersion"] != 1
+        or bundle_manifest["format"] != "tar"
+    ):
         fail("invalid deployment bundle manifest")
     if not isinstance(bundle_manifest["files"], list) or not bundle_manifest["files"]:
         fail("deployment bundle manifest contains no files")
+    if (
+        not isinstance(bundle_manifest["digest"], str)
+        or not DIGEST_RE.fullmatch(bundle_manifest["digest"])
+        or type(bundle_manifest["sizeBytes"]) is not int
+        or bundle_manifest["sizeBytes"] <= 0
+    ):
+        fail("invalid deployment bundle manifest identity")
 
     release_bundle = manifest["deploymentBundle"]
     expected_release_bundle = {
@@ -132,6 +181,10 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     }
     if release_bundle != expected_release_bundle:
         fail("deployment bundle manifest does not match release identity")
+    frozen_legacy_bundle = (
+        manifest["releaseId"] == FROZEN_CANDIDATE_RELEASE_ID
+        and release_bundle["digest"] == FROZEN_CANDIDATE_BUNDLE_DIGEST
+    )
 
     try:
         bundle_bytes = bundle_path.read_bytes()
@@ -143,22 +196,33 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
         fail("deployment bundle digest mismatch")
 
     seen: set[str] = set()
+    expected_file_keys = (
+        {"path", "digest", "sizeBytes"}
+        if frozen_legacy_bundle
+        else {"path", "digest", "sizeBytes", "mode"}
+    )
     for item in bundle_manifest["files"]:
-        if not isinstance(item, dict) or set(item) != {"path", "digest", "sizeBytes"}:
+        if not isinstance(item, dict) or set(item) != expected_file_keys:
             fail("invalid deployment bundle file entry")
         name = item["path"]
         if not isinstance(name, str) or not name or name.startswith("/"):
             fail("unsafe deployment bundle path")
-        parts = PurePosixPath(name).parts
-        if "." in parts or ".." in parts:
+        if any(ord(char) < 0x20 or char == "\\" for char in name):
             fail(f"unsafe deployment bundle path: {name}")
-        if name in seen:
-            fail(f"duplicate deployment bundle path: {name}")
+        parts = PurePosixPath(name).parts
+        normalized = PurePosixPath(name).as_posix()
+        if "." in parts or ".." in parts or normalized in {"", "."} or normalized != name:
+            fail(f"unsafe/non-canonical deployment bundle path: {name}")
+        if name in seen or any(name.startswith(existing + "/") or existing.startswith(name + "/") for existing in seen):
+            fail(f"duplicate or overlapping deployment bundle path: {name}")
         seen.add(name)
         if not isinstance(item["digest"], str) or not DIGEST_RE.fullmatch(item["digest"]):
             fail(f"invalid deployment bundle file digest: {name}")
         if not isinstance(item["sizeBytes"], int) or isinstance(item["sizeBytes"], bool) or item["sizeBytes"] < 0:
             fail(f"invalid deployment bundle file size: {name}")
+        expected_mode = 0o644 if frozen_legacy_bundle else item["mode"]
+        if type(expected_mode) is not int or expected_mode not in {0o644, 0o755}:
+            fail(f"invalid deployment bundle file mode: {name}")
 
     try:
         with tarfile.open(bundle_path, "r") as tar:
@@ -170,7 +234,8 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
                     fail(f"deployment bundle tar contains non-file member: {member.name}")
                 if member.name != expected["path"]:
                     fail(f"deployment bundle tar order/path mismatch: {member.name}")
-                if member.mode not in {0o644, 0o755}:
+                expected_mode = 0o644 if frozen_legacy_bundle else expected["mode"]
+                if member.mode != expected_mode:
                     fail(f"deployment bundle tar mode mismatch: {member.name}")
                 source = tar.extractfile(member)
                 if source is None:
@@ -186,28 +251,62 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     return bundle_manifest, bundle_bytes
 
 
+def expected_bundle_directories(paths: set[str]) -> set[str]:
+    return {
+        parent.as_posix()
+        for name in paths
+        for parent in PurePosixPath(name).parents
+        if parent.as_posix() != "."
+    }
+
+
+def inspect_bundle_tree(bundle_dir: Path) -> tuple[set[str], set[str]] | None:
+    if bundle_dir.is_symlink() or not bundle_dir.is_dir():
+        return None
+    files: set[str] = set()
+    directories: set[str] = set()
+    try:
+        for path in bundle_dir.rglob("*"):
+            relative = path.relative_to(bundle_dir).as_posix()
+            info = os.lstat(path)
+            if stat.S_ISLNK(info.st_mode):
+                return None
+            if stat.S_ISREG(info.st_mode):
+                files.add(relative)
+            elif stat.S_ISDIR(info.st_mode):
+                directories.add(relative)
+            else:
+                return None
+    except OSError:
+        return None
+    return files, directories
+
+
 def verify_bundle_tree(bundle_dir: Path, bundle_manifest: dict[str, Any]) -> bool:
     expected_paths = {item["path"] for item in bundle_manifest["files"]}
+    inspected = inspect_bundle_tree(bundle_dir)
+    if inspected is None:
+        return False
+    actual_files, actual_directories = inspected
+    if actual_files != expected_paths or actual_directories != expected_bundle_directories(expected_paths):
+        return False
     try:
-        actual_files = {
-            path.relative_to(bundle_dir).as_posix()
-            for path in bundle_dir.rglob("*")
-            if path.is_file()
-        }
-        if actual_files != expected_paths:
-            return False
-        if any(path.is_symlink() for path in bundle_dir.rglob("*")):
-            return False
         for item in bundle_manifest["files"]:
             path = bundle_dir / item["path"]
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode):
+                return False
             content = path.read_bytes()
             if len(content) != item["sizeBytes"] or sha256_bytes(content) != item["digest"]:
                 return False
-            mode = path.stat().st_mode & 0o777
-            if mode not in {0o444, 0o555}:
+            declared_mode = item.get("mode", 0o644)
+            expected_mode = 0o555 if declared_mode & 0o111 else 0o444
+            if (info.st_mode & 0o777) != expected_mode:
                 return False
-        for path in [bundle_dir, *[p for p in bundle_dir.rglob("*") if p.is_dir()]]:
-            if (path.stat().st_mode & 0o777) != 0o555:
+        if (os.lstat(bundle_dir).st_mode & 0o777) != 0o555:
+            return False
+        for relative in actual_directories:
+            if (os.lstat(bundle_dir / relative).st_mode & 0o777) != 0o555:
                 return False
     except OSError:
         return False
@@ -227,9 +326,15 @@ def existing_matches(
         actual = {entry.name for entry in target.iterdir()}
     except OSError as exc:
         fail(f"cannot inspect installed release {target}: {exc}")
-    if actual != expected:
+    if actual != expected or target.is_symlink() or not target.is_dir():
         return False
     try:
+        files = ("manifest.json", "images.env", "deployment-bundle.json", "deployment-bundle.tar")
+        if any(
+            entry.is_symlink() or not stat.S_ISREG(os.lstat(entry).st_mode)
+            for entry in (target / name for name in files)
+        ):
+            return False
         return (
             target.joinpath("manifest.json").read_bytes() == manifest_bytes
             and target.joinpath("images.env").read_bytes() == images_bytes
@@ -252,7 +357,8 @@ def install_bundle_tree(tmp: Path, bundle_path: Path, bundle_manifest: dict[str,
             source = tar.extractfile(member)
             if source is None:
                 fail(f"cannot extract deployment bundle member: {member.name}")
-            mode = 0o555 if member.mode & 0o111 else 0o444
+            declared_mode = expected.get("mode", member.mode)
+            mode = 0o555 if declared_mode & 0o111 else 0o444
             write_file(target, source.read(), mode)
 
     directories = sorted(
@@ -304,8 +410,8 @@ def main() -> None:
     elif active.exists():
         active_before = "<non-symlink>"
 
-    if target.exists():
-        if not target.is_dir() or not existing_matches(
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or not target.is_dir() or not existing_matches(
             target, manifest_bytes, images_bytes, bundle_manifest_bytes, bundle_bytes, bundle_manifest
         ):
             fail(f"immutable release collision: {target}")

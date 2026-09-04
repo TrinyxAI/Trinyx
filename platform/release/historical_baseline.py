@@ -33,7 +33,7 @@ BACKEND_WORKFLOW = ".github/workflows/build-trinyx-backend.yml"
 CLOUD_WORKFLOW = f"{REPOSITORY}/.github/workflows/build-trinyx-cloud-images.yml@{SOURCE_COMMIT}"
 FRONTEND_WORKFLOW = ".github/workflows/build-trinyx-frontend.yml"
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-ANSI_SGR_RE = re.compile(r"\x1b\[[0-?]*[ -/]*m")
+ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 UNSAFE_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 UTC_RFC3339_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
@@ -175,7 +175,7 @@ def normalize_terminal_log(log_text: str) -> str:
     """Remove terminal color formatting without interpreting terminal control semantics."""
     require(isinstance(log_text, str) and log_text, "historical publication log is empty")
     normalized = log_text.replace("\r\n", "\n").replace("\r", "\n")
-    normalized = ANSI_SGR_RE.sub("", normalized)
+    normalized = ANSI_CSI_RE.sub("", normalized)
     require("\x1b" not in normalized, "unsupported terminal escape sequence in historical log")
     require(
         UNSAFE_TERMINAL_CONTROL_RE.search(normalized) is None,

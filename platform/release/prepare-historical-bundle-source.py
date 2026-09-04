@@ -77,7 +77,7 @@ def verify_historical_checkout(path: Path) -> Path:
             text=True,
         ).stdout.strip()
         status = subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+            ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all", "--ignored"],
             check=True,
             capture_output=True,
             text=True,

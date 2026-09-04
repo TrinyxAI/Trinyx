@@ -577,6 +577,10 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("--repo historical-bundle-source", workflow)
         self.assertNotIn("--repo historical-source \\", workflow)
         self.assertIn("historical-deployment-bundle-sources.json", workflow)
+        self.assertIn("Verify Paid runtime render from authenticated bundle origins", workflow)
+        self.assertIn("docker compose --env-file historical-input/paid/images.env", workflow)
+        self.assertIn("HISTORICAL_PAID_RUNTIME_RENDER_OK services=8", workflow)
+        self.assertNotIn("docker compose up", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)
 
     def test_historical_bundle_source_is_explicit_and_complete(self) -> None:

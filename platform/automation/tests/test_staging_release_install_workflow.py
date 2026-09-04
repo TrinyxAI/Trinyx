@@ -25,13 +25,14 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         cls.template = json.loads(SSM_TEMPLATE.read_text(encoding="utf-8"))
 
     def install_block(self) -> str:
-        matches = re.findall(
+        self.assertEqual(1, self.workflow.count('if [ "$ACTION" = install ]; then'))
+        match = re.search(
             r'if \[ "\$ACTION" = install \]; then\n(?P<body>.*?)\n          fi',
             self.workflow,
             re.S,
         )
-        self.assertEqual(2, len(matches))
-        return matches[-1]
+        self.assertIsNotNone(match)
+        return match.group("body")
 
     def test_install_is_explicit_call_only_staging_action(self) -> None:
         head = self.workflow.split("\npermissions:", 1)[0]
@@ -52,7 +53,7 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         for forbidden in ("normalize-plan", " adopt", " deploy", " apply", " rollback", " health"):
             self.assertNotIn(forbidden, block)
 
-    def test_install_inputs_are_closed_and_previous_releases_are_required(self) -> None:
+    def test_install_interface_does_not_claim_unenforced_active_precondition(self) -> None:
         for name in (
             "baseline_release_id",
             "baseline_bundle_digest",
@@ -60,14 +61,16 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
             "registry_bucket",
             "deploy_role_arn",
             "document_version",
-            "previous_cloud_release",
-            "previous_paid_release",
         ):
             self.assertIn(f"{name}:", self.workflow)
-        self.assertIn('[[ "$PREVIOUS_CLOUD_RELEASE" =~ ^rel-v1-[0-9a-f]{32}$ ]]', self.workflow)
-        self.assertIn('[[ "$PREVIOUS_PAID_RELEASE" =~ ^rel-v1-[0-9a-f]{32}$ ]]', self.workflow)
-        self.assertIn('--previous-cloud "$PREVIOUS_CLOUD_RELEASE"', self.install_block())
-        self.assertIn('--previous-paid "$PREVIOUS_PAID_RELEASE"', self.install_block())
+        self.assertNotIn("previous_cloud_release:", self.workflow)
+        self.assertNotIn("previous_paid_release:", self.workflow)
+        self.assertNotIn("PREVIOUS_CLOUD_RELEASE", self.workflow)
+        self.assertNotIn("PREVIOUS_PAID_RELEASE", self.workflow)
+        block = self.install_block()
+        self.assertIn("active-release preconditions", block)
+        self.assertIn('--previous-cloud "$BASELINE_RELEASE_ID"', block)
+        self.assertIn('--previous-paid "$BASELINE_RELEASE_ID"', block)
         self.assertIn("arn:aws:iam::001634075617:role/TrinyxStagingDeployRole", self.workflow)
 
     def test_ssm_document_remains_fixed_program(self) -> None:

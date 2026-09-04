@@ -156,6 +156,11 @@ class InstallReleaseModeTests(unittest.TestCase):
                 installer.validate_bundle(release, manifest_path, tar_path)
 
             document["schemaVersion"] = 1
+            document["sizeBytes"] = True
+            manifest_path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "manifest identity"):
+                installer.validate_bundle(release, manifest_path, tar_path)
+            document["sizeBytes"] = len(tar_path.read_bytes())
             for bad_path in (".", "./plain.txt", "plain.txt/", "plain\\txt", "plain//txt"):
                 document["files"][0]["path"] = bad_path
                 manifest_path.write_text(json.dumps(document), encoding="utf-8")

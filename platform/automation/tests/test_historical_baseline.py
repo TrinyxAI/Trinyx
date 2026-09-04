@@ -441,8 +441,10 @@ class HistoricalBaselineTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, workflow)
         self.assertIn("docker buildx imagetools inspect", workflow)
-        self.assertIn('{{json (index .Image "linux/amd64")}}', workflow)
-        self.assertNotIn("{{json .Image}}", workflow)
+        self.assertIn("image=$(docker buildx imagetools inspect", workflow)
+        self.assertIn("--format '{{json .Image}}'", workflow)
+        self.assertNotIn("index .Image", workflow)
+        self.assertIn("HISTORICAL_PAID_INSPECT package=%s", workflow)
         self.assertIn("(.config.Labels // {})", workflow)
         self.assertIn("--argjson platform", workflow)
         self.assertIn("docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9", workflow)

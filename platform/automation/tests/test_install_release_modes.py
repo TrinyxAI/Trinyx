@@ -231,6 +231,7 @@ class InstallReleaseModeTests(unittest.TestCase):
                     "mode": 0o644,
                 }
             )
+            release["deploymentBundle"]["fileCount"] = len(document["files"])
             manifest_path.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "overlapping"):
                 installer.validate_bundle(release, manifest_path, tar_path)

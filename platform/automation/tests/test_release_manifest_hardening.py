@@ -92,6 +92,12 @@ class ReleaseManifestHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "values must be strings"):
             release.normalize_images({"images": [invalid_image]})
 
+        tagged_image = image()
+        tagged_image["package"] = "ghcr.io/trinyxai/test:mutable"
+        tagged_image["immutableRef"] = tagged_image["package"] + "@" + tagged_image["digest"]
+        with self.assertRaisesRegex(SystemExit, "canonical and tagless"):
+            release.normalize_images({"images": [tagged_image]})
+
         for mutate in (
             lambda doc: doc["files"][0].pop("mode"),
             lambda doc: doc["files"][0].__setitem__("mode", True),

@@ -44,7 +44,14 @@ grep -Fq 'platform/release/validate-historical-artifact.py' "$HISTORICAL_WORKFLO
 grep -Fq -- '--expected-file cloud-image-manifest.json' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--trusted-commit "$TRUSTED_BUILDER_COMMIT"' "$HISTORICAL_WORKFLOW"
 grep -Fq -- '--approved-environment-config platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--approved-environment-config-out historical-input/paid/paid.override.yml' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '-f historical-input/paid/paid.override.yml' "$HISTORICAL_WORKFLOW"
+if grep -Fq -- '-f platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml' "$HISTORICAL_WORKFLOW"; then
+  echo ERROR_HISTORICAL_PAID_RENDER_USES_MUTABLE_CHECKOUT_CONFIG >&2
+  exit 1
+fi
 grep -Fq 'HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK' "$ROOT/platform/release/prepare-historical-bundle-source.py"
+grep -Fq 'safe_output_file' "$ROOT/platform/release/prepare-historical-bundle-source.py"
 if grep -Fq 'unzip -q' "$HISTORICAL_WORKFLOW"; then
   echo ERROR_UNSAFE_HISTORICAL_ZIP_EXTRACTION >&2
   exit 1
@@ -68,7 +75,7 @@ assert set(doc) == {
     "schemaVersion", "historicalSourceCommit", "historicalPaths",
     "trustedBuilderOverlays",
 }
-assert doc["schemaVersion"] == 1
+assert type(doc["schemaVersion"]) is int and doc["schemaVersion"] == 1
 assert doc["historicalSourceCommit"] == source
 assert set(doc["trustedBuilderOverlays"]) == {"docker/docker-compose.paid.runtime.yml"}
 assert set(doc["historicalPaths"]) == {

@@ -15,7 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import make_release, write_json
 from invariants import InvariantError, calculated_release_id, sha256_bytes
-from release_registry import FROZEN_CANDIDATE, OBJECT_FILES, fetch, register
+from release_registry import (
+    APPROVED_HISTORICAL_BASELINE,
+    FROZEN_CANDIDATE,
+    OBJECT_FILES,
+    fetch,
+    register,
+    validate_candidate,
+)
 
 
 class MemoryRegistry:
@@ -384,6 +391,72 @@ class RegistryTests(unittest.TestCase):
         self.registry.objects[key] = b'{"different":true}\n'
         with self.assertRaisesRegex(InvariantError, "collision"):
             register(self.registry, self.candidate)
+
+    def approved_baseline_for_candidate(self) -> dict[str, str]:
+        release_path = self.candidate / "release.json"
+        images_path = self.candidate / "release-images.json"
+        bundle_manifest_path = self.candidate / "deployment-bundle.json"
+        release = json.loads(release_path.read_text(encoding="utf-8"))
+        provenance_path = self.candidate / "provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance.update(
+            {
+                "signerWorkflow": "build-historical-staging-baseline-impl.yml",
+                "signerDigest": "22f1e593c36eaf1d70197db91bd54e31844a7eef",
+                "compatibility": "pinned-reusable-builder",
+            }
+        )
+        write_json(provenance_path, provenance)
+        return {
+            "sourceCommit": release["sourceCommit"],
+            "releaseId": release["releaseId"],
+            "bundleDigest": release["deploymentBundle"]["digest"],
+            "artifactId": str(provenance["artifactId"]),
+            "runId": str(provenance["runId"]),
+            "artifactDigest": provenance["artifactDigest"],
+            "builderCommit": provenance["signerDigest"],
+            "releaseManifestDigest": sha256_bytes(release_path.read_bytes()),
+            "imageInventoryDigest": sha256_bytes(images_path.read_bytes()),
+            "bundleManifestDigest": sha256_bytes(bundle_manifest_path.read_bytes()),
+        }
+
+    def test_exact_approved_historical_baseline_uses_modern_bundle_schema(self) -> None:
+        approved = self.approved_baseline_for_candidate()
+        with patch.dict(APPROVED_HISTORICAL_BASELINE, approved, clear=True):
+            manifest, _ = validate_candidate(self.candidate)
+        self.assertEqual(self.release_id, manifest["releaseId"])
+        bundle_manifest = json.loads(
+            (self.candidate / "deployment-bundle.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(bundle_manifest["files"])
+        self.assertTrue(all("mode" in entry for entry in bundle_manifest["files"]))
+
+    def test_each_approved_historical_baseline_registry_drift_fails_closed(self) -> None:
+        exact = self.approved_baseline_for_candidate()
+        for key in exact:
+            with self.subTest(key=key):
+                changed = exact.copy()
+                changed[key] = "0" * max(1, len(changed[key]))
+                with patch.dict(APPROVED_HISTORICAL_BASELINE, changed, clear=True):
+                    with self.assertRaises(InvariantError):
+                        validate_candidate(self.candidate)
+
+    def test_checked_in_approved_baseline_tuple_is_exact(self) -> None:
+        self.assertEqual(
+            {
+                "sourceCommit": "aeb2a447ea7ce0436a60549713636225dfe1a2c1",
+                "releaseId": "rel-v1-61d902b8c3f36f7b23873cab31427243",
+                "bundleDigest": "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047",
+                "artifactId": "9931132603",
+                "runId": "33858423626",
+                "artifactDigest": "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
+                "builderCommit": "22f1e593c36eaf1d70197db91bd54e31844a7eef",
+                "releaseManifestDigest": "sha256:b8bc11965c29e5cdc85389fd9f5d232abe359c4d85ecaf5caad381272fdbbc12",
+                "imageInventoryDigest": "sha256:b8ec0fa73f5e1b5b0cab04d729f7c21618c5bcb2f805fa908963c2a2c31320d0",
+                "bundleManifestDigest": "sha256:16321b2ed8876fed4bd6a57c69d42c39199c36bf81432e36b34f291c31d8cf03",
+            },
+            APPROVED_HISTORICAL_BASELINE,
+        )
 
     def test_historical_signer_is_rejected_for_any_non_frozen_candidate(self) -> None:
         provenance_path = self.candidate / "provenance.json"

@@ -33,10 +33,19 @@ def fail(message: str) -> None:
     raise SystemExit(f"ERROR: {message}")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         fail(f"cannot read JSON {path}: {exc}")
 
 

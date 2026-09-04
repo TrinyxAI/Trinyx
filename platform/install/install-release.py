@@ -16,6 +16,8 @@ from typing import Any
 ENVIRONMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ROLES = {"cloud", "paid"}
+FROZEN_CANDIDATE_RELEASE_ID = "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4"
+FROZEN_CANDIDATE_BUNDLE_DIGEST = "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892"
 
 
 def fail(message: str) -> None:
@@ -132,6 +134,10 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
     }
     if release_bundle != expected_release_bundle:
         fail("deployment bundle manifest does not match release identity")
+    frozen_legacy_bundle = (
+        manifest["releaseId"] == FROZEN_CANDIDATE_RELEASE_ID
+        and release_bundle["digest"] == FROZEN_CANDIDATE_BUNDLE_DIGEST
+    )
 
     try:
         bundle_bytes = bundle_path.read_bytes()
@@ -143,8 +149,13 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
         fail("deployment bundle digest mismatch")
 
     seen: set[str] = set()
+    expected_file_keys = (
+        {"path", "digest", "sizeBytes"}
+        if frozen_legacy_bundle
+        else {"path", "digest", "sizeBytes", "mode"}
+    )
     for item in bundle_manifest["files"]:
-        if not isinstance(item, dict) or set(item) != {"path", "digest", "sizeBytes"}:
+        if not isinstance(item, dict) or set(item) != expected_file_keys:
             fail("invalid deployment bundle file entry")
         name = item["path"]
         if not isinstance(name, str) or not name or name.startswith("/"):
@@ -159,6 +170,9 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
             fail(f"invalid deployment bundle file digest: {name}")
         if not isinstance(item["sizeBytes"], int) or isinstance(item["sizeBytes"], bool) or item["sizeBytes"] < 0:
             fail(f"invalid deployment bundle file size: {name}")
+        expected_mode = 0o644 if frozen_legacy_bundle else item["mode"]
+        if type(expected_mode) is not int or expected_mode not in {0o644, 0o755}:
+            fail(f"invalid deployment bundle file mode: {name}")
 
     try:
         with tarfile.open(bundle_path, "r") as tar:
@@ -170,7 +184,8 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
                     fail(f"deployment bundle tar contains non-file member: {member.name}")
                 if member.name != expected["path"]:
                     fail(f"deployment bundle tar order/path mismatch: {member.name}")
-                if member.mode not in {0o644, 0o755}:
+                expected_mode = 0o644 if frozen_legacy_bundle else expected["mode"]
+                if member.mode != expected_mode:
                     fail(f"deployment bundle tar mode mismatch: {member.name}")
                 source = tar.extractfile(member)
                 if source is None:
@@ -252,7 +267,8 @@ def install_bundle_tree(tmp: Path, bundle_path: Path, bundle_manifest: dict[str,
             source = tar.extractfile(member)
             if source is None:
                 fail(f"cannot extract deployment bundle member: {member.name}")
-            mode = 0o555 if member.mode & 0o111 else 0o444
+            declared_mode = expected.get("mode", member.mode)
+            mode = 0o555 if declared_mode & 0o111 else 0o444
             write_file(target, source.read(), mode)
 
     directories = sorted(

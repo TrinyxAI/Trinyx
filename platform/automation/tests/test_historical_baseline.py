@@ -253,6 +253,12 @@ class HistoricalBaselineTests(unittest.TestCase):
         )
         hb.validate_artifact(artifact_fixture())
 
+    def test_paid_package_identity_regex_is_exact(self) -> None:
+        self.assertIsNotNone(hb.PACKAGE_RE.fullmatch(hb.BACKEND_PACKAGE))
+        self.assertIsNotNone(hb.PACKAGE_RE.fullmatch(hb.FRONTEND_PACKAGE))
+        self.assertIsNone(hb.PACKAGE_RE.fullmatch("ghcr\\.io/trinyxai/trinyx-backend"))
+        self.assertIsNone(hb.PACKAGE_RE.fullmatch("ghcrXio/trinyxai/trinyx-backend"))
+
     def test_paid_tag_digest_and_oci_revision_are_strict(self) -> None:
         package = "ghcr.io/trinyxai/trinyx-backend"
         result = hb.paid_manifest(

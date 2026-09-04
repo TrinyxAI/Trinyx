@@ -231,5 +231,45 @@ class InstallReleaseModeTests(unittest.TestCase):
                 installer.validate_bundle(release, manifest_path, tar_path)
 
 
+    def test_runtime_inventory_contract_is_closed_and_strictly_typed(self) -> None:
+        installer = load_installer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = json.loads(
+                (ROOT / "platform/release/runtime-inventory.json").read_text(encoding="utf-8")
+            )
+            contract = root / "runtime-inventory.json"
+            contract.write_text(json.dumps(document), encoding="utf-8")
+            manifest = {
+                "images": [
+                    {
+                        "name": item["name"],
+                        "role": item["role"],
+                        "service": item["service"],
+                        "environment": item["environment"],
+                    }
+                    for item in document["images"]
+                ]
+            }
+            installer.validate_complete_runtime(contract, manifest)
+
+            cases = (
+                ("schema-bool", lambda value: value.__setitem__("schemaVersion", True)),
+                ("extra-key", lambda value: value.__setitem__("unexpected", "value")),
+                ("name-type", lambda value: value["images"][0].__setitem__("name", 1)),
+                ("duplicate-binding", lambda value: value["images"][1].__setitem__(
+                    "environment", value["images"][0]["environment"]
+                )),
+            )
+            for label, mutate in cases:
+                with self.subTest(label=label):
+                    invalid = json.loads(json.dumps(document))
+                    mutate(invalid)
+                    contract.write_text(json.dumps(invalid), encoding="utf-8")
+                    with self.assertRaisesRegex(SystemExit, "runtime inventory contract"):
+                        installer.validate_complete_runtime(contract, manifest)
+
+
+
 if __name__ == "__main__":
     unittest.main()

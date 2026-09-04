@@ -52,9 +52,18 @@ def require_no_path_overlap(paths: list[str], label: str) -> None:
                 fail(f"{label} contains overlapping paths")
 
 
+def reject_symlinked_repository_root(path: Path, label: str) -> None:
+    current = Path(os.path.abspath(path))
+    while True:
+        if current.is_symlink():
+            fail(f"{label} repository root may not traverse a symlink")
+        if current.parent == current:
+            return
+        current = current.parent
+
+
 def verify_historical_checkout(path: Path) -> Path:
-    if path.is_symlink():
-        fail("historical repository root may not be a symlink")
+    reject_symlinked_repository_root(path, "historical")
     repo = path.resolve()
     if not repo.is_dir():
         fail("historical repository must be a directory")
@@ -81,8 +90,7 @@ def verify_historical_checkout(path: Path) -> Path:
 
 
 def verified_trusted_repo(path: Path) -> Path:
-    if path.is_symlink():
-        fail("trusted repository root may not be a symlink")
+    reject_symlinked_repository_root(path, "trusted")
     repo = path.resolve()
     if not repo.is_dir():
         fail("trusted repository must be a directory")

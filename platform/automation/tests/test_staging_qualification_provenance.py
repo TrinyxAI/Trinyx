@@ -356,6 +356,15 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
             "REQUIRE_INTERNAL_ATTESTATIONS": "true",
         }
 
+    def approved_baseline_policy(self):
+        return {
+            "SIGNER_WORKFLOW": "build-historical-staging-baseline-impl.yml",
+            "SIGNER_DIGEST": AEB2_BUILDER,
+            "ATTESTATION_SOURCE_DIGEST": AEB2_CALLER_HEAD,
+            "COMPATIBILITY": "pinned-reusable-builder",
+            "REQUIRE_INTERNAL_ATTESTATIONS": "true",
+        }
+
     def historical_policy(self):
         return {
             "SIGNER_WORKFLOW": "build-release-candidate.yml",
@@ -399,6 +408,33 @@ class StagingQualificationProvenanceTests(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
             )
             return result, log.read_text(encoding="utf-8") if log.exists() else ""
+
+    def test_registration_and_qualification_aeb2_constants_are_identical(self) -> None:
+        values = (
+            AEB2_SOURCE,
+            AEB2_CALLER_HEAD,
+            AEB2_BUILDER,
+            "33858423626",
+            "9931132603",
+            "sha256:76fa8c2765f08f2f502d43e497e7da4a104e134e9d35ad7be661224aa8adde2a",
+            "rel-v1-61d902b8c3f36f7b23873cab31427243",
+            "sha256:178805ec9d47a8624d1476ec3859959b9033f2893f0473051d9c9c3d2b9c0047",
+        )
+        for value in values:
+            self.assertIn(value, self.workflow)
+            self.assertIn(value, self.registration)
+
+    def test_aeb2_baseline_requires_four_attestations_with_caller_source_digest(self) -> None:
+        result, log = self.run_attestations(
+            self.approved_baseline_policy(),
+            self.modern_policy("d" * 40),
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(8, log.count("attestation verify"))
+        baseline_calls = [line for line in log.splitlines() if "baseline/" in line]
+        self.assertEqual(4, len(baseline_calls))
+        self.assertTrue(all("--source-digest " + AEB2_CALLER_HEAD in line for line in baseline_calls))
+        self.assertTrue(all("--signer-digest " + AEB2_BUILDER in line for line in baseline_calls))
 
     def test_modern_baseline_and_candidate_require_four_attestations_each(self) -> None:
         result, log = self.run_attestations(self.modern_policy(), self.modern_policy())

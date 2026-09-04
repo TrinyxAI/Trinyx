@@ -44,6 +44,15 @@ def path_list(value: Any, label: str) -> list[str]:
     return result
 
 
+def source_path(root: Path, relative: str) -> Path:
+    current = root
+    for part in PurePosixPath(relative).parts:
+        current = current / part
+        if current.is_symlink():
+            fail(f"historical bundle source path traverses a symlink: {relative}")
+    return current
+
+
 def copy_safe(source: Path, destination: Path) -> None:
     if source.is_symlink():
         fail(f"historical bundle source may not be a symlink: {source}")
@@ -107,12 +116,13 @@ def prepare(
     destination.mkdir(parents=True, mode=0o755)
 
     for relative in historical_paths:
-        copy_safe(historical_repo / relative, destination / relative)
+        copy_safe(source_path(historical_repo, relative), destination / relative)
 
     for relative in trusted_overlays:
-        if (historical_repo / relative).exists() or (historical_repo / relative).is_symlink():
+        historical_source = source_path(historical_repo, relative)
+        if historical_source.exists() or historical_source.is_symlink():
             fail(f"trusted overlay would shadow historical source: {relative}")
-        source = trusted_repo / relative
+        source = source_path(trusted_repo, relative)
         if source.is_symlink() or not source.is_file():
             fail(f"trusted overlay is missing or unsafe: {relative}")
         copy_safe(source, destination / relative)

@@ -13,6 +13,10 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 RELEASE_RE = re.compile(r"^rel-v1-[0-9a-f]{32}$")
 RFC3339_UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 ROLES = {"cloud", "paid", "shared"}
@@ -67,10 +71,8 @@ def normalize_image(item: Any) -> dict[str, str]:
         fail(f"invalid image role for {result['name']}")
     if not NAME_RE.fullmatch(result["service"]):
         fail(f"invalid service for {result['name']}")
-    if not result["package"] or "@" in result["package"] or any(ch.isspace() for ch in result["package"]):
-        fail(f"invalid package for {result['name']}")
-    if ":latest" in result["package"] or result["package"].endswith(":latest"):
-        fail(f"mutable latest package is forbidden for {result['name']}")
+    if not PACKAGE_RE.fullmatch(result["package"]):
+        fail(f"image repository must be canonical and tagless for {result['name']}")
     if not ENV_RE.fullmatch(result["environment"]):
         fail(f"invalid environment variable for {result['name']}")
     if not DIGEST_RE.fullmatch(result["digest"]):

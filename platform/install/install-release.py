@@ -164,6 +164,13 @@ def validate_bundle(manifest: dict[str, Any], bundle_manifest_path: Path, bundle
         fail("invalid deployment bundle manifest")
     if not isinstance(bundle_manifest["files"], list) or not bundle_manifest["files"]:
         fail("deployment bundle manifest contains no files")
+    if (
+        not isinstance(bundle_manifest["digest"], str)
+        or not DIGEST_RE.fullmatch(bundle_manifest["digest"])
+        or type(bundle_manifest["sizeBytes"]) is not int
+        or bundle_manifest["sizeBytes"] <= 0
+    ):
+        fail("invalid deployment bundle manifest identity")
 
     release_bundle = manifest["deploymentBundle"]
     expected_release_bundle = {

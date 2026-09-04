@@ -10,6 +10,57 @@ Build -> Release -> Attestation -> S3 Registry -> SSM -> Install -> Preflight
       -> Activate -> Health -> Rollback
 ```
 
+## Staging reboot contract
+
+Docker state, including images, volumes and existing containers, persists under
+`/srv/trinyx/docker`. The complete runtime generations under `/run/trinyx`
+are ephemeral and must be rebuilt after every boot. Staging-only systemd
+drop-ins therefore gate `docker.service` with `Requires=` and `After=` on
+the role's runtime materializer. Cloud also requires its pre-Docker truststore
+materializer:
+
+```text
+Cloud: local-fs -> pre-docker -> network/SSM runtime materializer -> Docker
+Paid:  local-fs -----------> network/SSM runtime materializer -> Docker
+```
+
+The runtime materializers use the network, AWS CLI/SSM and persistent release
+and configuration files; they do not use Docker. The graph is therefore
+acyclic. A missing persistent input, unavailable SSM value, invalid secret,
+failed ownership/mode check or incomplete generation prevents Docker from
+starting, so restart-managed application containers cannot become boot-ready
+against a partial runtime. Cloud pre-Docker failure has the same fail-closed
+effect.
+
+A reboot does not pull or rebuild images, run Compose, recreate the stack,
+change the active release pointer or delete persistent Docker state. After the
+gate succeeds, Docker may restart only the existing long-running containers
+whose stored policy is `unless-stopped`. Migration and init containers retain
+`restart: "no"` and remain exited unless an explicitly approved deployment
+runs them. The active release selected before reboot remains the source read by
+the materializer.
+
+The reconciler installs these drop-ins only for `staging`; production unit
+behavior is unchanged. Applying the files to an already running host performs
+no Docker restart. The gate takes effect on the next explicit Docker start or
+host reboot.
+
+If SSM or the network is temporarily unavailable, the materializer retries
+under its existing `Restart=on-failure` policy, while Docker remains failed and
+the application stays stopped. Systemd does not automatically requeue a unit
+whose start job already failed because a required unit failed. After the
+dependency is healthy, the deterministic recovery is therefore:
+
+```text
+systemctl reset-failed docker.service
+systemctl start docker.service
+```
+
+The second start transaction reruns and revalidates the required materializer
+before Docker. It does not run Compose, recreate containers, change `active`,
+or use a timing delay. Operators must not start containers directly while the
+Docker gate is failed.
+
 Application builds remain manual or application-input gated. Registration and
 qualification are separate manual workflows bound to the `staging` GitHub
 Environment. The publisher role cannot call SSM. The deploy role cannot write
@@ -199,6 +250,76 @@ No Private CA, certificate, CRL bucket, KMS key or live trust material may be cr
   two-CA AWS PCA hierarchy remains disabled and paid.
 
 
+## Canonical historical baseline import
+
+`build-historical-staging-baseline.yml` reconstructs one genuine canonical
+release for source commit `aeb2a447ea7ce0436a60549713636225dfe1a2c1`
+without rebuilding or publishing application images. It authenticates the
+exact historical backend/Cloud and frontend workflow runs, downloads Cloud
+manifest artifact `9777989306` by ID, derives the original Paid manifest
+digests from the exact authenticated historical publication job logs, and then
+requires the present GHCR full-SHA tags plus OCI revision to match that
+historical evidence. The registry tags are consistency checks, not the
+historical source of truth. The authenticated job-log evidence is pinned to
+backend publish job `99660712771` and frontend build job `99659777935`; it yields
+backend `sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e`
+and frontend `sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e`.
+The builder combines those inputs with the reviewed static
+third-party inventory. The trusted current packaging tools build the bundle
+from the exact historical source tree as data and `release.py` computes the
+content-derived release ID. The four canonical files receive GitHub build
+provenance attestations.
+Both historical runs must also report branch
+`codex/trinyx-cloud-gateway-v2`, event `workflow_dispatch`, and attempt `1`
+before the builder may emit `release.sourceRef` as
+`refs/heads/codex/trinyx-cloud-gateway-v2`; the branch label is authenticated
+metadata and never substitutes for the exact aeb2 source commit.
+
+The exact historical Cloud artifact uses legacy logical names (`agent`,
+`auth`, ..., `websearch`). Those names are not prefixed heuristically. A
+fail-closed adapter validates every original `name`/`service`/`environment`/
+`package` binding against the exact historical source inventory, maps the
+binding one-to-one to the current canonical inventory, and preserves the
+original digest and immutable reference. The downloaded ZIP is checked against
+GitHub artifact digest
+`sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0`
+before extraction.
+
+This is not baseline observation and it never imports identities from EC2.
+Live runtime evidence cannot replace missing historical publication provenance.
+The resulting baseline means historical aeb2 first-party source/images plus
+the currently reviewed immutable third-party inventory; it is not represented
+as a byte-for-byte snapshot of every legacy container.
+The workflow has read-only package access, performs only manifest inspection,
+and contains no image build, push, registration or AWS operation. Do not run it
+until its repository change is independently reviewed.
+
+This workflow is **not currently dispatchable**: GitHub requires a manual
+`workflow_dispatch` entry point to exist on the default branch, while this file
+exists only on the platform branch/PR. Do not claim or attempt a branch-only
+manual dispatch. A later, separately reviewed tiny default-branch caller must
+delegate to `build-historical-staging-baseline-impl.yml` at the exact immutable
+final builder SHA and grant only `actions:read`, `contents:read`,
+`packages:read`, `id-token:write`, and `attestations:write`.
+
+The current release registrar also does not yet authorize this new builder.
+After the builder SHA exists and its output is reviewed, a separate registrar
+change must recognize only the exact aeb2 source, exact historical run and
+artifact identities, exact baseline artifact name, exact default-branch caller
+commit, and exact reusable builder path/SHA. All four internal attestations are
+mandatory. Their signer workflow/digest must identify the immutable baseline
+implementation; the attestation source digest must identify the exact caller
+run commit. `release.sourceCommit` remains aeb2 and
+`release.platformCommit` remains the reusable builder's `job.workflow_sha`.
+This is a new modern policy path and must not reuse or widen the frozen f3a4
+compatibility exception.
+
+The operational order remains: prove and build the canonical baseline →
+register it → install without changing `active` → Paid normalization PLAN →
+Cloud normalization PLAN → STOP and review → separately approved bounded
+normalization.
+
+
 ## Legacy runtime normalization gate
 
 The legacy runtime is not eligible for pointer-only adoption while any effective
@@ -212,9 +333,39 @@ configuration is reconciled/materialized, dispatch
 run a materializer, write a plan file, recreate a container, change `active`, or
 run health mutations.
 
-For every exact 20 Cloud / 8 Paid service it reports current and expected image
-digests, Compose config hashes, mounts, container ID and `recreateRequired`
-reasons. It fails the workflow when more than three service hashes differ, when the exact service inventory or report SHA cannot be authenticated, or when the configured/running image object lacks the immutable baseline RepoDigest.
+For every exact 20 Cloud / 8 Paid service it reports the observed
+`Config.Image`, the exact Docker image object and its immutable `RepoDigests`,
+the expected digest, Compose config hashes, mounts, container ID and
+`recreateRequired` reasons. A legacy tag is observation metadata only: it is
+never resolved or trusted. Content matches only when the expected canonical
+`repository@sha256` occurs in the exact object's `RepoDigests`; a matching
+object behind a tag is reported separately as a non-canonical configured
+reference requiring bounded recreation. Missing object evidence fails closed.
+Compose hash drift is not qualified by a count. The planner hashes the canonical
+rendered model and a second structured model that reintroduces only the observed
+legacy image reference and approved `/srv/trinyx/pr25-*` bind sources while
+leaving command, environment, ports, networks, restart policy, healthcheck,
+mount targets/options and every other field canonical. A current label must
+match one of those exact hashes. Any single unexplained effective change returns
+`compatibility=stop`. This keeps Compose hashes as authenticated supplementary
+evidence without treating a fixed mismatch threshold as a trust boundary.
+
+A legacy bind path is not content identity. Before such a source can enter the
+structured explained model, the planner compares the bytes actually reachable
+through it with the corresponding path in the installed immutable release
+bundle. Files are bound by type, mode, size and SHA-256. Directories use a
+bounded canonical tree identity over sorted relative paths, entry types, modes,
+sizes and file SHA-256 values. Symlinks, traversal outside either approved root,
+special files, duplicate targets, missing/extra entries and any byte difference
+fail closed as `LEGACY_BIND_CONTENT_MISMATCH`; a matching Git HEAD alone is not
+evidence because the checkout may be dirty. Only aggregate digests—not raw bind
+contents—are emitted in the bounded SSM protocol.
+
+Before approving normalization, require every one of the 12 third-party service
+records to prove `image_match=yes`: the exact running Docker object's
+`RepoDigests` must contain the corresponding immutable reference from
+`platform/release/third-party-images.json`. This read-only preflight does not
+turn observed tags into baseline identity.
 
 Review the authenticated bounded normalization protocol independently; verify its final recomputed `report_sha256` and exact 8/20 service inventory. The expected initial legacy delta is at
 least Paid `paid-edge` because its effective container may still mount the
@@ -250,5 +401,9 @@ never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
 under the SSM `StandardOutputContent` limit. Every report is bound to the
 baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
-SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
-returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+SHA-256 of the emitted protocol. Explained canonicalization drift is counted
+separately from unexplained effective configuration drift; one unexplained
+change returns `compatibility=stop`. No bulk recreation is inferred or authorized.
+PLAN performs no pull, build, push, start or recreate. A proven content
+mismatch remains visible for separate human review; APPLY is never implied and
+must remain release/bundle/config/service bounded under the global lock.

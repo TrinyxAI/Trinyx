@@ -1,24 +1,52 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from legacy_normalization_plan import (
-    COMPOSE_HASH_MISMATCH_LIMIT,
     SSM_STDOUT_MAX_BYTES,
     build_normalization_plan,
+    explained_compose_model,
+    legacy_bind_content_evidence,
     render_ssm_protocol,
 )
 from legacy_runtime import SERVICES
+from invariants import InvariantError
 
 
 def config_hash(service: str) -> str:
     return hashlib.sha256(f"compose:{service}".encode()).hexdigest()
+
+
+def explained_hash(service: str) -> str:
+    return hashlib.sha256(f"compose-legacy-explained:{service}".encode()).hexdigest()
+
+
+def empty_bind_evidence(role: str) -> dict[str, dict]:
+    empty = "sha256:" + hashlib.sha256(b"[]").hexdigest()
+    aggregate = "sha256:" + hashlib.sha256(
+        b'{"current":[],"expected":[]}'
+    ).hexdigest()
+    return {
+        service: {
+            "required": False,
+            "verified": True,
+            "verifiedTargets": [],
+            "currentDigest": empty,
+            "expectedDigest": empty,
+            "evidenceDigest": aggregate,
+        }
+        for service in SERVICES[role]
+    }
 
 
 class LegacyNormalizationPlanTests(unittest.TestCase):
@@ -60,6 +88,39 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             }
         return containers, {"services": models}, hashes
 
+    def bind_fixture(
+        self, root: Path, *, directory: bool = False,
+    ) -> tuple[list[dict], dict, dict[str, str], dict[str, dict], str, Path, Path, Path]:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        legacy_root = root / "srv" / "trinyx"
+        checkout_root = legacy_root / "pr25-aeb2a44"
+        bundle_root = root / "release" / "bundle"
+        relative = Path("catalog-seeds" if directory else "docker/legacy.conf")
+        current = checkout_root / relative
+        expected = bundle_root / relative
+        if directory:
+            (current / "nested").mkdir(parents=True)
+            (expected / "nested").mkdir(parents=True)
+            (current / "seed.json").write_text('{"seed":1}\n')
+            (expected / "seed.json").write_text('{"seed":1}\n')
+            (current / "nested/item.txt").write_text("approved\n")
+            (expected / "nested/item.txt").write_text("approved\n")
+        else:
+            current.parent.mkdir(parents=True)
+            expected.parent.mkdir(parents=True)
+            current.write_text("approved legacy content\n")
+            expected.write_text("approved legacy content\n")
+        containers[0]["Mounts"][0]["Source"] = str(current)
+        model["services"][service]["volumes"][0]["source"] = str(expected)
+        evidence = legacy_bind_content_evidence(
+            "paid", containers, model, bundle_root, legacy_root=legacy_root,
+        )
+        return (
+            containers, model, hashes, evidence, service, legacy_root,
+            current, expected,
+        )
+
     def build(
         self,
         containers: list[dict],
@@ -67,6 +128,8 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         hashes: dict[str, str],
         role: str = "paid",
         image_inspections: list[dict] | None = None,
+        explained_hashes: dict[str, str] | None = None,
+        bind_evidence: dict[str, dict] | None = None,
     ) -> dict:
         inspected = image_inspections or [
             {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
@@ -79,6 +142,8 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             inspected,
             model,
             hashes,
+            explained_hashes or dict(hashes),
+            bind_evidence or empty_bind_evidence(role),
             "v2.40.3",
             "2026-09-02T00:00:00Z",
             bundle_digest="sha256:" + "b" * 64,
@@ -91,41 +156,132 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
     def test_happy_path_is_review_qualified_and_requires_no_recreate(self) -> None:
         containers, model, hashes = self.fixture()
         result = self.build(containers, model, hashes)
-        self.assertEqual("QUALIFIED_REVIEW", result["composeHashCompatibility"])
-        self.assertEqual(8, result["composeHashCalibrationMatches"])
-        self.assertEqual(0, result["composeHashMismatchCount"])
-        self.assertEqual(COMPOSE_HASH_MISMATCH_LIMIT, result["composeHashMismatchLimit"])
+        self.assertEqual("QUALIFIED_EXPLAINED_DRIFT", result["composeDriftCompatibility"])
+        self.assertEqual(8, result["composeCanonicalMatchCount"])
+        self.assertEqual(0, result["composeExplainedDriftCount"])
+        self.assertEqual(0, result["composeUnexplainedDriftCount"])
         self.assertEqual("MATCHED", result["imageCompatibility"])
         self.assertEqual([], result["recreateServices"])
         self.assertEqual(8, result["serviceCount"])
 
     def test_mutable_checkout_is_reported_not_hidden(self) -> None:
-        containers, model, hashes = self.fixture()
-        service = sorted(SERVICES["paid"])[0]
-        containers[0]["Mounts"][0]["Source"] = "/srv/trinyx/" + "pr25-aeb2a44/docker/Caddyfile"
-        result = self.build(containers, model, hashes)
-        item = result["services"][service]
-        self.assertTrue(item["mutableCheckoutMounted"])
-        self.assertTrue(item["recreateRequired"])
-        self.assertIn("MUTABLE_CHECKOUT_MOUNT", item["reasons"])
-        self.assertIn(service, result["recreateServices"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            containers, model, hashes, evidence, service, legacy_root, _, _ = self.bind_fixture(root)
+            allowed_hashes = dict(hashes)
+            allowed_hashes[service] = explained_hash(service)
+            containers[0]["Config"]["Labels"]["com.docker.compose.config-hash"] = allowed_hashes[service]
+            result = self.build(
+                containers, model, hashes, explained_hashes=allowed_hashes,
+                bind_evidence=evidence,
+            )
+            item = result["services"][service]
+            self.assertTrue(item["mutableCheckoutMounted"])
+            self.assertTrue(item["legacyBindContentVerified"])
+            self.assertTrue(item["recreateRequired"])
+            self.assertIn("MUTABLE_CHECKOUT_MOUNT", item["reasons"])
+            self.assertIn(service, result["recreateServices"])
+            protocol = render_ssm_protocol(result)
+            self.assertIn(
+                f"bind_proof=match:{evidence[service]['evidenceDigest']}",
+                protocol,
+            )
+            self.assertNotIn(str(root), protocol)
+            self.assertNotIn("approved legacy content", protocol)
 
-    def test_same_image_but_small_effective_hash_drift_requires_human_review(self) -> None:
+    def assert_bind_content_mismatch(
+        self, root: Path, containers: list[dict], model: dict,
+        hashes: dict[str, str], service: str, legacy_root: Path,
+    ) -> None:
+        evidence = legacy_bind_content_evidence(
+            "paid", containers, model, root / "release" / "bundle",
+            legacy_root=legacy_root,
+        )
+        self.assertTrue(evidence[service]["required"])
+        self.assertFalse(evidence[service]["verified"])
+        result = self.build(containers, model, hashes, bind_evidence=evidence)
+        item = result["services"][service]
+        self.assertEqual("UNEXPLAINED", item["composeDriftClassification"])
+        self.assertIn("LEGACY_BIND_CONTENT_MISMATCH", item["reasons"])
+        self.assertEqual("UNQUALIFIED_UNEXPLAINED_DRIFT", result["composeDriftCompatibility"])
+
+    def test_same_legacy_file_path_with_one_changed_byte_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            containers, model, hashes, _, service, legacy_root, current, _ = self.bind_fixture(root)
+            current.write_text("approved legacy content?\n")
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
+
+    def test_dirty_checkout_head_does_not_substitute_for_content_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            containers, model, hashes, _, service, legacy_root, current, _ = self.bind_fixture(root)
+            git = current.parents[1] / ".git"
+            git.mkdir()
+            (git / "HEAD").write_text("aeb2a447ea7ce0436a60549713636225dfe1a2c1\n")
+            current.write_text("locally modified despite matching HEAD\n")
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
+
+    def test_legacy_bind_symlink_escape_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            containers, model, _, _, _, legacy_root, current, _ = self.bind_fixture(root)
+            outside = root / "outside.conf"
+            outside.write_text("approved legacy content\n")
+            current.unlink()
+            try:
+                current.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            with self.assertRaises(InvariantError):
+                legacy_bind_content_evidence(
+                    "paid", containers, model, root / "release" / "bundle",
+                    legacy_root=legacy_root,
+                )
+
+    def test_legacy_directory_add_remove_and_nested_change_fail_closed(self) -> None:
+        mutations = {
+            "added": lambda path: (path / "extra.txt").write_text("extra\n"),
+            "removed": lambda path: (path / "seed.json").unlink(),
+            "nested": lambda path: (path / "nested/item.txt").write_text("changed\n"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                values = self.bind_fixture(root, directory=True)
+                containers, model, hashes, _, service, legacy_root, current, _ = values
+                mutate(current)
+                self.assert_bind_content_mismatch(
+                    root, containers, model, hashes, service, legacy_root,
+                )
+
+    def test_legacy_bind_target_or_access_mode_mismatch_fails_closed(self) -> None:
+        for field in ("Destination", "RW"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                containers, model, _, _, _, legacy_root, _, _ = self.bind_fixture(root)
+                if field == "Destination":
+                    containers[0]["Mounts"][0][field] = "/unexpected"
+                else:
+                    containers[0]["Mounts"][0][field] = True
+                with self.assertRaises(InvariantError):
+                    legacy_bind_content_evidence(
+                        "paid", containers, model, root / "release" / "bundle",
+                        legacy_root=legacy_root,
+                    )
+
+    def test_one_unexplained_effective_config_change_fails_closed(self) -> None:
         containers, model, hashes = self.fixture()
         service = sorted(SERVICES["paid"])[0]
         containers[0]["Config"]["Labels"]["com.docker.compose.config-hash"] = "f" * 64
         result = self.build(containers, model, hashes)
-        self.assertIn("COMPOSE_CONFIG_HASH_MISMATCH", result["services"][service]["reasons"])
-        self.assertEqual("QUALIFIED_REVIEW", result["composeHashCompatibility"])
-        self.assertEqual(1, result["composeHashMismatchCount"])
-
-    def test_excessive_hash_drift_fails_closed_before_mass_recreation(self) -> None:
-        containers, model, hashes = self.fixture()
-        for container in containers[: COMPOSE_HASH_MISMATCH_LIMIT + 1]:
-            container["Config"]["Labels"]["com.docker.compose.config-hash"] = "f" * 64
-        result = self.build(containers, model, hashes)
-        self.assertEqual("UNQUALIFIED_EXCESSIVE_DRIFT", result["composeHashCompatibility"])
-        self.assertEqual(COMPOSE_HASH_MISMATCH_LIMIT + 1, result["composeHashMismatchCount"])
+        self.assertIn("UNEXPLAINED_COMPOSE_CONFIG_DRIFT", result["services"][service]["reasons"])
+        self.assertEqual("UNQUALIFIED_UNEXPLAINED_DRIFT", result["composeDriftCompatibility"])
+        self.assertEqual(1, result["composeUnexplainedDriftCount"])
 
     def test_image_difference_is_not_normalized_silently(self) -> None:
         containers, model, hashes = self.fixture()
@@ -135,15 +291,19 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         )
         result = self.build(containers, model, hashes)
         self.assertEqual("MISMATCH", result["imageCompatibility"])
-        self.assertIn("IMAGE_DIGEST_MISMATCH", result["services"][service]["reasons"])
+        self.assertIn("IMAGE_REFERENCE_NON_CANONICAL", result["services"][service]["reasons"])
+        self.assertIn("IMAGE_OBJECT_DIGEST_MISMATCH", result["services"][service]["reasons"])
         self.assertIn("currentConfiguredImage", result["services"][service])
         self.assertRegex(result["services"][service]["currentImageObjectId"], r"^sha256:[0-9a-f]{64}$")
 
     def test_running_image_object_must_expose_expected_repo_digest(self) -> None:
         containers, model, hashes = self.fixture()
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
         inspected = [
-            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
-            for container in containers
+            {"Id": container["Image"], "RepoDigests": [
+                model["services"][sorted(SERVICES["paid"])[index]]["image"]
+            ]}
+            for index, container in enumerate(containers)
         ]
         service = sorted(SERVICES["paid"])[0]
         inspected[0]["RepoDigests"] = [
@@ -151,9 +311,198 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         ]
         result = self.build(containers, model, hashes, image_inspections=inspected)
         item = result["services"][service]
-        self.assertFalse(item["imageObjectVerified"])
+        self.assertFalse(item["imageContentMatches"])
         self.assertIn("IMAGE_OBJECT_DIGEST_MISMATCH", item["reasons"])
         self.assertEqual("MISMATCH", result["imageCompatibility"])
+
+    def test_legacy_tag_is_observed_from_exact_object_and_requires_recreate(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        expected = model["services"][service]["image"]
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        allowed_hashes = dict(hashes)
+        allowed_hashes[service] = explained_hash(service)
+        containers[0]["Config"]["Labels"]["com.docker.compose.config-hash"] = allowed_hashes[service]
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                expected if index == 0 else container["Config"]["Image"]
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        result = self.build(
+            containers, model, hashes,
+            image_inspections=inspected,
+            explained_hashes=allowed_hashes,
+        )
+        item = result["services"][service]
+        self.assertEqual("redis:7-alpine", item["currentConfiguredImage"])
+        self.assertTrue(item["imageContentMatches"])
+        self.assertTrue(item["imageObjectVerified"])
+        self.assertFalse(item["configuredImageCanonical"])
+        self.assertEqual(
+            ["IMAGE_REFERENCE_NON_CANONICAL", "COMPOSE_CONFIG_DRIFT_EXPLAINED"],
+            item["reasons"],
+        )
+        self.assertEqual("EXPLAINED_NORMALIZATION", item["composeDriftClassification"])
+        self.assertTrue(item["recreateRequired"])
+        self.assertEqual("MATCHED", result["imageCompatibility"])
+
+    def test_legacy_tag_without_expected_object_digest_is_a_bounded_mismatch(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                (f"redis@sha256:{'f' * 64}" if index == 0 else container["Config"]["Image"])
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        item = self.build(containers, model, hashes, image_inspections=inspected)["services"][service]
+        self.assertFalse(item["imageContentMatches"])
+        self.assertEqual(
+            ["IMAGE_REFERENCE_NON_CANONICAL", "IMAGE_OBJECT_DIGEST_MISMATCH"],
+            item["reasons"],
+        )
+
+    def test_missing_immutable_object_evidence_fails_closed(self) -> None:
+        containers, model, hashes = self.fixture()
+        containers[0]["Config"]["Image"] = "redis:7-alpine"
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [] if index == 0 else [container["Config"]["Image"]]}
+            for index, container in enumerate(containers)
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
+
+    def test_immutable_config_must_be_consistent_with_exact_object(self) -> None:
+        containers, model, hashes = self.fixture()
+        service = sorted(SERVICES["paid"])[0]
+        wrong = f"ghcr.io/trinyxai/{service}@sha256:{'f' * 64}"
+        containers[0]["Config"]["Image"] = wrong
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [
+                model["services"][service]["image"] if index == 0 else container["Config"]["Image"]
+            ]}
+            for index, container in enumerate(containers)
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
+
+    def test_missing_exact_image_object_inspection_fails_closed(self) -> None:
+        containers, model, hashes = self.fixture()
+        inspected = [
+            {"Id": container["Image"], "RepoDigests": [container["Config"]["Image"]]}
+            for container in containers[1:]
+        ]
+        with self.assertRaises(InvariantError):
+            self.build(containers, model, hashes, image_inspections=inspected)
+
+    def test_six_real_third_party_image_canonicalizations_per_role_are_explained(self) -> None:
+        inventory = json.loads(
+            (Path(__file__).resolve().parents[2] / "release/third-party-images.json").read_text()
+        )
+        for role in ("paid", "cloud"):
+            with self.subTest(role=role):
+                services = {
+                    item["service"] for item in inventory["images"] if item["role"] == role
+                }
+                self.assertEqual(6, len(services))
+                containers, model, hashes = self.fixture(role)
+                explained = dict(hashes)
+                inspected: list[dict] = []
+                for index, service in enumerate(sorted(SERVICES[role])):
+                    container = containers[index]
+                    expected = model["services"][service]["image"]
+                    if service in services:
+                        container["Config"]["Image"] = expected.split("@", 1)[0] + ":legacy"
+                        explained[service] = explained_hash(service)
+                        container["Config"]["Labels"]["com.docker.compose.config-hash"] = explained[service]
+                    inspected.append({"Id": container["Image"], "RepoDigests": [expected]})
+                result = self.build(
+                    containers, model, hashes, role,
+                    image_inspections=inspected,
+                    explained_hashes=explained,
+                )
+                self.assertEqual("QUALIFIED_EXPLAINED_DRIFT", result["composeDriftCompatibility"])
+                self.assertEqual(6, result["composeExplainedDriftCount"])
+                self.assertEqual(0, result["composeUnexplainedDriftCount"])
+                for service in services:
+                    self.assertTrue(result["services"][service]["imageContentMatches"])
+                    self.assertEqual(
+                        "EXPLAINED_NORMALIZATION",
+                        result["services"][service]["composeDriftClassification"],
+                    )
+
+                unrelated = next(service for service in sorted(SERVICES[role]) if service not in services)
+                position = sorted(SERVICES[role]).index(unrelated)
+                containers[position]["Config"]["Labels"]["com.docker.compose.config-hash"] = "f" * 64
+                blocked = self.build(
+                    containers, model, hashes, role,
+                    image_inspections=inspected,
+                    explained_hashes=explained,
+                )
+                self.assertEqual(
+                    "UNQUALIFIED_UNEXPLAINED_DRIFT",
+                    blocked["composeDriftCompatibility"],
+                )
+                self.assertEqual(1, blocked["composeUnexplainedDriftCount"])
+
+    def test_explained_model_changes_only_approved_legacy_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            containers, canonical, _, evidence, service, legacy_root, _, _ = self.bind_fixture(root)
+            canonical_service = canonical["services"][service]
+            canonical_service.update({
+                "command": ["serve", "--strict"],
+                "environment": {"MODE": "staging"},
+                "ports": [{"target": 8080, "published": "18080"}],
+                "restart": "unless-stopped",
+                "healthcheck": {"test": ["CMD", "true"]},
+                "networks": {"default": {}},
+            })
+            containers[0]["Config"]["Image"] = "redis:7-alpine"
+            containers[0]["Config"]["Cmd"] = ["serve", "--unapproved"]
+            containers[0]["Config"]["Env"] = ["MODE=unexpected"]
+
+            explained = explained_compose_model(
+                "paid", containers, canonical, evidence, legacy_root=legacy_root,
+            )
+            explained_service = explained["services"][service]
+            self.assertEqual("redis:7-alpine", explained_service["image"])
+            self.assertEqual(
+                containers[0]["Mounts"][0]["Source"],
+                explained_service["volumes"][0]["source"],
+            )
+            for field in ("command", "environment", "ports", "restart", "healthcheck", "networks"):
+                self.assertEqual(canonical_service[field], explained_service[field])
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI is unavailable")
+    def test_real_compose_hash_changes_when_only_image_becomes_digest_only(self) -> None:
+        def compose_hash(image: str) -> str:
+            model = {
+                "name": "normalization-hash-contract",
+                "services": {
+                    "redis": {
+                        "image": image,
+                        "command": ["redis-server", "--appendonly", "yes"],
+                        "environment": {"TZ": "UTC"},
+                        "restart": "unless-stopped",
+                    }
+                },
+            }
+            result = subprocess.run(
+                ["docker", "compose", "-f", "-", "config", "--hash", "redis"],
+                input=json.dumps(model), text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, check=True, timeout=30,
+            )
+            service, value = result.stdout.strip().split()
+            self.assertEqual("redis", service)
+            self.assertRegex(value, r"^[0-9a-f]{64}$")
+            return value
+
+        legacy = compose_hash("redis:7-alpine")
+        canonical = compose_hash("redis@sha256:" + "a" * 64)
+        self.assertNotEqual(legacy, canonical)
 
     def test_report_is_bound_and_bounded_with_marker_last(self) -> None:
         containers, model, hashes = self.fixture()
@@ -167,6 +516,11 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         output = render_ssm_protocol(record)
         self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
         self.assertNotIn('"services":', output)
+        self.assertTrue(output.startswith("LEGACY_NORMALIZATION_REPORT_V3 "))
+        self.assertIn("configured_image_canonical=yes", output)
+        self.assertIn("compose_drift=matched", output)
+        self.assertNotIn("explained_config_hash=", output)
+        self.assertNotIn("configured_image_sha256=", output)
         self.assertIn("bundle_digest=sha256:" + "b" * 64, output)
         self.assertIn("deployment_id=dep-" + "c" * 32, output)
         self.assertIn("config_revision=config-1", output)
@@ -198,6 +552,43 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             )
             total += len(SERVICES[role])
         self.assertEqual(28, total)
+
+    def test_cloud_protocol_with_four_verified_legacy_binds_remains_ssm_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy_root = root / "srv" / "trinyx"
+            checkout = legacy_root / "pr25-aeb2a44"
+            bundle_root = root / "release" / "bundle"
+            containers, model, hashes = self.fixture("cloud")
+            explained = dict(hashes)
+            legacy_services = sorted(SERVICES["cloud"])[:4]
+            for service in legacy_services:
+                position = sorted(SERVICES["cloud"]).index(service)
+                relative = Path("docker/cloud") / f"{service}.conf"
+                current = checkout / relative
+                expected = bundle_root / relative
+                current.parent.mkdir(parents=True, exist_ok=True)
+                expected.parent.mkdir(parents=True, exist_ok=True)
+                current.write_text(f"approved:{service}\n")
+                expected.write_text(f"approved:{service}\n")
+                containers[position]["Mounts"][0]["Source"] = str(current)
+                model["services"][service]["volumes"][0]["source"] = str(expected)
+                explained[service] = explained_hash(service)
+                containers[position]["Config"]["Labels"][
+                    "com.docker.compose.config-hash"
+                ] = explained[service]
+            evidence = legacy_bind_content_evidence(
+                "cloud", containers, model, bundle_root, legacy_root=legacy_root,
+            )
+            record = self.build(
+                containers, model, hashes, "cloud",
+                explained_hashes=explained, bind_evidence=evidence,
+            )
+            output = render_ssm_protocol(record)
+            print(f"CLOUD_LEGACY_BIND_PROTOCOL_BYTES={len(output.encode('utf-8'))}")
+            self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
+            self.assertEqual(4, output.count("bind_proof=match:sha256:"))
+            self.assertNotIn(str(root), output)
 
 
 

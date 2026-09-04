@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
+import hashlib
 import json
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +28,7 @@ if __package__:
         sha256_bytes,
         validate_release_directory,
     )
-    from .legacy_runtime import FORBIDDEN_MUTABLE_CHECKOUT, SERVICES, compose_runtime_state
+    from .legacy_runtime import SERVICES, compose_runtime_state
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from deploy_engine import ShellAdapter, load_host_plan  # type: ignore
@@ -40,15 +43,19 @@ else:
         sha256_bytes,
         validate_release_directory,
     )
-    from legacy_runtime import FORBIDDEN_MUTABLE_CHECKOUT, SERVICES, compose_runtime_state  # type: ignore
+    from legacy_runtime import SERVICES, compose_runtime_state  # type: ignore
 
 IMAGE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 IMAGE_OBJECT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+CONFIGURED_IMAGE_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,4096}$")
 DEPLOYMENT_RE = re.compile(r"^dep-[0-9a-f]{32}$")
 CONFIG_REVISION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 COMPOSE_VERSION_RE = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$")
 SSM_STDOUT_MAX_BYTES = 20_000
-COMPOSE_HASH_MISMATCH_LIMIT = 3
+LEGACY_CHECKOUT_RE = re.compile(r"^pr25-[0-9a-f]{7,40}$")
+LEGACY_BIND_MAX_ENTRIES = 4096
+LEGACY_BIND_MAX_BYTES = 64 * 1024 * 1024
+DEFAULT_LEGACY_ROOT = Path("/srv/trinyx")
 
 
 def docker_json(argv: list[str], timeout: int = 60) -> Any:
@@ -102,6 +109,230 @@ def bind_mounts(mounts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for item in mounts if item["type"] == "bind"]
 
 
+def _legacy_checkout_relative(source: str, legacy_root: Path) -> tuple[Path, Path] | None:
+    path = Path(source)
+    if not path.is_absolute():
+        return None
+    try:
+        relative = path.relative_to(legacy_root)
+    except ValueError:
+        return None
+    if len(relative.parts) < 2 or LEGACY_CHECKOUT_RE.fullmatch(relative.parts[0]) is None:
+        return None
+    return legacy_root / relative.parts[0], Path(*relative.parts[1:])
+
+
+def _content_identity(path: Path, allowed_root: Path) -> tuple[str, str]:
+    """Hash a bounded file/tree without following any symlink or special file."""
+    try:
+        require(path.is_absolute() and allowed_root.is_absolute(),
+                "legacy bind content path is not absolute")
+        require(not allowed_root.is_symlink(), "legacy bind content root is a symlink")
+        allowed_real = allowed_root.resolve(strict=True)
+        require(allowed_real.is_dir(), "legacy bind content root is not a directory")
+        relative = path.relative_to(allowed_root)
+        cursor = allowed_root
+        for part in relative.parts:
+            cursor = cursor / part
+            require(not cursor.is_symlink(), "legacy bind content path contains a symlink")
+        require(path.resolve(strict=True).is_relative_to(allowed_real),
+                "legacy bind content escapes its approved root")
+
+        entries: list[dict[str, Any]] = []
+        total_bytes = 0
+
+        def visit(current: Path, item_path: str) -> None:
+            nonlocal total_bytes
+            require(len(entries) < LEGACY_BIND_MAX_ENTRIES,
+                    "legacy bind content entry limit exceeded")
+            metadata = current.lstat()
+            mode = stat.S_IMODE(metadata.st_mode)
+            if stat.S_ISLNK(metadata.st_mode):
+                raise InvariantError("legacy bind content contains a symlink")
+            if stat.S_ISREG(metadata.st_mode):
+                digest = hashlib.sha256()
+                size = 0
+                with current.open("rb") as handle:
+                    while True:
+                        chunk = handle.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        total_bytes += len(chunk)
+                        require(total_bytes <= LEGACY_BIND_MAX_BYTES,
+                                "legacy bind content byte limit exceeded")
+                        digest.update(chunk)
+                require(size == metadata.st_size, "legacy bind content changed while hashing")
+                entries.append({
+                    "path": item_path, "type": "file", "mode": mode,
+                    "sizeBytes": size, "sha256": digest.hexdigest(),
+                })
+                return
+            if stat.S_ISDIR(metadata.st_mode):
+                entries.append({"path": item_path, "type": "directory", "mode": mode})
+                children = sorted(current.iterdir(), key=lambda item: item.name)
+                for child in children:
+                    child_path = child.name if item_path == "." else f"{item_path}/{child.name}"
+                    visit(child, child_path)
+                return
+            raise InvariantError("legacy bind content contains an unsupported file type")
+
+        visit(path, ".")
+        kind = entries[0]["type"]
+        return kind, sha256_bytes(canonical_json(entries))
+    except (OSError, ValueError) as exc:
+        raise InvariantError("legacy bind content cannot be safely inspected") from exc
+
+
+def legacy_bind_content_evidence(
+    role: str,
+    containers: list[dict[str, Any]],
+    rendered_model: dict[str, Any],
+    bundle_root: Path,
+    *,
+    legacy_root: Path = DEFAULT_LEGACY_ROOT,
+) -> dict[str, dict[str, Any]]:
+    """Prove mutable checkout bind bytes against the installed immutable bundle."""
+    require(role in SERVICES, "invalid normalization role")
+    _, runtime = compose_runtime_state(role, containers, reject_mutable_checkout=False)
+    models = rendered_model.get("services")
+    require(isinstance(models, dict) and set(SERVICES[role]).issubset(models),
+            "rendered Compose service inventory mismatch")
+    require(bundle_root.is_absolute(), "normalization bundle root is not absolute")
+    evidence: dict[str, dict[str, Any]] = {}
+    for service in sorted(SERVICES[role]):
+        wanted = bind_mounts(expected_mounts(models[service]))
+        wanted_by_target = {item["destination"]: item for item in wanted}
+        require(len(wanted_by_target) == len(wanted), "duplicate canonical bind mount target")
+        current_items: list[dict[str, str]] = []
+        expected_items: list[dict[str, str]] = []
+        verified_targets: list[str] = []
+        seen_targets: set[str] = set()
+        for observed in bind_mounts(runtime[service]["mounts"]):
+            legacy = _legacy_checkout_relative(observed["source"], legacy_root)
+            if legacy is None:
+                continue
+            require(observed["destination"] not in seen_targets,
+                    "duplicate observed legacy bind mount target")
+            seen_targets.add(observed["destination"])
+            checkout_root, relative = legacy
+            canonical = wanted_by_target.get(observed["destination"])
+            require(canonical is not None, "legacy bind target is not canonical")
+            require(
+                canonical["type"] == "bind"
+                and observed["readOnly"] == canonical["readOnly"],
+                "legacy bind type or access mode differs from canonical contract",
+            )
+            expected_path = Path(canonical["source"])
+            require(expected_path.is_absolute(), "canonical bind source is not absolute")
+            try:
+                expected_relative = expected_path.relative_to(bundle_root)
+            except ValueError as exc:
+                raise InvariantError("canonical bind source escapes immutable bundle") from exc
+            require(relative == expected_relative,
+                    "legacy bind relative path differs from canonical bundle path")
+            current_kind, current_digest = _content_identity(
+                Path(observed["source"]), checkout_root
+            )
+            expected_kind, expected_digest = _content_identity(expected_path, bundle_root)
+            require(current_kind == expected_kind, "legacy bind content type mismatch")
+            item = {"target": observed["destination"], "type": current_kind}
+            current_items.append({**item, "digest": current_digest})
+            expected_items.append({**item, "digest": expected_digest})
+            if current_digest == expected_digest:
+                verified_targets.append(observed["destination"])
+
+        current_items.sort(key=lambda item: item["target"])
+        expected_items.sort(key=lambda item: item["target"])
+        required = bool(current_items)
+        verified = len(verified_targets) == len(current_items)
+        evidence[service] = {
+            "required": required,
+            "verified": verified,
+            "verifiedTargets": sorted(verified_targets),
+            "currentDigest": sha256_bytes(canonical_json(current_items)),
+            "expectedDigest": sha256_bytes(canonical_json(expected_items)),
+            "evidenceDigest": sha256_bytes(canonical_json({
+                "current": current_items,
+                "expected": expected_items,
+            })),
+        }
+    return evidence
+
+
+def explained_compose_model(
+    role: str,
+    containers: list[dict[str, Any]],
+    rendered_model: dict[str, Any],
+    bind_content_evidence: dict[str, dict[str, Any]],
+    *,
+    legacy_root: Path = DEFAULT_LEGACY_ROOT,
+) -> dict[str, Any]:
+    """Reintroduce only explicitly approved legacy fields into the canonical model.
+
+    A current container config hash is review-qualified only when Compose hashes
+    this structured variant to the same value. Any command, environment, port,
+    network, restart, healthcheck, mount target/options, or other effective
+    service change remains absent from the variant and therefore fails closed.
+    """
+    require(role in SERVICES, "invalid normalization role")
+    _, runtime = compose_runtime_state(role, containers, reject_mutable_checkout=False)
+    model = copy.deepcopy(rendered_model)
+    services = model.get("services")
+    require(isinstance(services, dict) and set(SERVICES[role]).issubset(services),
+            "rendered Compose service inventory mismatch")
+    containers_by_service: dict[str, dict[str, Any]] = {}
+    for container in containers:
+        if not isinstance(container, dict) or not isinstance(container.get("Config"), dict):
+            continue
+        labels = container["Config"].get("Labels") or {}
+        service = labels.get("com.docker.compose.service") if isinstance(labels, dict) else None
+        if service in SERVICES[role]:
+            require(service not in containers_by_service, "duplicate Docker Compose service")
+            containers_by_service[str(service)] = container
+    require(set(containers_by_service) == SERVICES[role], "runtime inventory mismatch")
+    require(set(bind_content_evidence) == SERVICES[role],
+            "legacy bind content evidence inventory mismatch")
+
+    for service in sorted(SERVICES[role]):
+        service_model = services[service]
+        require(isinstance(service_model, dict), "invalid rendered Compose service")
+        config = containers_by_service[service]["Config"]
+        configured_image = str(config.get("Image", ""))
+        require(CONFIGURED_IMAGE_RE.fullmatch(configured_image) is not None,
+                "legacy configured image observation is invalid")
+        if configured_image != str(service_model.get("image", "")):
+            service_model["image"] = configured_image
+
+        observed_binds = {
+            item["destination"]: item for item in bind_mounts(runtime[service]["mounts"])
+        }
+        require(len(observed_binds) == len(bind_mounts(runtime[service]["mounts"])),
+                "duplicate observed bind mount target")
+        volumes = service_model.get("volumes") or []
+        require(isinstance(volumes, list), "invalid rendered Compose mount inventory")
+        for volume in volumes:
+            require(isinstance(volume, dict), "rendered Compose mount is not normalized")
+            if str(volume.get("type", "")) != "bind":
+                continue
+            target = str(volume.get("target", ""))
+            observed = observed_binds.get(target)
+            if observed is None:
+                continue
+            expected_read_only = volume.get("read_only", False)
+            require(isinstance(expected_read_only, bool), "invalid rendered Compose bind mode")
+            legacy = _legacy_checkout_relative(observed["source"], legacy_root)
+            if (
+                observed["source"] != str(volume.get("source", ""))
+                and legacy is not None
+                and observed["readOnly"] == expected_read_only
+                and bind_content_evidence[service]["verified"] is True
+                and target in bind_content_evidence[service]["verifiedTargets"]
+            ):
+                volume["source"] = observed["source"]
+    return model
+
+
 def build_normalization_plan(
     role: str,
     baseline_release_id: str,
@@ -109,6 +340,8 @@ def build_normalization_plan(
     image_inspections: list[dict[str, Any]],
     rendered_model: dict[str, Any],
     expected_hashes: dict[str, str],
+    explained_hashes: dict[str, str],
+    bind_content_evidence: dict[str, dict[str, Any]],
     version: str,
     observed_at: str,
     *,
@@ -133,6 +366,10 @@ def build_normalization_plan(
         role, containers, reject_mutable_checkout=False,
     )
     require(set(expected_hashes) == SERVICES[role], "expected Compose config-hash inventory mismatch")
+    require(set(explained_hashes) == SERVICES[role],
+            "explained Compose config-hash inventory mismatch")
+    require(set(bind_content_evidence) == SERVICES[role],
+            "legacy bind content evidence inventory mismatch")
     models = rendered_model.get("services")
     require(isinstance(models, dict) and set(SERVICES[role]).issubset(models),
             "rendered Compose service inventory mismatch")
@@ -157,6 +394,8 @@ def build_normalization_plan(
 
     services: dict[str, dict[str, Any]] = {}
     hash_matches = 0
+    explained_hash_mismatches = 0
+    unexplained_hash_mismatches = 0
     image_matches = 0
     for service in sorted(SERVICES[role]):
         state = runtime[service]
@@ -168,8 +407,8 @@ def build_normalization_plan(
         service_model = models[service]
         require(isinstance(service_model, dict), "invalid rendered Compose service")
         expected_image = str(service_model.get("image", ""))
-        require(IMAGE_RE.fullmatch(current_configured_image) is not None,
-                "legacy configured image is not digest-only")
+        require(CONFIGURED_IMAGE_RE.fullmatch(current_configured_image) is not None,
+                "legacy configured image observation is invalid")
         require(IMAGE_OBJECT_RE.fullmatch(current_image_object_id) is not None,
                 "legacy Docker image object ID is invalid")
         require(current_image_object_id in repo_digests_by_image,
@@ -178,23 +417,73 @@ def build_normalization_plan(
         current_repo_digests = repo_digests_by_image[current_image_object_id]
         current_mounts = state["mounts"]
         wanted_mounts = expected_mounts(service_model)
-        mutable_checkout = any(FORBIDDEN_MUTABLE_CHECKOUT in item["source"] for item in current_mounts)
+        content_evidence = bind_content_evidence[service]
+        require(
+            isinstance(content_evidence, dict)
+            and type(content_evidence.get("required")) is bool
+            and type(content_evidence.get("verified")) is bool
+            and isinstance(content_evidence.get("verifiedTargets"), list)
+            and len(content_evidence["verifiedTargets"])
+            == len(set(content_evidence["verifiedTargets"]))
+            and all(
+                isinstance(target, str) and target.startswith("/")
+                for target in content_evidence["verifiedTargets"]
+            )
+            and all(
+                DIGEST_RE.fullmatch(str(content_evidence.get(key, ""))) is not None
+                for key in ("currentDigest", "expectedDigest", "evidenceDigest")
+            ),
+            "legacy bind content evidence is invalid",
+        )
+        require(
+            content_evidence["required"]
+            == bool(content_evidence["verifiedTargets"])
+            if content_evidence["verified"]
+            else content_evidence["required"] is True,
+            "legacy bind content evidence state is inconsistent",
+        )
+        require(
+            content_evidence["verified"]
+            == (content_evidence["currentDigest"] == content_evidence["expectedDigest"]),
+            "legacy bind content digests contradict verification state",
+        )
+        mutable_checkout = bool(content_evidence["required"])
         current_hash = state["composeConfigHash"]
         expected_hash = expected_hashes[service]
+        explained_hash = explained_hashes[service]
         reasons: list[str] = []
-        configured_image_matches = current_configured_image == expected_image
-        image_object_matches = expected_image in current_repo_digests
-        if not configured_image_matches:
-            reasons.append("IMAGE_DIGEST_MISMATCH")
-        if not image_object_matches:
+        configured_image_is_digest = IMAGE_RE.fullmatch(current_configured_image) is not None
+        configured_image_canonical = current_configured_image == expected_image
+        image_content_matches = expected_image in current_repo_digests
+        if configured_image_is_digest:
+            require(
+                current_configured_image in current_repo_digests,
+                "configured immutable image contradicts Docker object RepoDigests",
+            )
+        if not configured_image_canonical:
+            reasons.append("IMAGE_REFERENCE_NON_CANONICAL")
+        if not image_content_matches:
             reasons.append("IMAGE_OBJECT_DIGEST_MISMATCH")
-        image_verified = configured_image_matches and image_object_matches
-        if image_verified:
+        if image_content_matches:
             image_matches += 1
-        if current_hash != expected_hash:
-            reasons.append("COMPOSE_CONFIG_HASH_MISMATCH")
-        else:
+        if mutable_checkout and not content_evidence["verified"]:
+            compose_drift = "UNEXPLAINED"
+            unexplained_hash_mismatches += 1
+            reasons.extend([
+                "LEGACY_BIND_CONTENT_MISMATCH",
+                "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
+            ])
+        elif current_hash == expected_hash:
+            compose_drift = "MATCHED"
             hash_matches += 1
+        elif explained_hash != expected_hash and current_hash == explained_hash:
+            compose_drift = "EXPLAINED_NORMALIZATION"
+            explained_hash_mismatches += 1
+            reasons.append("COMPOSE_CONFIG_DRIFT_EXPLAINED")
+        else:
+            compose_drift = "UNEXPLAINED"
+            unexplained_hash_mismatches += 1
+            reasons.append("UNEXPLAINED_COMPOSE_CONFIG_DRIFT")
         if bind_mounts(current_mounts) != bind_mounts(wanted_mounts):
             reasons.append("BIND_MOUNT_MISMATCH")
         if mutable_checkout:
@@ -204,22 +493,30 @@ def build_normalization_plan(
             "currentConfiguredImage": current_configured_image,
             "currentImageObjectId": current_image_object_id,
             "currentRepoDigests": current_repo_digests,
+            "imageObjectVerified": True,
             "expectedImageDigest": expected_image,
-            "imageObjectVerified": image_verified,
+            "configuredImageCanonical": configured_image_canonical,
+            "imageContentMatches": image_content_matches,
             "currentComposeConfigHash": current_hash,
             "expectedComposeConfigHash": expected_hash,
+            "explainedComposeConfigHash": explained_hash,
+            "composeDriftClassification": compose_drift,
             "currentMounts": current_mounts,
             "expectedMounts": wanted_mounts,
             "mutableCheckoutMounted": mutable_checkout,
+            "legacyBindContentRequired": mutable_checkout,
+            "legacyBindContentVerified": content_evidence["verified"],
+            "currentLegacyBindContentDigest": content_evidence["currentDigest"],
+            "expectedLegacyBindContentDigest": content_evidence["expectedDigest"],
+            "legacyBindEvidenceDigest": content_evidence["evidenceDigest"],
             "recreateRequired": bool(reasons),
             "reasons": reasons,
         }
 
     service_count = len(SERVICES[role])
-    mismatch_count = service_count - hash_matches
     recreate = [name for name, item in services.items() if item["recreateRequired"]]
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 4,
         "environment": "staging",
         "role": role,
         "baselineReleaseId": baseline_release_id,
@@ -231,16 +528,15 @@ def build_normalization_plan(
         "observedAt": observed_at,
         "composeProject": compose_project,
         "composeVersion": version,
-        "composeHashCapability": "SUPPORTED",
-        "composeHashCompatibility": (
-            "QUALIFIED_REVIEW"
-            if mismatch_count <= COMPOSE_HASH_MISMATCH_LIMIT
-            else "UNQUALIFIED_EXCESSIVE_DRIFT"
+        "composeHashCapability": "STRUCTURED_EXPLAINED_VARIANT",
+        "composeDriftCompatibility": (
+            "QUALIFIED_EXPLAINED_DRIFT"
+            if unexplained_hash_mismatches == 0
+            else "UNQUALIFIED_UNEXPLAINED_DRIFT"
         ),
-        "composeHashCalibrationMatches": hash_matches,
-        "composeHashCalibrationTotal": service_count,
-        "composeHashMismatchCount": mismatch_count,
-        "composeHashMismatchLimit": COMPOSE_HASH_MISMATCH_LIMIT,
+        "composeCanonicalMatchCount": hash_matches,
+        "composeExplainedDriftCount": explained_hash_mismatches,
+        "composeUnexplainedDriftCount": unexplained_hash_mismatches,
         "imageCompatibility": "MATCHED" if image_matches == service_count else "MISMATCH",
         "serviceCount": service_count,
         "recreateServices": recreate,
@@ -249,25 +545,25 @@ def build_normalization_plan(
 
 
 def _image_digest(image_ref: str) -> str:
-    require(IMAGE_RE.fullmatch(image_ref) is not None, "invalid configured image in normalization protocol")
+    require(IMAGE_RE.fullmatch(image_ref) is not None, "invalid expected image in normalization protocol")
     return "sha256:" + image_ref.rsplit("@sha256:", 1)[1]
 
 
 def render_ssm_protocol(record: dict[str, Any]) -> str:
     """Render a bounded, marker-last protocol safe for SSM's 24k stdout field."""
-    require(record.get("schemaVersion") == 2, "unsupported normalization report")
+    require(record.get("schemaVersion") == 4, "unsupported normalization report")
     role = str(record["role"])
     release_id = str(record["baselineReleaseId"])
     header = (
-        "LEGACY_NORMALIZATION_REPORT_V1 "
+        "LEGACY_NORMALIZATION_REPORT_V3 "
         f"role={role} release_id={release_id} bundle_digest={record['bundleDigest']} "
         f"deployment_id={record['deploymentId']} config_revision={record['environmentConfigRevision']} "
         f"config_digest={record['environmentConfigDigest']} "
         f"control_plane_commit={record['controlPlaneCommit']} observed_at={record['observedAt']} "
         f"compose_version={record['composeVersion']} service_count={record['serviceCount']} "
-        f"hash_matches={record['composeHashCalibrationMatches']} "
-        f"hash_mismatches={record['composeHashMismatchCount']} "
-        f"hash_limit={record['composeHashMismatchLimit']}"
+        f"canonical_matches={record['composeCanonicalMatchCount']} "
+        f"explained_drift={record['composeExplainedDriftCount']} "
+        f"unexplained_drift={record['composeUnexplainedDriftCount']}"
     )
     lines = [header]
     services = record["services"]
@@ -275,26 +571,37 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
     for service in sorted(services):
         item = services[service]
         reasons = ",".join(item["reasons"]) or "none"
+        compose_drift = {
+            "MATCHED": "matched",
+            "EXPLAINED_NORMALIZATION": "explained",
+            "UNEXPLAINED": "unexplained",
+        }[item["composeDriftClassification"]]
+        bind_proof = "none"
+        if item["legacyBindContentRequired"]:
+            bind_proof = (
+                "match:" if item["legacyBindContentVerified"] else "mismatch:"
+            ) + item["legacyBindEvidenceDigest"]
         lines.append(
             "NORMALIZATION "
-            f"role={role} service={service} "
+            f"service={service} "
             f"recreate={'yes' if item['recreateRequired'] else 'no'} reasons={reasons} "
-            f"image_match={'yes' if item['imageObjectVerified'] else 'no'} "
+            f"image_match={'yes' if item['imageContentMatches'] else 'no'} "
             f"container_id={item['currentContainerId']} image_object={item['currentImageObjectId']} "
-            f"configured_image_digest={_image_digest(item['currentConfiguredImage'])} "
+            f"configured_image_canonical={'yes' if item['configuredImageCanonical'] else 'no'} "
             f"expected_image_digest={_image_digest(item['expectedImageDigest'])} "
             f"repo_digests_sha256={sha256_bytes(canonical_json(item['currentRepoDigests']))} "
+            f"compose_drift={compose_drift} "
             f"current_config_hash={item['currentComposeConfigHash']} "
             f"expected_config_hash={item['expectedComposeConfigHash']} "
             f"current_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['currentMounts'])))} "
             f"expected_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['expectedMounts'])))} "
-            f"mutable_checkout={'yes' if item['mutableCheckoutMounted'] else 'no'}"
+            f"bind_proof={bind_proof}"
         )
     payload = "\n".join(lines) + "\n"
     report_sha = sha256_bytes(payload.encode("utf-8"))
     compatibility = (
         "review"
-        if record["composeHashCompatibility"] == "QUALIFIED_REVIEW"
+        if record["composeDriftCompatibility"] == "QUALIFIED_EXPLAINED_DRIFT"
         else "stop"
     )
     images = "matched" if record["imageCompatibility"] == "MATCHED" else "mismatch"
@@ -372,6 +679,18 @@ def main() -> None:
     rendered_model = adapter.render_model(base, release_dir, plan)
     expected_hashes = adapter.compose_config_hashes(base, release_dir, plan)
     containers = inspect_containers()
+    bind_evidence = legacy_bind_content_evidence(
+        args.role, containers, rendered_model, release_dir / "bundle"
+    )
+    roundtrip_hashes = adapter.compose_model_hashes(rendered_model, plan.services)
+    require(roundtrip_hashes == expected_hashes,
+            "Compose rendered-model hash round-trip mismatch")
+    explained_hashes = adapter.compose_model_hashes(
+        explained_compose_model(
+            args.role, containers, rendered_model, bind_evidence
+        ),
+        plan.services,
+    )
     record = build_normalization_plan(
         args.role,
         args.baseline_release,
@@ -379,6 +698,8 @@ def main() -> None:
         inspect_images(containers, args.role),
         rendered_model,
         expected_hashes,
+        explained_hashes,
+        bind_evidence,
         compose_version(),
         dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         bundle_digest=args.expected_bundle_digest,

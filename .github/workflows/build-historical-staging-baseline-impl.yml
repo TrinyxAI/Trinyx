@@ -1,0 +1,162 @@
+name: Build Historical Staging Baseline Implementation
+
+on:
+  workflow_call:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: trinyx-historical-staging-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout trusted baseline builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Verify trusted builder checkout
+        env:
+          TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TRUSTED_BUILDER_COMMIT"
+          [[ "$TRUSTED_BUILDER_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+      - name: Checkout exact historical source as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          path: historical-source
+          persist-credentials: false
+      - name: Authenticate historical GitHub publication evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit=aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          test "$(git -C historical-source rev-parse HEAD)" = "$source_commit"
+          mkdir -p historical-input/cloud historical-input/paid
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417 > historical-input/backend-run.json
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444302902 > historical-input/frontend-run.json
+          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99660712771 > historical-input/backend-publish-job.json
+          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99659777935 > historical-input/frontend-publish-job.json
+          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99660712771/logs > historical-input/backend-publish.log
+          gh api /repos/TrinyxAI/Trinyx/actions/jobs/99659777935/logs > historical-input/frontend-publish.log
+          gh api /repos/TrinyxAI/Trinyx/actions/runs/33444272417/artifacts \
+            --jq '.artifacts[] | select(.id == 9777989306)' > historical-input/artifact.json
+          test "$(jq -r .id historical-input/artifact.json)" = 9777989306
+          gh api /repos/TrinyxAI/Trinyx/actions/artifacts/9777989306/zip > historical-input/cloud.zip
+          printf '%s  %s\n' \
+            '8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0' \
+            historical-input/cloud.zip | sha256sum --check --strict
+          unzip -q historical-input/cloud.zip -d historical-input/cloud
+          test -f historical-input/cloud/cloud-image-manifest.json
+      - name: Authenticate to GHCR for read-only metadata inspection
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Inspect immutable Paid image provenance without pull
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspect() {
+            local package="$1" out="$2"
+            local tag="${package}:aeb2a447ea7ce0436a60549713636225dfe1a2c1"
+            local digest image labels
+            digest=$(docker buildx imagetools inspect "$tag" | awk '$1 == "Digest:" {print $2; exit}')
+            image=$(docker buildx imagetools inspect "$tag" --format '{{json .Image}}')
+            labels=$(jq -ce '.config.Labels | select(type == "object")' <<<"$image")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            jq -n --arg package "$package" --arg tag "$tag" --arg digest "$digest" \
+              --argjson labels "$labels" '{package:$package,tag:$tag,digest:$digest,labels:$labels}' > "$out"
+          }
+          inspect ghcr.io/trinyxai/trinyx-backend historical-input/paid/backend-inspect.json
+          inspect ghcr.io/trinyxai/trinyx-frontend historical-input/paid/frontend-inspect.json
+      - name: Validate evidence and construct canonical Paid manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/historical_baseline.py \
+            --backend-run historical-input/backend-run.json \
+            --frontend-run historical-input/frontend-run.json \
+            --artifact historical-input/artifact.json \
+            --backend-job historical-input/backend-publish-job.json \
+            --frontend-job historical-input/frontend-publish-job.json \
+            --backend-log historical-input/backend-publish.log \
+            --frontend-log historical-input/frontend-publish.log \
+            --cloud-manifest historical-input/cloud/cloud-image-manifest.json \
+            --inventory platform/release/runtime-inventory.json \
+            --historical-inventory historical-source/docker/cloud-images.json \
+            --backend-inspect historical-input/paid/backend-inspect.json \
+            --frontend-inspect historical-input/paid/frontend-inspect.json \
+            --out historical-input/paid
+      - name: Assemble canonical 28-image inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/assemble-release-images.py \
+            --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
+            --inventory platform/release/runtime-inventory.json \
+            --manifest historical-input/paid/cloud.json \
+            --manifest historical-input/paid/backend.json \
+            --manifest historical-input/paid/frontend.json \
+            --manifest platform/release/third-party-images.json \
+            --out release-images.json
+          python3 platform/release/validate-runtime-images.py \
+            --contract platform/release/runtime-inventory.json --images release-images.json
+      - name: Build deterministic bundle from exact historical source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/build-deployment-bundle.py \
+            --repo historical-source \
+            --contract platform/release/deployment-bundle-files.json \
+            --out deployment-bundle.tar \
+            --manifest-out deployment-bundle.json
+      - name: Create canonical release manifest
+        env:
+          TRUSTED_BUILDER_COMMIT: ${{ job.workflow_sha }}
+          SOURCE_REF: refs/heads/codex/trinyx-cloud-gateway-v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 platform/release/release.py create \
+            --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
+            --source-ref "$SOURCE_REF" \
+            --platform-commit "$TRUSTED_BUILDER_COMMIT" \
+            --images release-images.json \
+            --bundle-manifest deployment-bundle.json \
+            --out release.json
+          python3 platform/release/release.py validate --manifest release.json
+          jq -er '.releaseId | test("^rel-v1-[0-9a-f]{32}$")' release.json >/dev/null
+      - name: Upload canonical historical baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: trinyx-historical-staging-baseline-aeb2a447ea7ce0436a60549713636225dfe1a2c1
+          path: |
+            release.json
+            release-images.json
+            deployment-bundle.json
+            deployment-bundle.tar
+          if-no-files-found: error
+          retention-days: 365
+      - name: Attest exact canonical baseline subjects
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            release.json
+            release-images.json
+            deployment-bundle.json
+            deployment-bundle.tar

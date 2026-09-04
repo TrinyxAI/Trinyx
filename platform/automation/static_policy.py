@@ -23,6 +23,7 @@ LIVE_IMPLEMENTATIONS = {name.replace(".yml", "-impl.yml") for name in LIVE_WRAPP
 OIDC_IMPLEMENTATIONS = LIVE_IMPLEMENTATIONS | {
     "build-release-candidate-impl.yml",
     "build-trinyx-ce-images-impl.yml",
+    "build-historical-staging-baseline-impl.yml",
 }
 
 
@@ -285,13 +286,28 @@ def check_iac() -> None:
             and "compose_config_hashes" in engine and "current_compose_runtime" in engine,
             "legacy adoption is not bound to effective container Compose config")
     normalizer = (ROOT / "platform/automation/legacy_normalization_plan.py").read_text(encoding="utf-8")
-    require("composeHashCompatibility" in normalizer and "MUTABLE_CHECKOUT_MOUNT" in normalizer
+    require("composeDriftCompatibility" in normalizer
+            and "UNEXPLAINED_COMPOSE_CONFIG_DRIFT" in normalizer
+            and "MUTABLE_CHECKOUT_MOUNT" in normalizer
             and "recreateRequired" in normalizer and "compose_version" in normalizer,
             "legacy normalization plan lacks runtime/config/mount compatibility evidence")
+    require(
+        "legacy_bind_content_evidence" in normalizer
+        and "LEGACY_BIND_CONTENT_MISMATCH" in normalizer
+        and "LEGACY_BIND_MAX_ENTRIES" in normalizer
+        and "LEGACY_BIND_MAX_BYTES" in normalizer,
+        "legacy checkout bind content is not authenticated and bounded",
+    )
     require("SSM_STDOUT_MAX_BYTES = 20_000" in normalizer
             and "render_ssm_protocol" in normalizer
-            and "UNQUALIFIED_EXCESSIVE_DRIFT" in normalizer,
+            and "UNQUALIFIED_UNEXPLAINED_DRIFT" in normalizer,
             "legacy normalization report is not bounded/fail-closed")
+    require(
+        "COMPOSE_HASH_MISMATCH_LIMIT" not in normalizer
+        and "explained_compose_model" in normalizer
+        and "compose_model_hashes" in normalizer,
+        "legacy normalization still relies on a global Compose drift threshold",
+    )
     require(
         "docker\", \"image\", \"inspect" in normalizer
         and "RepoDigests" in normalizer

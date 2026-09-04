@@ -229,8 +229,28 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
             DesiredFile(REPO_ROOT / "platform/host/cloud/cloud-auth-files.sh", f"{base}/cloud-auth-files.sh", 0o600),
             DesiredFile(rendered / "cloud/runtime-static.env", f"{base}/runtime-static.env", 0o600),
             DesiredFile(rendered / "cloud/cloud-paid.override.yml", f"{base}/cloud-paid.override.yml", 0o600),
-            *([DesiredFile(REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/deployment-plan.json", f"{base}/deployment-plan.json", 0o600),
-               DesiredFile(REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/cloud-health-endpoints.json", f"{base}/cloud-health-endpoints.json", 0o644)] if environment == "staging" else []),
+            *([
+                DesiredFile(
+                    REPO_ROOT / "platform/host/cloud/systemd/staging/docker.service.d/20-trinyx-staging-runtime-gate.conf",
+                    "/etc/systemd/system/docker.service.d/20-trinyx-staging-runtime-gate.conf",
+                    0o644,
+                ),
+                DesiredFile(
+                    REPO_ROOT / "platform/host/cloud/systemd/staging/trinyx-cloud-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf",
+                    "/etc/systemd/system/trinyx-cloud-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf",
+                    0o644,
+                ),
+                DesiredFile(
+                    REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/deployment-plan.json",
+                    f"{base}/deployment-plan.json",
+                    0o600,
+                ),
+                DesiredFile(
+                    REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/cloud-health-endpoints.json",
+                    f"{base}/cloud-health-endpoints.json",
+                    0o644,
+                ),
+            ] if environment == "staging" else []),
         ]
         return dirs, files
 
@@ -248,8 +268,28 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
         DesiredFile(rendered / "paid/paid.override.yml", f"{base}/paid.override.yml", 0o600),
         DesiredFile(rendered / "paid/paid-bind.override.yml", f"{base}/paid-bind.override.yml", 0o600),
         DesiredFile(rendered / "paid/paid-runtime.override.yml", f"{base}/paid-runtime.override.yml", 0o600),
-        *([DesiredFile(REPO_ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/deployment-plan.json", f"{base}/deployment-plan.json", 0o600),
-           DesiredFile(REPO_ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid-health-endpoints.json", f"{base}/paid-health-endpoints.json", 0o644)] if environment == "staging" else []),
+        *([
+            DesiredFile(
+                REPO_ROOT / "platform/host/paid/systemd/staging/docker.service.d/20-trinyx-staging-runtime-gate.conf",
+                "/etc/systemd/system/docker.service.d/20-trinyx-staging-runtime-gate.conf",
+                0o644,
+            ),
+            DesiredFile(
+                REPO_ROOT / "platform/host/paid/systemd/staging/trinyx-paid-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf",
+                "/etc/systemd/system/trinyx-paid-runtime-materialize.service.d/20-trinyx-staging-retrigger.conf",
+                0o644,
+            ),
+            DesiredFile(
+                REPO_ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/deployment-plan.json",
+                f"{base}/deployment-plan.json",
+                0o600,
+            ),
+            DesiredFile(
+                REPO_ROOT / "platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid-health-endpoints.json",
+                f"{base}/paid-health-endpoints.json",
+                0o644,
+            ),
+        ] if environment == "staging" else []),
     ]
     return dirs, files
 

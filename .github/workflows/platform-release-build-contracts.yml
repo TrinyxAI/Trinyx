@@ -17,6 +17,8 @@ on:
       - 'docker/paid-monolith-internal/Caddyfile'
       - '.github/workflows/build-release-candidate.yml'
       - '.github/workflows/build-release-candidate-impl.yml'
+      - '.github/workflows/build-historical-staging-baseline.yml'
+      - '.github/workflows/build-historical-staging-baseline-impl.yml'
       - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   push:
@@ -37,6 +39,8 @@ on:
       - 'docker/paid-monolith-internal/Caddyfile'
       - '.github/workflows/build-release-candidate.yml'
       - '.github/workflows/build-release-candidate-impl.yml'
+      - '.github/workflows/build-historical-staging-baseline.yml'
+      - '.github/workflows/build-historical-staging-baseline-impl.yml'
       - '.github/workflows/build-trinyx-frontend.yml'
       - '.github/workflows/platform-release-build-contracts.yml'
   workflow_dispatch:
@@ -69,6 +73,7 @@ jobs:
           python3 -m py_compile platform/release/release.py
           python3 -m py_compile platform/release/assemble-release-images.py
           python3 -m py_compile platform/release/build-deployment-bundle.py
+          python3 -m py_compile platform/release/historical_baseline.py
           bash -n platform/tests/test-release-build-contract.sh
           bash -n platform/tests/test-release-workflow-boundary.sh
       - name: Verify immutable build manifest and bundle contracts
@@ -103,4 +108,3 @@ jobs:
           echo CLOUD_RUNTIME_20_IMAGE_CONTRACT_OK
       - name: Release build contract complete
         run: echo O5_RELEASE_BUILD_CONTRACT_CI_OK
-

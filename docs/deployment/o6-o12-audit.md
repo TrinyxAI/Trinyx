@@ -187,6 +187,14 @@ Because this repository was created after GitHub's 2026 immutable-subject rollou
 
 ### Pre-merge manual entry point
 
+The historical aeb2 baseline builder remains deliberately non-operational in
+this branch. Its `workflow_dispatch` file is absent from the default branch and
+the current registrar trusts neither its artifact name nor its signer. A later
+default-branch caller must pin the final reusable builder SHA; a separate
+registrar authorization must pin that caller/build identity and require all
+four modern attestations. Neither follow-up may alter the exact frozen f3a4
+exception.
+
 GitHub only dispatches a workflow file registered on the default branch. Until the dedicated workflows are integrated, manually dispatch `build-trinyx-backend.yml` at ref `codex/platform-release-automation` and select one explicit operation. The bridge has no generic command input and calls only pinned repository reusable workflows. Selecting a platform operation does not run backend/frontend tests, Docker build, image publication or any push-triggered staging contact.
 
 
@@ -238,8 +246,12 @@ and incurs no AWS managed-CA monthly fee.
 - **LIVE_BOOTSTRAP_BLOCKER — legacy normalization:** a new read-only
   `normalize-plan` SSM path reports image/config-hash/mount deltas without
   materialization or mutation. Mutable checkout mounts are reported as required
-  recreations, not permitted as baseline evidence. All-image mismatch and
-  all-service config-hash mismatch remain fail-closed compatibility gates.
+  recreations, not permitted as baseline evidence. Legacy image tags are never
+  trusted: the exact Docker image object's immutable `RepoDigests` prove
+  content identity, while non-canonical configured references and true content
+  mismatches remain distinct bounded-plan reasons. A structured Compose variant
+  admits only those explained image/mutable-bind substitutions; one unrelated
+  effective configuration change remains a fail-closed gate.
 - **OPERATIONAL STOP:** normalization output is CI-implemented only. No container
   recreation, TLS transition, baseline adoption, AWS change set or staging plan
   has been live validated.
@@ -258,14 +270,18 @@ never the full JSON report. Output is hard-bounded below 20,000 bytes to remain
 under the SSM `StandardOutputContent` limit. Every report is bound to the
 baseline release and bundle digest, deployment ID, environment config revision
 and computed config digest, audited control-plane commit, Compose version and a
-SHA-256 of the emitted protocol. More than three Compose config-hash mismatches
-returns `compatibility=stop`; no bulk recreation is inferred or authorized.
+SHA-256 of the emitted protocol. Explained canonicalization hashes are separate
+from unexplained drift; any unexplained service returns `compatibility=stop`.
+No bulk recreation is inferred or authorized.
 
 
 ### Normalization receiver integrity closure
 
-The host proves both the configured digest and the running Docker image object:
-the expected immutable reference must appear in that object's `RepoDigests`.
+The host records the configured reference but trusts only the running Docker
+image object: the expected immutable reference must appear in that exact
+object's `RepoDigests`. A tag may therefore be observed but never treated as
+identity; matching content behind a tag still requires a separately approved
+canonical-reference normalization.
 The orchestrator accepts a normalization report only when it contains one exact
 header, exactly 8 unique Paid or 20 unique Cloud service records with the
 canonical names, and one final marker. It recomputes SHA-256 over every
@@ -273,7 +289,17 @@ pre-marker byte and verifies service, image, hash, recreate and compatibility
 summaries. Missing, duplicate, unknown, truncated, reordered-after-marker or
 digest-mismatched output fails before human review or mutation.
 
-The only approved live order is reconcile/materialize → install baseline
+The metadata-only historical import is distinct from observation: it may create
+a canonical release only from exact historical GitHub publication runs and
+artifact ID, original Paid digests extracted from the exact authenticated
+publication job logs, matching present-day full-SHA tags/OCI revisions, the
+exact historical source tree, and the reviewed static third-party inventory.
+The latter makes this an aeb2 first-party baseline plus current reviewed
+third-party policy, not a byte-for-byte snapshot of every legacy container. It performs no application
+rebuild and live runtime evidence cannot substitute for any missing provenance.
+
+The only approved live order is reconcile/materialize → register canonical
+baseline → install baseline
 inactive → authenticated Paid/Cloud normalization plan → separately approved
 minimal normalization → zero-recreate normalization proof → schema-v3 baseline
 observation → pointer-only adoption → candidate plan. Observation before

@@ -18,11 +18,10 @@
     "composeProject",
     "composeVersion",
     "composeHashCapability",
-    "composeHashCompatibility",
-    "composeHashCalibrationMatches",
-    "composeHashCalibrationTotal",
-    "composeHashMismatchCount",
-    "composeHashMismatchLimit",
+    "composeDriftCompatibility",
+    "composeCanonicalMatchCount",
+    "composeExplainedDriftCount",
+    "composeUnexplainedDriftCount",
     "imageCompatibility",
     "serviceCount",
     "recreateServices",
@@ -30,7 +29,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 4
     },
     "environment": {
       "const": "staging"
@@ -79,32 +78,28 @@
       "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
     },
     "composeHashCapability": {
-      "const": "SUPPORTED"
+      "const": "STRUCTURED_EXPLAINED_VARIANT"
     },
-    "composeHashCompatibility": {
+    "composeDriftCompatibility": {
       "enum": [
-        "QUALIFIED_REVIEW",
-        "UNQUALIFIED_EXCESSIVE_DRIFT"
+        "QUALIFIED_EXPLAINED_DRIFT",
+        "UNQUALIFIED_UNEXPLAINED_DRIFT"
       ]
     },
-    "composeHashCalibrationMatches": {
+    "composeCanonicalMatchCount": {
       "type": "integer",
       "minimum": 0,
       "maximum": 20
     },
-    "composeHashCalibrationTotal": {
-      "enum": [
-        8,
-        20
-      ]
-    },
-    "composeHashMismatchCount": {
+    "composeExplainedDriftCount": {
       "type": "integer",
       "minimum": 0,
       "maximum": 20
     },
-    "composeHashMismatchLimit": {
-      "const": 3
+    "composeUnexplainedDriftCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
     },
     "imageCompatibility": {
       "enum": [
@@ -139,12 +134,21 @@
           "currentImageObjectId",
           "currentRepoDigests",
           "imageObjectVerified",
+          "configuredImageCanonical",
+          "imageContentMatches",
           "expectedImageDigest",
           "currentComposeConfigHash",
           "expectedComposeConfigHash",
+          "explainedComposeConfigHash",
+          "composeDriftClassification",
           "currentMounts",
           "expectedMounts",
           "mutableCheckoutMounted",
+          "legacyBindContentRequired",
+          "legacyBindContentVerified",
+          "currentLegacyBindContentDigest",
+          "expectedLegacyBindContentDigest",
+          "legacyBindEvidenceDigest",
           "recreateRequired",
           "reasons"
         ],
@@ -155,7 +159,7 @@
           },
           "currentConfiguredImage": {
             "type": "string",
-            "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]{1,4096}$"
           },
           "currentImageObjectId": {
             "type": "string",
@@ -173,6 +177,17 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           },
+          "explainedComposeConfigHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "composeDriftClassification": {
+            "enum": [
+              "MATCHED",
+              "EXPLAINED_NORMALIZATION",
+              "UNEXPLAINED"
+            ]
+          },
           "currentMounts": {
             "type": "array",
             "items": {
@@ -188,6 +203,24 @@
           "mutableCheckoutMounted": {
             "type": "boolean"
           },
+          "legacyBindContentRequired": {
+            "type": "boolean"
+          },
+          "legacyBindContentVerified": {
+            "type": "boolean"
+          },
+          "currentLegacyBindContentDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "expectedLegacyBindContentDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "legacyBindEvidenceDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
           "recreateRequired": {
             "type": "boolean"
           },
@@ -196,10 +229,12 @@
             "uniqueItems": true,
             "items": {
               "enum": [
-                "IMAGE_DIGEST_MISMATCH",
+                "IMAGE_REFERENCE_NON_CANONICAL",
                 "IMAGE_OBJECT_DIGEST_MISMATCH",
-                "COMPOSE_CONFIG_HASH_MISMATCH",
+                "COMPOSE_CONFIG_DRIFT_EXPLAINED",
+                "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
                 "BIND_MOUNT_MISMATCH",
+                "LEGACY_BIND_CONTENT_MISMATCH",
                 "MUTABLE_CHECKOUT_MOUNT"
               ]
             }
@@ -214,6 +249,12 @@
             }
           },
           "imageObjectVerified": {
+            "const": true
+          },
+          "configuredImageCanonical": {
+            "type": "boolean"
+          },
+          "imageContentMatches": {
             "type": "boolean"
           }
         }

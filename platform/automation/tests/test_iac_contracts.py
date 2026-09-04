@@ -188,6 +188,14 @@ class IacContractTests(unittest.TestCase):
             "IMAGE_OBJECT_DIGEST_MISMATCH",
             service["properties"]["reasons"]["items"]["enum"],
         )
+        self.assertTrue(
+            {"explainedComposeConfigHash", "composeDriftClassification"}
+            .issubset(set(service["required"]))
+        )
+        self.assertIn(
+            "UNEXPLAINED_COMPOSE_CONFIG_DRIFT",
+            service["properties"]["reasons"]["items"]["enum"],
+        )
 
     def test_o6_o12_contract_schemas_are_committed_and_closed(self) -> None:
         expected = {
@@ -215,9 +223,9 @@ class IacContractTests(unittest.TestCase):
                 "schemaVersion", "environment", "role", "baselineReleaseId", "bundleDigest",
                 "deploymentId", "environmentConfigRevision", "environmentConfigDigest",
                 "controlPlaneCommit", "observedAt", "composeProject", "composeVersion",
-                "composeHashCapability", "composeHashCompatibility",
-                "composeHashCalibrationMatches", "composeHashCalibrationTotal",
-                "composeHashMismatchCount", "composeHashMismatchLimit", "imageCompatibility",
+                "composeHashCapability", "composeDriftCompatibility",
+                "composeCanonicalMatchCount", "composeExplainedDriftCount",
+                "composeUnexplainedDriftCount", "imageCompatibility",
                 "serviceCount", "recreateServices", "services",
             },
         }
@@ -233,6 +241,19 @@ class IacContractTests(unittest.TestCase):
                         field_type == "string" or isinstance(field_type, list) and "string" in field_type,
                         f"{path}:{name}",
                     )
+        normalization = self.load("platform/contracts/legacy-normalization-plan.schema.json")
+        service = normalization["properties"]["services"]["additionalProperties"]
+        self.assertTrue({
+            "legacyBindContentRequired",
+            "legacyBindContentVerified",
+            "currentLegacyBindContentDigest",
+            "expectedLegacyBindContentDigest",
+            "legacyBindEvidenceDigest",
+        }.issubset(set(service["required"])))
+        self.assertIn(
+            "LEGACY_BIND_CONTENT_MISMATCH",
+            service["properties"]["reasons"]["items"]["enum"],
+        )
 
 
 if __name__ == "__main__":

@@ -147,10 +147,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          created_at=$(jq -er '
+            .created_at
+            | select(type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+          ' historical-input/backend-run.json)
           python3 platform/release/release.py create \
             --source-commit aeb2a447ea7ce0436a60549713636225dfe1a2c1 \
             --source-ref "$SOURCE_REF" \
             --platform-commit "$TRUSTED_BUILDER_COMMIT" \
+            --created-at "$created_at" \
             --images release-images.json \
             --bundle-manifest deployment-bundle.json \
             --out release.json

@@ -52,20 +52,41 @@ def load_release_module(path: Path):
 
 def validate_complete_runtime(contract_path: Path, manifest: dict[str, Any]) -> None:
     contract = load_json(contract_path)
+    entry_keys = {"name", "role", "service", "environment"}
     if (
         not isinstance(contract, dict)
+        or set(contract) != {"schemaVersion", "images"}
         or type(contract.get("schemaVersion")) is not int
         or contract["schemaVersion"] != 1
         or not isinstance(contract.get("images"), list)
+        or len(contract["images"]) != 28
     ):
         fail("invalid runtime inventory contract")
+
     expected: dict[str, tuple[str, str, str]] = {}
+    expected_bindings: set[tuple[str, str]] = set()
+    expected_counts = {"cloud": 0, "paid": 0}
     for item in contract["images"]:
-        name = str(item.get("name", ""))
-        binding = (str(item.get("role", "")), str(item.get("service", "")), str(item.get("environment", "")))
-        if not name or name in expected:
-            fail("duplicate/empty runtime contract image name")
-        expected[name] = binding
+        if (
+            not isinstance(item, dict)
+            or set(item) != entry_keys
+            or any(not isinstance(item[key], str) for key in entry_keys)
+            or item["role"] not in expected_counts
+            or not item["name"]
+            or not item["service"]
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]*", item["environment"])
+        ):
+            fail("invalid runtime inventory contract image entry")
+        name = item["name"]
+        binding = (item["role"], item["environment"])
+        if name in expected or binding in expected_bindings:
+            fail("duplicate runtime inventory contract binding")
+        expected[name] = (item["role"], item["service"], item["environment"])
+        expected_bindings.add(binding)
+        expected_counts[item["role"]] += 1
+    if expected_counts != {"cloud": 20, "paid": 8}:
+        fail("runtime inventory contract role cardinality mismatch")
+
     actual: dict[str, tuple[str, str, str]] = {}
     for item in manifest["images"]:
         name = item["name"]

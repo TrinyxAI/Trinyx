@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "historicalSourceCommit": "aeb2a447ea7ce0436a60549713636225dfe1a2c1",
+  "historicalPaths": [
+    "docker-compose.yml",
+    "catalog-seeds",
+    "docker/docker-compose.cloud.yml",
+    "docker/docker-compose.cloud.runtime.yml",
+    "docker/cloud/Caddyfile",
+    "docker/cloud/postgres/00-keycloak-schema.sql",
+    "docker/cloud/keycloak/trinyx-realm.json",
+    "docker/cloud/searxng/settings.yml",
+    "docker/paid-monolith-internal/Caddyfile"
+  ],
+  "trustedBuilderOverlays": [
+    "docker/docker-compose.paid.runtime.yml"
+  ]
+}

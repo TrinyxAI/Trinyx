@@ -1,0 +1,16 @@
+name: Build Historical Staging Baseline
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  baseline:
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    uses: TrinyxAI/Trinyx/.github/workflows/build-historical-staging-baseline-impl.yml@3e298c6b2903e5620a8522edcc55ec9c0a2bf9e0

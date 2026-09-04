@@ -7,18 +7,111 @@ import re
 from pathlib import Path
 from typing import Any
 
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
+ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+IMAGE_KEYS = {"name", "role", "service", "package", "environment", "digest", "immutableRef"}
 
 
 def fail(message: str) -> None:
     raise SystemExit(f"ERROR: {message}")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def load(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         fail(f"cannot read {path}: {exc}")
+
+
+def validate_inventory(contract: Any) -> dict[str, tuple[str, str, str]]:
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schemaVersion", "images"}
+        or type(contract["schemaVersion"]) is not int
+        or contract["schemaVersion"] != 1
+        or not isinstance(contract["images"], list)
+        or len(contract["images"]) != 28
+    ):
+        fail("invalid runtime inventory contract")
+    expected: dict[str, tuple[str, str, str]] = {}
+    bindings: set[tuple[str, str]] = set()
+    for item in contract["images"]:
+        keys = {"name", "role", "service", "environment"}
+        if (
+            not isinstance(item, dict)
+            or set(item) != keys
+            or any(not isinstance(item[key], str) for key in keys)
+            or item["role"] not in {"cloud", "paid"}
+            or not NAME_RE.fullmatch(item["name"])
+            or not NAME_RE.fullmatch(item["service"])
+            or not ENV_RE.fullmatch(item["environment"])
+        ):
+            fail("invalid runtime inventory image entry")
+        if item["name"] in expected:
+            fail("duplicate/empty runtime contract image name")
+        binding = (item["role"], item["environment"])
+        if binding in bindings:
+            fail("duplicate runtime contract image binding")
+        expected[item["name"]] = (item["role"], item["service"], item["environment"])
+        bindings.add(binding)
+    return expected
+
+
+def validate_images(document: Any) -> dict[str, tuple[str, str, str]]:
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schemaVersion", "sourceCommit", "images"}
+        or type(document["schemaVersion"]) is not int
+        or document["schemaVersion"] != 1
+        or not isinstance(document["sourceCommit"], str)
+        or not SHA_RE.fullmatch(document["sourceCommit"])
+        or not isinstance(document["images"], list)
+        or len(document["images"]) != 28
+    ):
+        fail("image document schema mismatch")
+    actual: dict[str, tuple[str, str, str]] = {}
+    bindings: set[tuple[str, str]] = set()
+    for item in document["images"]:
+        if (
+            not isinstance(item, dict)
+            or set(item) != IMAGE_KEYS
+            or any(not isinstance(item[key], str) for key in IMAGE_KEYS)
+            or not NAME_RE.fullmatch(item["name"])
+            or not NAME_RE.fullmatch(item["service"])
+            or not ENV_RE.fullmatch(item["environment"])
+        ):
+            fail("invalid runtime image entry")
+        name = item["name"]
+        role = item["role"]
+        package = item["package"]
+        digest = item["digest"]
+        if role not in {"cloud", "paid"}:
+            fail(f"invalid image role for {name}")
+        if name in actual:
+            fail("duplicate/empty image name")
+        if not DIGEST_RE.fullmatch(digest):
+            fail(f"non-immutable digest for {name}")
+        if not package or "@" in package or any(char.isspace() for char in package):
+            fail(f"invalid package for {name}")
+        if item["immutableRef"] != package + "@" + digest:
+            fail(f"immutableRef mismatch for {name}")
+        binding = (role, item["environment"])
+        if binding in bindings:
+            fail("duplicate runtime image binding")
+        actual[name] = (role, item["service"], item["environment"])
+        bindings.add(binding)
+    return actual
 
 
 def main() -> None:
@@ -27,40 +120,8 @@ def main() -> None:
     parser.add_argument("--images", required=True, type=Path)
     args = parser.parse_args()
 
-    contract = load(args.contract)
-    document = load(args.images)
-    if contract.get("schemaVersion") != 1 or not isinstance(contract.get("images"), list):
-        fail("invalid runtime inventory contract")
-    if not isinstance(document, dict) or not isinstance(document.get("images"), list):
-        fail("image document must contain images[]")
-
-    expected: dict[str, tuple[str, str, str]] = {}
-    for item in contract["images"]:
-        key = str(item.get("name", ""))
-        value = (str(item.get("role", "")), str(item.get("service", "")), str(item.get("environment", "")))
-        if not key or key in expected:
-            fail("duplicate/empty runtime contract image name")
-        expected[key] = value
-
-    actual: dict[str, tuple[str, str, str]] = {}
-    for item in document["images"]:
-        name = str(item.get("name", ""))
-        role = str(item.get("role", ""))
-        service = str(item.get("service", ""))
-        environment = str(item.get("environment", ""))
-        package = str(item.get("package", ""))
-        digest = str(item.get("digest", ""))
-        immutable = str(item.get("immutableRef", ""))
-        if not name or name in actual:
-            fail("duplicate/empty image name")
-        if not DIGEST_RE.fullmatch(digest):
-            fail(f"non-immutable digest for {name}")
-        if not package or "@" in package or any(ch.isspace() for ch in package):
-            fail(f"invalid package for {name}")
-        if immutable != package + "@" + digest:
-            fail(f"immutableRef mismatch for {name}")
-        actual[name] = (role, service, environment)
-
+    expected = validate_inventory(load(args.contract))
+    actual = validate_images(load(args.images))
     missing = sorted(set(expected) - set(actual))
     extra = sorted(set(actual) - set(expected))
     mismatch = sorted(name for name in expected.keys() & actual.keys() if expected[name] != actual[name])
@@ -70,7 +131,6 @@ def main() -> None:
         fail("extra runtime images: " + ",".join(extra))
     if mismatch:
         fail("runtime binding mismatch: " + ",".join(mismatch))
-
     print(f"RUNTIME_IMAGE_CONTRACT_OK images={len(actual)}")
 
 

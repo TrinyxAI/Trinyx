@@ -183,7 +183,7 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             self.assertIn(service, result["recreateServices"])
             protocol = render_ssm_protocol(result)
             self.assertIn(
-                f"bind_content={evidence[service]['evidenceDigest']} bind_content_match=yes",
+                f"bind_proof=match:{evidence[service]['evidenceDigest']}",
                 protocol,
             )
             self.assertNotIn(str(root), protocol)
@@ -552,6 +552,43 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             )
             total += len(SERVICES[role])
         self.assertEqual(28, total)
+
+    def test_cloud_protocol_with_four_verified_legacy_binds_remains_ssm_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy_root = root / "srv" / "trinyx"
+            checkout = legacy_root / "pr25-aeb2a44"
+            bundle_root = root / "release" / "bundle"
+            containers, model, hashes = self.fixture("cloud")
+            explained = dict(hashes)
+            legacy_services = sorted(SERVICES["cloud"])[:4]
+            for service in legacy_services:
+                position = sorted(SERVICES["cloud"]).index(service)
+                relative = Path("docker/cloud") / f"{service}.conf"
+                current = checkout / relative
+                expected = bundle_root / relative
+                current.parent.mkdir(parents=True, exist_ok=True)
+                expected.parent.mkdir(parents=True, exist_ok=True)
+                current.write_text(f"approved:{service}\n")
+                expected.write_text(f"approved:{service}\n")
+                containers[position]["Mounts"][0]["Source"] = str(current)
+                model["services"][service]["volumes"][0]["source"] = str(expected)
+                explained[service] = explained_hash(service)
+                containers[position]["Config"]["Labels"][
+                    "com.docker.compose.config-hash"
+                ] = explained[service]
+            evidence = legacy_bind_content_evidence(
+                "cloud", containers, model, bundle_root, legacy_root=legacy_root,
+            )
+            record = self.build(
+                containers, model, hashes, "cloud",
+                explained_hashes=explained, bind_evidence=evidence,
+            )
+            output = render_ssm_protocol(record)
+            print(f"CLOUD_LEGACY_BIND_PROTOCOL_BYTES={len(output.encode('utf-8'))}")
+            self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
+            self.assertEqual(4, output.count("bind_proof=match:sha256:"))
+            self.assertNotIn(str(root), output)
 
 
 

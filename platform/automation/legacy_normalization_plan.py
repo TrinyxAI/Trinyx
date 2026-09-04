@@ -576,6 +576,11 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
             "EXPLAINED_NORMALIZATION": "explained",
             "UNEXPLAINED": "unexplained",
         }[item["composeDriftClassification"]]
+        bind_proof = "none"
+        if item["legacyBindContentRequired"]:
+            bind_proof = (
+                "match:" if item["legacyBindContentVerified"] else "mismatch:"
+            ) + item["legacyBindEvidenceDigest"]
         lines.append(
             "NORMALIZATION "
             f"service={service} "
@@ -590,9 +595,7 @@ def render_ssm_protocol(record: dict[str, Any]) -> str:
             f"expected_config_hash={item['expectedComposeConfigHash']} "
             f"current_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['currentMounts'])))} "
             f"expected_bind_mounts_sha256={sha256_bytes(canonical_json(bind_mounts(item['expectedMounts'])))} "
-            f"bind_content={item['legacyBindEvidenceDigest'] if item['legacyBindContentRequired'] else 'none'} "
-            f"bind_content_match={'yes' if item['legacyBindContentVerified'] else 'no'} "
-            f"mutable_checkout={'yes' if item['mutableCheckoutMounted'] else 'no'}"
+            f"bind_proof={bind_proof}"
         )
     payload = "\n".join(lines) + "\n"
     report_sha = sha256_bytes(payload.encode("utf-8"))

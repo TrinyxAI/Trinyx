@@ -75,7 +75,7 @@ def normalization_protocol(
             f"expected_config_hash={expected_hash} "
             f"current_bind_mounts_sha256=sha256:{index + 4000:064x} "
             f"expected_bind_mounts_sha256=sha256:{index + 4000:064x} "
-            "bind_content=none bind_content_match=yes mutable_checkout=no"
+            "bind_proof=none"
         )
     payload = "\n".join(lines) + "\n"
     report_sha = "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -310,9 +310,8 @@ class OrchestratorTests(unittest.TestCase):
         request = self.normalization_request()
         lines = normalization_protocol(request).rstrip("\n").split("\n")
         lines[1] = lines[1].replace(
-            "bind_content=none bind_content_match=yes mutable_checkout=no",
-            "bind_content=sha256:" + "a" * 64
-            + " bind_content_match=no mutable_checkout=yes",
+            "bind_proof=none",
+            "bind_proof=mismatch:sha256:" + "a" * 64,
         )
         payload = "\n".join(lines[:-1]) + "\n"
         lines[-1] = re.sub(
@@ -320,7 +319,7 @@ class OrchestratorTests(unittest.TestCase):
             "report_sha256=sha256:" + hashlib.sha256(payload.encode()).hexdigest(),
             lines[-1],
         )
-        with self.assertRaisesRegex(InvariantError, "reasons/recreate invariant"):
+        with self.assertRaisesRegex(InvariantError, "mutable checkout evidence"):
             self.validate_protocol("\n".join(lines) + "\n", request)
 
     def test_normalization_receiver_accepts_verified_legacy_bind_content(self) -> None:
@@ -337,9 +336,8 @@ class OrchestratorTests(unittest.TestCase):
             "compose_drift=matched current_config_hash=" + "1".zfill(64),
             "compose_drift=explained current_config_hash=" + "e" * 64,
         ).replace(
-            "bind_content=none bind_content_match=yes mutable_checkout=no",
-            "bind_content=sha256:" + "a" * 64
-            + " bind_content_match=yes mutable_checkout=yes",
+            "bind_proof=none",
+            "bind_proof=match:sha256:" + "a" * 64,
         )
         marker = lines[-1].replace("recreate_count=0", "recreate_count=1")
         payload = "\n".join(lines[:-1]) + "\n"

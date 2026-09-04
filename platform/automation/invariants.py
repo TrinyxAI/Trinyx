@@ -23,6 +23,10 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 RFC3339_UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PACKAGE_RE = re.compile(
+    r"^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?)/)?"
+    r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+)
 SERVICE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 FROZEN_CANDIDATE_RELEASE_ID = "rel-v1-b5ba70c23b9f529ac8228a7b00b4faa4"
 FROZEN_CANDIDATE_BUNDLE_DIGEST = "sha256:c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892"
@@ -198,10 +202,10 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
         require(SERVICE_RE.fullmatch(image["name"]) is not None, "bad image name")
         require(SERVICE_RE.fullmatch(image["service"]) is not None, "bad service name")
         require(ENV_RE.fullmatch(image["environment"]) is not None, "bad image environment binding")
+        require(PACKAGE_RE.fullmatch(image["package"]) is not None, "runtime image repository is not canonical/tagless")
         require(DIGEST_RE.fullmatch(image["digest"]) is not None, "runtime image is not digest pinned")
         expected = f"{image['package']}@{image['digest']}"
         require(image["immutableRef"] == expected, "image binding/digest mismatch")
-        require(":latest" not in expected, "mutable latest image is forbidden")
         require(image["name"] not in seen_names, "duplicate image name")
         binding = (role, image["environment"])
         require(binding not in seen_bindings, "duplicate image binding")

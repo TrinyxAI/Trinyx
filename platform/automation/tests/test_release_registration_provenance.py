@@ -411,16 +411,23 @@ class ReleaseRegistrationProvenanceTests(unittest.TestCase):
             )
             fake_gh.chmod(0o755)
             env = os.environ.copy()
+            frozen = compatibility == "frozen-historical-builder"
+            source_digest = HISTORICAL_SOURCE if frozen else "a" * 40
             env.update(
                 {
                     "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
                     "REQUIRE_INTERNAL_ATTESTATIONS": require_attestations,
                     "COMPATIBILITY": compatibility,
                     "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
-                    "SIGNER_WORKFLOW": "build-release-candidate-impl.yml",
-                    "SIGNER_DIGEST": BUILDER_COMMIT,
-                    "ATTESTATION_SOURCE_DIGEST": "a" * 40,
-                    "SOURCE_COMMIT": "a" * 40,
+                    "BUILDER_WORKFLOW_COMMIT": BUILDER_COMMIT,
+                    "SIGNER_WORKFLOW": (
+                        "build-release-candidate.yml"
+                        if frozen
+                        else "build-release-candidate-impl.yml"
+                    ),
+                    "SIGNER_DIGEST": HISTORICAL_SOURCE if frozen else BUILDER_COMMIT,
+                    "ATTESTATION_SOURCE_DIGEST": source_digest,
+                    "SOURCE_COMMIT": source_digest,
                 }
             )
             return subprocess.run(

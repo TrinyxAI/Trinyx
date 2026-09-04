@@ -530,7 +530,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             '.manifest.digest | select(type == "string" '
             'and test("^sha256:[0-9a-f]{64}$"))'
         )
-        image_filter = '.image | select(type == "object")'
+        image_filter = '.image | select(type == "object" and (.config | type == "object"))'
         valid = {
             "manifest": {"digest": BACKEND_HISTORICAL_DIGEST},
             "image": {
@@ -557,6 +557,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             {"manifest": {"digest": "mutable"}, "image": valid["image"]},
             {"manifest": {"digest": "sha256:" + "A" * 64}, "image": valid["image"]},
             {"manifest": {"digest": BACKEND_HISTORICAL_DIGEST}, "image": []},
+            {"manifest": {"digest": BACKEND_HISTORICAL_DIGEST}, "image": {}},
         )
         for document in invalid_snapshots:
             with self.subTest(document=document):

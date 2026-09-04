@@ -39,7 +39,25 @@ grep -Fq 'historical-deployment-bundle-sources.json' "$HISTORICAL_WORKFLOW"
 grep -Fq 'actions/attest-build-provenance@' "$HISTORICAL_WORKFLOW"
 grep -Fq 'git -C historical-source status --porcelain=v1 --untracked-files=all' "$HISTORICAL_WORKFLOW"
 grep -Fq 'postgres redis minio minio-init bridge livecontext frontend paid-edge' "$HISTORICAL_WORKFLOW"
-grep -Fq 'set(services) != set(expected)' "$HISTORICAL_WORKFLOW"
+grep -Fq 'set(services) != expected_services' "$HISTORICAL_WORKFLOW"
+grep -Fq 'platform/release/validate-historical-artifact.py' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--expected-file cloud-image-manifest.json' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--trusted-commit "$TRUSTED_BUILDER_COMMIT"' "$HISTORICAL_WORKFLOW"
+grep -Fq -- '--approved-environment-config platform/bootstrap/paid/staging/rootfs/etc/trinyx/staging/paid/config/paid.override.yml' "$HISTORICAL_WORKFLOW"
+grep -Fq 'HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK' "$ROOT/platform/release/prepare-historical-bundle-source.py"
+if grep -Fq 'unzip -q' "$HISTORICAL_WORKFLOW"; then
+  echo ERROR_UNSAFE_HISTORICAL_ZIP_EXTRACTION >&2
+  exit 1
+fi
+python3 - "$HISTORICAL_WORKFLOW" <<'PY'
+import sys
+workflow = open(sys.argv[1], encoding="utf-8").read()
+prepare = workflow.index("Prepare authenticated historical bundle source")
+render = workflow.index("Verify Paid runtime render from authenticated bundle origins")
+build = workflow.index("Build deterministic bundle from authenticated source origins")
+assert prepare < render < build
+print("HISTORICAL_BUNDLE_WORKFLOW_ORDER_OK")
+PY
 
 python3 - "$HISTORICAL_SOURCE_CONTRACT" "$BUNDLE_CONTRACT" "$SOURCE" <<'PY'
 import json, sys

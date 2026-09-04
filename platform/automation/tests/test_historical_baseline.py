@@ -730,7 +730,7 @@ class HistoricalBaselineTests(unittest.TestCase):
             helper, historical, trusted, source, bundle, case_root = case("root-symlink")
             linked = case_root / "historical-link"
             os.symlink(historical, linked)
-            with self.assertRaisesRegex(SystemExit, "root may not be a symlink"):
+            with self.assertRaisesRegex(SystemExit, "root may not traverse a symlink"):
                 helper.prepare(linked, trusted, source, bundle, case_root / "out")
 
     def test_historical_bundle_source_rejects_bool_versions_overlaps_and_dirty_checkout(self) -> None:

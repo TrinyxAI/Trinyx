@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,10 +20,12 @@ from deploy_engine import (
     DeploymentLock,
     HostDeployment,
     HostPlan,
+    ShellAdapter,
     atomic_active_pointer,
     sha256_path,
 )
 from invariants import InvariantError, environment_config_digest, validate_active_pointer
+from legacy_runtime import SERVICES
 from helpers import make_host
 
 
@@ -99,6 +105,138 @@ class FakePointer:
             raise InvariantError("missing activation target")
         self.release_id = release_id
         self.activations.append(release_id)
+
+
+class RecordingHashAdapter(ShellAdapter):
+    def __init__(self, responses: dict[str, str] | None = None):
+        super().__init__()
+        self.responses = responses or {}
+        self.commands: list[tuple[list[str], str | None]] = []
+
+    def _compose_argv(
+        self, base: Path, release_dir: Path, plan: HostPlan,
+    ) -> list[str]:
+        return ["docker", "compose", "--env-file", str(release_dir / "images.env")]
+
+    def _run(
+        self,
+        argv: list[str],
+        timeout: int | None = None,
+        capture: bool = False,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append((list(argv), input_text))
+        service = argv[-1]
+        output = self.responses.get(service, f"{service} {compose_hash(service)}\n")
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+
+class ComposeConfigHashCollectionTests(unittest.TestCase):
+    def plan(self, role: str) -> HostPlan:
+        return SimpleNamespace(role=role, services=tuple(SERVICES[role]))  # type: ignore[return-value]
+
+    def test_paid_and_cloud_query_one_service_per_compose_invocation(self) -> None:
+        for role, expected_count in (("paid", 8), ("cloud", 20)):
+            with self.subTest(role=role):
+                plan = self.plan(role)
+                adapter = RecordingHashAdapter()
+                hashes = adapter.compose_config_hashes(
+                    Path("/etc/trinyx/staging") / role,
+                    Path("/etc/trinyx/staging") / role / "releases" / ("rel-v1-" + "a" * 32),
+                    plan,
+                )
+                self.assertEqual(expected_count, len(adapter.commands))
+                self.assertEqual(list(plan.services), list(hashes))
+                self.assertEqual(
+                    {service: compose_hash(service) for service in plan.services},
+                    hashes,
+                )
+                for service, (argv, input_text) in zip(plan.services, adapter.commands):
+                    self.assertEqual(["config", "--hash", service], argv[-3:])
+                    self.assertEqual(1, len(argv[argv.index("--hash") + 1:]))
+                    self.assertIsNone(input_text)
+
+    def test_real_docker_compose_hashes_two_services_independently(self) -> None:
+        docker = shutil.which("docker")
+        if docker is None:
+            if os.environ.get("CI"):
+                self.fail("Docker CLI is required for the real Compose config-hash contract")
+            self.skipTest("Docker CLI is unavailable")
+
+        compose_version = subprocess.run(
+            [docker, "compose", "version"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+        if compose_version.returncode != 0:
+            if os.environ.get("CI"):
+                self.fail("Docker Compose is required for the real config-hash contract")
+            self.skipTest("Docker Compose is unavailable")
+
+        services = ("service-a", "service-b")
+        model = {
+            "name": "trinyx-compose-hash-contract",
+            "services": {
+                "service-a": {"image": "example.invalid/trinyx/service-a:test"},
+                "service-b": {"image": "example.invalid/trinyx/service-b:test"},
+            },
+        }
+        hashes = ShellAdapter(timeout_seconds=30).compose_model_hashes(model, services)
+
+        self.assertEqual(list(services), list(hashes))
+        self.assertEqual(set(services), set(hashes))
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes.values()))
+        self.assertNotEqual(hashes["service-a"], hashes["service-b"])
+
+    def test_rendered_model_is_replayed_via_stdin_once_per_service(self) -> None:
+        services = tuple(SERVICES["paid"])
+        model = {"services": {service: {"image": f"example/{service}:test"} for service in services}}
+        expected_input = json.dumps(model, sort_keys=True, separators=(",", ":"))
+        adapter = RecordingHashAdapter()
+        hashes = adapter.compose_model_hashes(model, services)
+
+        self.assertEqual({service: compose_hash(service) for service in services}, hashes)
+        self.assertEqual(len(services), len(adapter.commands))
+        for service, (argv, input_text) in zip(services, adapter.commands):
+            self.assertEqual(
+                ["docker", "compose", "-f", "-", "config", "--hash", service],
+                argv,
+            )
+            self.assertEqual(expected_input, input_text)
+
+    def test_each_service_result_fails_closed_when_not_exact(self) -> None:
+        service = tuple(SERVICES["paid"])[0]
+        invalid_outputs = {
+            "empty": "",
+            "wrong-service": f"other {compose_hash(service)}\n",
+            "invalid-hash": f"{service} {'A' * 64}\n",
+            "extra-line": (
+                f"{service} {compose_hash(service)}\n"
+                f"{service} {compose_hash(service)}\n"
+            ),
+        }
+        for name, output in invalid_outputs.items():
+            with self.subTest(name=name):
+                adapter = RecordingHashAdapter({service: output})
+                with self.assertRaises(InvariantError):
+                    adapter.compose_model_hashes(
+                        {"services": {service: {}}},
+                        (service,),
+                    )
+
+    def test_missing_or_duplicate_requested_service_fails_before_compose(self) -> None:
+        service = tuple(SERVICES["paid"])[0]
+        for services in ((), (service, service)):
+            with self.subTest(services=services):
+                adapter = RecordingHashAdapter()
+                with self.assertRaises(InvariantError):
+                    adapter.compose_model_hashes(
+                        {"services": {service: {}}},
+                        services,
+                    )
+                self.assertEqual([], adapter.commands)
 
 
 class DeploymentEngineTests(unittest.TestCase):

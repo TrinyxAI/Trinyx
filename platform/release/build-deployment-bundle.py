@@ -50,6 +50,13 @@ def reject_symlinked_root(path: Path) -> None:
         current = current.parent
 
 
+def require_no_path_overlap(paths: list[str], label: str = "bundle paths") -> None:
+    for index, left in enumerate(paths):
+        for right in paths[index + 1:]:
+            if left.startswith(right + "/") or right.startswith(left + "/"):
+                fail(f"{label} contains overlapping paths")
+
+
 def load_contract(path: Path) -> list[str]:
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
@@ -71,6 +78,7 @@ def load_contract(path: Path) -> list[str]:
         if normalized in clean:
             fail(f"duplicate bundle path: {normalized}")
         clean.append(normalized)
+    require_no_path_overlap(clean)
     return clean
 
 

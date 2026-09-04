@@ -27,6 +27,14 @@ RELEASE_MANIFEST_KEYS = {
     "deploymentBundle",
     "images",
 }
+LEGACY_BOOTSTRAP_IMAGE_DOCUMENT_KEYS = {
+    "schemaVersion",
+    "sourceCommit",
+    "sourceRef",
+    "legacyReleaseId",
+    "images",
+}
+LEGACY_RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def fail(message: str) -> None:
@@ -90,7 +98,11 @@ def validate_images(document: Any) -> dict[str, tuple[str, str, str]]:
     if not isinstance(document, dict):
         fail("image document schema mismatch")
     keys = set(document)
-    if keys != IMAGE_DOCUMENT_KEYS and keys != RELEASE_MANIFEST_KEYS:
+    if (
+        keys != IMAGE_DOCUMENT_KEYS
+        and keys != RELEASE_MANIFEST_KEYS
+        and keys != LEGACY_BOOTSTRAP_IMAGE_DOCUMENT_KEYS
+    ):
         fail("image document schema mismatch")
     if (
         type(document["schemaVersion"]) is not int
@@ -101,6 +113,15 @@ def validate_images(document: Any) -> dict[str, tuple[str, str, str]]:
         or len(document["images"]) != 28
     ):
         fail("image document schema mismatch")
+    if keys == LEGACY_BOOTSTRAP_IMAGE_DOCUMENT_KEYS and (
+        not isinstance(document["sourceRef"], str)
+        or not document["sourceRef"]
+        or len(document["sourceRef"]) > 255
+        or "\\n" in document["sourceRef"]
+        or not isinstance(document["legacyReleaseId"], str)
+        or LEGACY_RELEASE_ID_RE.fullmatch(document["legacyReleaseId"]) is None
+    ):
+        fail("legacy bootstrap image document identity mismatch")
     actual: dict[str, tuple[str, str, str]] = {}
     bindings: set[tuple[str, str]] = set()
     for item in document["images"]:

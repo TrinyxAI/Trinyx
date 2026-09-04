@@ -321,6 +321,9 @@ jobs:
               "deployment-bundle.json": "b101918414ee9d113d4ef54d32c9f438005d8ebee7bde2e62f72d58a16cfdd7b",
               "deployment-bundle.tar": "c9df14dcd1dbc24b31b926d3778bef2e208b59824c78f24292608284f3579892",
           }
+          HISTORICAL_IDENTITY = FROZEN_IDENTITY
+          HISTORICAL_INTERNAL_SHA256 = FROZEN_INTERNAL_SHA256
+
           APPROVED_HISTORICAL_BASELINE_IDENTITY = {
               "GITHUB_REPOSITORY": "TrinyxAI/Trinyx",
               "GITHUB_REPOSITORY_ID": "1342032975",

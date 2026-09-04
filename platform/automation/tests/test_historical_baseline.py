@@ -610,8 +610,8 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertNotIn("--repo historical-source \\", workflow)
         self.assertIn("historical-deployment-bundle-sources.json", workflow)
         helper_source = (ROOT / "platform/release/prepare-historical-bundle-source.py").read_text()
-        self.assertIn("git", "-C", str(repo), "rev-parse", "HEAD"", helper_source)
-        self.assertIn("git", "-C", str(repo), "status", "--porcelain=v1"", helper_source)
+        self.assertIn('["git", "-C", str(repo), "rev-parse", "HEAD"]', helper_source)
+        self.assertIn('["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"]', helper_source)
         self.assertIn("repository root may not traverse a symlink", helper_source)
         self.assertIn("destination may not be inside the historical repository", helper_source)
         self.assertIn("Prepare authenticated historical bundle source", workflow)
@@ -620,6 +620,8 @@ class HistoricalBaselineTests(unittest.TestCase):
         self.assertIn("Verify Paid runtime render from authenticated bundle origins", workflow)
         self.assertIn("docker compose --env-file historical-input/paid/images.env", workflow)
         self.assertIn("HISTORICAL_PAID_RUNTIME_RENDER_OK services=8", workflow)
+        self.assertIn("postgres redis minio minio-init bridge livecontext frontend paid-edge", workflow)
+        self.assertIn("set(services) != set(expected)", workflow)
         self.assertLess(
             workflow.index("Prepare authenticated historical bundle source"),
             workflow.index("Verify Paid runtime render from authenticated bundle origins"),
@@ -630,6 +632,13 @@ class HistoricalBaselineTests(unittest.TestCase):
         )
         self.assertNotIn("docker compose up", workflow)
         self.assertIn("actions/attest-build-provenance@", workflow)
+
+    def test_historical_bundle_paths_reject_noncanonical_or_cross_platform_values(self) -> None:
+        helper = load_historical_bundle_source_helper()
+        for value in (".", "./docker-compose.yml", "docker-compose.yml/", "docker//compose.yml",
+                      "docker\\compose.yml", "docker\x00compose.yml"):
+            with self.assertRaisesRegex(SystemExit, "unsafe|not canonical|empty"):
+                helper.normalized_relative(value)
 
     def test_historical_bundle_source_is_explicit_and_complete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

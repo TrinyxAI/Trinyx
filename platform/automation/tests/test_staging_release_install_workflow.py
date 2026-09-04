@@ -13,7 +13,7 @@ WRAPPER = ROOT / ".github" / "workflows" / "staging-legacy-adopt.yml"
 DISPATCHER = ROOT / "platform" / "host" / "common" / "staging-deploy.sh"
 INSTALLER = ROOT / "platform" / "install" / "install-release.py"
 SSM_TEMPLATE = ROOT / "platform" / "aws" / "staging" / "deploy-control-plane.json"
-C4 = "bdbdc0068b08f818881fecc96d6cb0770b972ec4"
+C4 = "6b0951f52d8fb15ef28754c894a5405b5d21a263"
 W9 = "a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae"
 
 

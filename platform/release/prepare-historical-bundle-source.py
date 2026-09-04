@@ -303,6 +303,10 @@ def prepare(
         # Docker Compose consumes this fresh snapshot, never the mutable checkout path
         # whose bytes were merely checked earlier in the job.
         copy_safe(config_source, config_destination)
+        # This configuration is deliberately an input to the read-only render,
+        # not bundle content. Publish it as a read-only snapshot so the render
+        # consumes the precise bytes that were authenticated above.
+        os.chmod(config_destination, 0o444)
         content, _ = read_regular_file_no_follow(config_destination)
         print(
             "HISTORICAL_TRUSTED_ENVIRONMENT_CONFIG_OK "

@@ -21,6 +21,10 @@ BACKEND_RUN_ID = 33444272417
 FRONTEND_RUN_ID = 33444302902
 BACKEND_PUBLISH_JOB_ID = 99660712771
 FRONTEND_PUBLISH_JOB_ID = 99659777935
+BACKEND_PACKAGE = "ghcr.io/trinyxai/trinyx-backend"
+FRONTEND_PACKAGE = "ghcr.io/trinyxai/trinyx-frontend"
+BACKEND_HISTORICAL_DIGEST = "sha256:0485c570d125ca008740860af078f7b6a876048721c0a66d3229bcc85fb94f1e"
+FRONTEND_HISTORICAL_DIGEST = "sha256:92f6c194739d085e88ab460bd09fef821fa96d4caba59d57063494db6f14f04e"
 CLOUD_ARTIFACT_ID = 9777989306
 CLOUD_ARTIFACT_NAME = f"trinyx-cloud-image-manifest-{SOURCE_COMMIT}"
 CLOUD_ARTIFACT_DIGEST = "sha256:8cb6a3b52b7deff90bebcceb6435a5c66d6d1a06e45c32b8350427efe4059ac0"
@@ -144,13 +148,35 @@ def normalize_terminal_log(log_text: str) -> str:
 
 def historical_paid_digest(log_text: str, *, package: str) -> str:
     normalized_log = normalize_terminal_log(log_text)
-    pattern = re.compile(
-        rf"pushing manifest for {re.escape(package)}:{SOURCE_COMMIT}@"
-        r"(sha256:[0-9a-f]{64})(?:\s|$)"
-    )
+    line_prefix = r"(?m)^(?:\d{4}-\d{2}-\d{2}T[0-9:.]+Z )?"
+    if package == BACKEND_PACKAGE:
+        expected_digest = BACKEND_HISTORICAL_DIGEST
+        pattern = re.compile(
+            line_prefix
+            + r"#[0-9]+\s+[0-9]+(?:\.[0-9]+)?\s+pushing "
+            + r"(sha256:[0-9a-f]{64})\s+to "
+            + re.escape(f"{BACKEND_PACKAGE}:{SOURCE_COMMIT}")
+            + r"\s*$"
+        )
+    elif package == FRONTEND_PACKAGE:
+        expected_digest = FRONTEND_HISTORICAL_DIGEST
+        pattern = re.compile(
+            line_prefix
+            + r"#[0-9]+\s+pushing manifest for "
+            + re.escape(f"{FRONTEND_PACKAGE}:{SOURCE_COMMIT}@")
+            + r"(sha256:[0-9a-f]{64})"
+            + r"(?:\s+[0-9]+(?:\.[0-9]+)?s)?\s+done\s*$"
+        )
+    else:
+        raise ValueError("unsupported historical Paid image package")
+
     digests = set(pattern.findall(normalized_log))
-    require(len(digests) == 1, "historical publication digest evidence is ambiguous or missing")
-    return next(iter(digests))
+    require(digests, f"historical publication digest evidence missing for {package}")
+    require(
+        digests == {expected_digest},
+        f"historical publication digest evidence mismatch for {package}",
+    )
+    return expected_digest
 
 
 def canonical_cloud_manifest(
@@ -350,10 +376,10 @@ def main() -> None:
     except OSError as exc:
         raise ValueError("cannot read historical publication job log") from exc
     backend_digest = historical_paid_digest(
-        backend_log, package="ghcr.io/trinyxai/trinyx-backend"
+        backend_log, package=BACKEND_PACKAGE
     )
     frontend_digest = historical_paid_digest(
-        frontend_log, package="ghcr.io/trinyxai/trinyx-frontend"
+        frontend_log, package=FRONTEND_PACKAGE
     )
     write_canonical(
         args.out / "cloud.json",
@@ -366,13 +392,13 @@ def main() -> None:
     write_canonical(args.out / "backend.json", paid_manifest(
         load(args.backend_inspect), historical_digest=backend_digest,
         name="paid-backend", service="livecontext",
-        environment="BACKEND_IMAGE", package="ghcr.io/trinyxai/trinyx-backend",
+        environment="BACKEND_IMAGE", package=BACKEND_PACKAGE,
         require_oci_labels=True,
     ))
     write_canonical(args.out / "frontend.json", paid_manifest(
         load(args.frontend_inspect), historical_digest=frontend_digest,
         name="paid-frontend", service="frontend",
-        environment="FRONTEND_IMAGE", package="ghcr.io/trinyxai/trinyx-frontend",
+        environment="FRONTEND_IMAGE", package=FRONTEND_PACKAGE,
         require_oci_labels=False,
     ))
     print(f"HISTORICAL_BASELINE_PROVENANCE_OK source_commit={SOURCE_COMMIT}")

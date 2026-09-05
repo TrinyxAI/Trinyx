@@ -4,6 +4,7 @@
   "composeFiles": [
     "release/docker/docker-compose.cloud.yml",
     "release/docker/docker-compose.cloud.runtime.yml",
+    "config/cloud-third-party-images.override.yml",
     "/run/trinyx/cloud-paid.override.yml"
   ],
   "services": [
@@ -19,7 +20,8 @@
     "storage-service", "trigger-service", "websearch-service", "searxng", "cloud-edge"
   ],
   "requiredFiles": [
-    "config/cloud-paid.override.yml", "config/runtime-static.env", "config/ssm-required.txt",
+    "config/cloud-paid.override.yml", "config/cloud-third-party-images.override.yml",
+    "config/runtime-static.env", "config/ssm-required.txt",
     "config/cloud-health-endpoints.json"
   ],
   "tlsFiles": ["config/tls/paid-ca.pem"],

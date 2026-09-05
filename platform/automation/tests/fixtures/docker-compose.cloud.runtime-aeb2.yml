@@ -1,0 +1,43 @@
+services:
+  agent-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_AGENT_IMAGE:?set TRINYX_CLOUD_AGENT_IMAGE to ghcr.io/trinyxai/trinyx-cloud-agent@sha256 digest}
+  auth-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_AUTH_IMAGE:?set TRINYX_CLOUD_AUTH_IMAGE to ghcr.io/trinyxai/trinyx-cloud-auth@sha256 digest}
+  catalog-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_CATALOG_IMAGE:?set TRINYX_CLOUD_CATALOG_IMAGE to ghcr.io/trinyxai/trinyx-cloud-catalog@sha256 digest}
+  conversation-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_CONVERSATION_IMAGE:?set TRINYX_CLOUD_CONVERSATION_IMAGE to ghcr.io/trinyxai/trinyx-cloud-conversation@sha256 digest}
+  datasource-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_DATASOURCE_IMAGE:?set TRINYX_CLOUD_DATASOURCE_IMAGE to ghcr.io/trinyxai/trinyx-cloud-datasource@sha256 digest}
+  gateway-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_GATEWAY_IMAGE:?set TRINYX_CLOUD_GATEWAY_IMAGE to ghcr.io/trinyxai/trinyx-cloud-gateway@sha256 digest}
+  interface-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_INTERFACE_IMAGE:?set TRINYX_CLOUD_INTERFACE_IMAGE to ghcr.io/trinyxai/trinyx-cloud-interface@sha256 digest}
+  keycloak:
+    build: !reset null
+    image: ${TRINYX_CLOUD_KEYCLOAK_IMAGE:?set TRINYX_CLOUD_KEYCLOAK_IMAGE to ghcr.io/trinyxai/trinyx-cloud-keycloak@sha256 digest}
+  migration-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_MIGRATION_IMAGE:?set TRINYX_CLOUD_MIGRATION_IMAGE to ghcr.io/trinyxai/trinyx-cloud-migration@sha256 digest}
+  orchestrator-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_ORCHESTRATOR_IMAGE:?set TRINYX_CLOUD_ORCHESTRATOR_IMAGE to ghcr.io/trinyxai/trinyx-cloud-orchestrator@sha256 digest}
+  publication-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_PUBLICATION_IMAGE:?set TRINYX_CLOUD_PUBLICATION_IMAGE to ghcr.io/trinyxai/trinyx-cloud-publication@sha256 digest}
+  storage-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_STORAGE_IMAGE:?set TRINYX_CLOUD_STORAGE_IMAGE to ghcr.io/trinyxai/trinyx-cloud-storage@sha256 digest}
+  trigger-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_TRIGGER_IMAGE:?set TRINYX_CLOUD_TRIGGER_IMAGE to ghcr.io/trinyxai/trinyx-cloud-trigger@sha256 digest}
+  websearch-service:
+    build: !reset null
+    image: ${TRINYX_CLOUD_WEBSEARCH_IMAGE:?set TRINYX_CLOUD_WEBSEARCH_IMAGE to ghcr.io/trinyxai/trinyx-cloud-websearch@sha256 digest}

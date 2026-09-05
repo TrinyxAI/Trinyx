@@ -42,6 +42,10 @@ run_role() {
       "$ROOT/platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/runtime-static.env" \
       "$fake/etc/trinyx/staging/cloud/config/runtime-static.env"
     diff -u \
+      "$ROOT/platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/cloud-third-party-images.override.yml" \
+      "$fake/etc/trinyx/staging/cloud/config/cloud-third-party-images.override.yml"
+    test "$(stat -c %a "$fake/etc/trinyx/staging/cloud/config/cloud-third-party-images.override.yml")" = 600
+    diff -u \
       "$ROOT/platform/host/cloud/systemd/staging/docker.service.d/20-trinyx-staging-runtime-gate.conf" \
       "$fake/etc/systemd/system/docker.service.d/20-trinyx-staging-runtime-gate.conf"
     diff -u \

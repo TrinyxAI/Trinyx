@@ -44,6 +44,10 @@ grep -Fxq '    network_mode: service:livecontext' "$TMP/rendered/paid/paid.overr
 grep -Fxq '      - ./docker/paid-monolith-internal/Caddyfile:/etc/caddy/Caddyfile:ro' "$TMP/rendered/paid/paid.override.yml"
 grep -Fxq '      - /etc/trinyx/staging/paid/config/tls/paid-server.crt:/run/tls/billing-internal.crt:ro' "$TMP/rendered/paid/paid.override.yml"
 grep -Fxq '      - /etc/trinyx/staging/paid/config/tls/paid-server.key:/run/tls/billing-internal.key:ro' "$TMP/rendered/paid/paid.override.yml"
+if grep -Fq '    image: caddy:2.11.4-alpine' "$TMP/rendered/paid/paid.override.yml"; then
+  echo 'ERROR_PAID_EDGE_LATE_MUTABLE_IMAGE_OVERRIDE' >&2
+  exit 1
+fi
 if grep -R -Fq --exclude='static_policy.py' --exclude='invariants.py' --exclude-dir=tests --exclude-dir=__pycache__ -- '/srv/trinyx/'"pr25-" "$ROOT/platform"; then
   echo 'ERROR_MUTABLE_CHECKOUT_DEPENDENCY' >&2
   exit 1

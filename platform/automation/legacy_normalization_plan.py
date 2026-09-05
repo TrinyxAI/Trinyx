@@ -146,7 +146,7 @@ def _content_identity(path: Path, allowed_root: Path) -> tuple[str, str]:
             require(len(entries) < LEGACY_BIND_MAX_ENTRIES,
                     "legacy bind content entry limit exceeded")
             metadata = current.lstat()
-            mode = stat.S_IMODE(metadata.st_mode)
+            mode = stat.S_IMODE(metadata.st_mode) & ~stat.S_IWUSR
             if stat.S_ISLNK(metadata.st_mode):
                 raise InvariantError("legacy bind content contains a symlink")
             if stat.S_ISREG(metadata.st_mode):

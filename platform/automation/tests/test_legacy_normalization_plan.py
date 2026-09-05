@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -16,11 +18,14 @@ from legacy_normalization_plan import (
     SSM_STDOUT_MAX_BYTES,
     build_normalization_plan,
     explained_compose_model,
+    expected_mounts,
     legacy_bind_content_evidence,
     render_ssm_protocol,
 )
 from legacy_runtime import SERVICES
+from deploy_engine import ShellAdapter, load_host_plan
 from invariants import InvariantError
+from ssm_orchestrator import validate_normalization_protocol
 
 
 def config_hash(service: str) -> str:
@@ -589,6 +594,250 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             self.assertLess(len(output.encode("utf-8")), SSM_STDOUT_MAX_BYTES)
             self.assertEqual(4, output.count("bind_proof=match:sha256:"))
             self.assertNotIn(str(root), output)
+
+
+
+ROOT = Path(__file__).resolve().parents[3]
+DIGEST_ONLY_IMAGE_RE = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
+HISTORICAL_CLOUD_RUNTIME_BLOB = "21bf5663c814b3184765d1164430db08b69a2e93"
+HISTORICAL_PAID_COMPOSE_BLOB = "3f13740c100913433d0af2b1eba7dec398ca8714"
+HISTORICAL_CLOUD_COMPOSE_BLOB = "21ffc835177db4f3dcaaca2d827bd1f24a7003b3"
+TRUSTED_PAID_RUNTIME_BLOB = "7a46cfa9ff0cc8d6aa87d3d4f8faf1352f2d3142"
+
+
+def git_blob_sha(path: Path) -> str:
+    content = path.read_bytes()
+    return hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+
+
+class RepositoryComposeAdapter(ShellAdapter):
+    def __init__(self, compose_files: tuple[Path, ...]):
+        super().__init__(timeout_seconds=60)
+        self.compose_files = compose_files
+
+    def _compose_argv(self, base: Path, release_dir: Path, plan: object) -> list[str]:
+        argv = ["docker", "compose"]
+        for path in self.compose_files:
+            argv.extend(["-f", str(path)])
+        return argv
+
+
+class RepositoryNormalizationPreflightTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        docker = shutil.which("docker")
+        if docker is None:
+            if os.environ.get("CI"):
+                raise AssertionError("Docker CLI is required for repository normalization preflight")
+            raise unittest.SkipTest("Docker CLI is unavailable")
+        result = subprocess.run(
+            [docker, "compose", "version", "--short"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            if os.environ.get("CI"):
+                raise AssertionError("Docker Compose is required for repository normalization preflight")
+            raise unittest.SkipTest("Docker Compose is unavailable")
+        cls.compose_version = result.stdout.strip()
+        print(f"NORMALIZATION_REAL_COMPOSE_VERSION={cls.compose_version}")
+
+    @staticmethod
+    def _config_root(role: str) -> Path:
+        return (
+            ROOT / "platform" / "bootstrap" / role / "staging" / "rootfs"
+            / "etc" / "trinyx" / "staging" / role / "config"
+        )
+
+    def _plan_and_files(self, role: str) -> tuple[object, tuple[Path, ...]]:
+        config_root = self._config_root(role)
+        plan = load_host_plan(config_root / "deployment-plan.json", role)
+        paths: list[Path] = []
+        for item in plan.compose_files:
+            if item.startswith("release/"):
+                relative = item.removeprefix("release/")
+                if role == "cloud" and relative == "docker/docker-compose.cloud.runtime.yml":
+                    path = (
+                        ROOT / "platform" / "automation" / "tests" / "fixtures"
+                        / "docker-compose.cloud.runtime-aeb2.yml"
+                    )
+                else:
+                    path = ROOT / relative
+            elif item.startswith("/run/trinyx/"):
+                path = config_root / Path(item).name
+            else:
+                path = config_root / item.removeprefix("config/")
+            self.assertTrue(path.is_file(), f"missing repository Compose input for {item}")
+            paths.append(path)
+        self.assertEqual(len(plan.compose_files), len(paths))
+        return plan, tuple(paths)
+
+    @staticmethod
+    def _required_value(name: str) -> str:
+        if name.endswith("_PATH"):
+            return "/tmp/trinyx-normalization-contract"
+        if name.endswith(("_USER", "_USERNAME")):
+            return "contract_user"
+        if name.endswith("_URL"):
+            return "https://example.invalid"
+        return "contract-value"
+
+    def _compose_environment(
+        self, role: str, plan: object, paths: tuple[Path, ...],
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        inventory = json.loads(
+            (ROOT / "platform" / "release" / "runtime-inventory.json").read_text(encoding="utf-8")
+        )
+        role_images = [item for item in inventory["images"] if item["role"] == role]
+        self.assertEqual(set(plan.services), {item["service"] for item in role_images})
+        expected: dict[str, str] = {}
+        environment: dict[str, str] = {}
+        for index, item in enumerate(sorted(role_images, key=lambda value: value["service"]), 1):
+            image = (
+                f"example.invalid/trinyx/{role}-{item['service']}@sha256:"
+                f"{index:064x}"
+            )
+            expected[item["service"]] = image
+            environment[item["environment"]] = image
+
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"\$\{([A-Z][A-Z0-9_]*)([^}]*)\}", text):
+                name, suffix = match.groups()
+                if suffix == "" or suffix.startswith(":?"):
+                    environment.setdefault(name, self._required_value(name))
+        return environment, expected
+
+    @staticmethod
+    def _synthetic_runtime(
+        role: str, model: dict, hashes: dict[str, str],
+    ) -> tuple[list[dict], list[dict]]:
+        containers: list[dict] = []
+        images: list[dict] = []
+        for index, service in enumerate(sorted(SERVICES[role]), 1):
+            image = model["services"][service]["image"]
+            image_id = "sha256:" + f"{index + 1000:064x}"
+            mounts = [
+                {
+                    "Type": mount["type"],
+                    "Source": mount["source"],
+                    "Destination": mount["destination"],
+                    "RW": not mount["readOnly"],
+                }
+                for mount in expected_mounts(model["services"][service])
+                if mount["type"] == "bind"
+            ]
+            containers.append({
+                "Id": f"{index + 2000:064x}",
+                "Image": image_id,
+                "Config": {
+                    "Image": image,
+                    "Labels": {
+                        "com.docker.compose.project": f"trinyx-{role}-staging",
+                        "com.docker.compose.service": service,
+                        "com.docker.compose.config-hash": hashes[service],
+                    },
+                },
+                "Mounts": mounts,
+            })
+            images.append({"Id": image_id, "RepoDigests": [image]})
+        return containers, images
+
+    def test_historical_bundle_sources_are_the_exact_authenticated_blobs(self) -> None:
+        fixture = (
+            ROOT / "platform" / "automation" / "tests" / "fixtures"
+            / "docker-compose.cloud.runtime-aeb2.yml"
+        )
+        self.assertEqual(HISTORICAL_CLOUD_RUNTIME_BLOB, git_blob_sha(fixture))
+        self.assertEqual(HISTORICAL_PAID_COMPOSE_BLOB, git_blob_sha(ROOT / "docker-compose.yml"))
+        self.assertEqual(
+            HISTORICAL_CLOUD_COMPOSE_BLOB,
+            git_blob_sha(ROOT / "docker" / "docker-compose.cloud.yml"),
+        )
+        self.assertEqual(
+            TRUSTED_PAID_RUNTIME_BLOB,
+            git_blob_sha(ROOT / "docker" / "docker-compose.paid.runtime.yml"),
+        )
+
+    def test_real_paid_and_cloud_normalization_preflight_contracts(self) -> None:
+        for role, expected_count in (("paid", 8), ("cloud", 20)):
+            with self.subTest(role=role):
+                plan, paths = self._plan_and_files(role)
+                environment, expected_images = self._compose_environment(role, plan, paths)
+                adapter = RepositoryComposeAdapter(paths)
+                with mock.patch.dict(os.environ, environment, clear=False):
+                    model = adapter.render_model(ROOT, ROOT, plan)
+                    source_hashes = adapter.compose_config_hashes(ROOT, ROOT, plan)
+                roundtrip_hashes = adapter.compose_model_hashes(model, plan.services)
+
+                self.assertEqual(expected_count, len(plan.services))
+                self.assertEqual(set(SERVICES[role]), set(plan.services))
+                self.assertEqual(set(plan.services), set(model["services"]))
+                self.assertEqual(set(plan.services), set(source_hashes))
+                self.assertEqual(source_hashes, roundtrip_hashes)
+                for service in plan.services:
+                    image = model["services"][service].get("image")
+                    self.assertEqual(expected_images[service], image)
+                    self.assertRegex(image, DIGEST_ONLY_IMAGE_RE)
+
+                if role == "paid":
+                    self.assertEqual(
+                        environment["TRINYX_PAID_EDGE_IMAGE"],
+                        model["services"]["paid-edge"]["image"],
+                    )
+                    self.assertNotEqual(
+                        "caddy:2.11.4-alpine",
+                        model["services"]["paid-edge"]["image"],
+                    )
+
+                containers, image_inspections = self._synthetic_runtime(
+                    role, model, source_hashes
+                )
+                record = build_normalization_plan(
+                    role,
+                    "rel-v1-" + "a" * 32,
+                    containers,
+                    image_inspections,
+                    model,
+                    source_hashes,
+                    source_hashes,
+                    empty_bind_evidence(role),
+                    self.compose_version,
+                    "2026-09-05T00:00:00Z",
+                    bundle_digest="sha256:" + "b" * 64,
+                    deployment_id="dep-" + "c" * 32,
+                    environment_config_revision="config-contract",
+                    environment_config_digest_value="sha256:" + "d" * 64,
+                    control_plane_commit="e" * 40,
+                )
+                protocol = render_ssm_protocol(record)
+                result = validate_normalization_protocol(
+                    protocol,
+                    role,
+                    "rel-v1-" + "a" * 32,
+                    "sha256:" + "b" * 64,
+                    "dep-" + "c" * 32,
+                    "config-contract",
+                    "e" * 40,
+                )
+                self.assertEqual(expected_count, result["serviceCount"])
+                self.assertEqual(0, result["recreateCount"])
+                self.assertEqual("review", result["compatibility"])
+                self.assertEqual("matched", result["images"])
+                lines = protocol.rstrip("\n").split("\n")
+                self.assertEqual(
+                    expected_count,
+                    sum(line.startswith("NORMALIZATION ") for line in lines),
+                )
+                self.assertTrue(lines[-1].startswith("LEGACY_NORMALIZATION_PLAN_COMPLETE "))
+                print(
+                    f"NORMALIZATION_REPOSITORY_PREFLIGHT_OK role={role} "
+                    f"services={expected_count} hashes={len(source_hashes)} "
+                    f"roundtrip=match protocol_bytes={len(protocol.encode('utf-8'))}"
+                )
 
 
 

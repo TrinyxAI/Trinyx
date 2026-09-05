@@ -246,7 +246,6 @@ def render(values: dict[str, str], out: Path) -> None:
         f"      GATEWAY_PUBLIC_URL: {values['PAID_PUBLIC_URL']}",
         "      BACKEND_PORT: \"8080\"",
         "  paid-edge:",
-        "    image: caddy:2.11.4-alpine",
         "    container_name: trinyx-paid-private-edge",
         "    restart: unless-stopped",
         "    network_mode: service:livecontext",

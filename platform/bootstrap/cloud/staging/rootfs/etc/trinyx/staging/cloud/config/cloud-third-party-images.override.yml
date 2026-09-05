@@ -1,0 +1,13 @@
+services:
+  cloud-postgres:
+    image: ${TRINYX_CLOUD_POSTGRES_IMAGE:?set TRINYX_CLOUD_POSTGRES_IMAGE to an immutable @sha256 reference}
+  cloud-redis:
+    image: ${TRINYX_CLOUD_REDIS_IMAGE:?set TRINYX_CLOUD_REDIS_IMAGE to an immutable @sha256 reference}
+  cloud-minio:
+    image: ${TRINYX_CLOUD_MINIO_IMAGE:?set TRINYX_CLOUD_MINIO_IMAGE to an immutable @sha256 reference}
+  cloud-minio-init:
+    image: ${TRINYX_CLOUD_MINIO_MC_IMAGE:?set TRINYX_CLOUD_MINIO_MC_IMAGE to an immutable @sha256 reference}
+  searxng:
+    image: ${TRINYX_CLOUD_SEARXNG_IMAGE:?set TRINYX_CLOUD_SEARXNG_IMAGE to an immutable @sha256 reference}
+  cloud-edge:
+    image: ${TRINYX_CLOUD_EDGE_IMAGE:?set TRINYX_CLOUD_EDGE_IMAGE to an immutable @sha256 reference}

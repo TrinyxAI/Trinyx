@@ -117,6 +117,10 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             expected.parent.mkdir(parents=True)
             current.write_text("approved legacy content\n")
             expected.write_text("approved legacy content\n")
+        for path in (current, *current.rglob("*")):
+            path.chmod(0o755 if path.is_dir() else 0o644)
+        for path in (expected, *expected.rglob("*")):
+            path.chmod(0o555 if path.is_dir() else 0o444)
         containers[0]["Mounts"][0]["Source"] = str(current)
         model["services"][service]["volumes"][0]["source"] = str(expected)
         evidence = legacy_bind_content_evidence(
@@ -210,6 +214,117 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
         self.assertEqual("UNEXPLAINED", item["composeDriftClassification"])
         self.assertIn("LEGACY_BIND_CONTENT_MISMATCH", item["reasons"])
         self.assertEqual("UNQUALIFIED_UNEXPLAINED_DRIFT", result["composeDriftCompatibility"])
+
+    def test_installer_hardened_regular_file_is_verified_and_explained(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root)
+            containers, model, hashes, _, service, legacy_root, current, expected = values
+            current.chmod(0o644)
+            expected.chmod(0o444)
+            evidence = legacy_bind_content_evidence(
+                "paid", containers, model, root / "release" / "bundle",
+                legacy_root=legacy_root,
+            )
+            self.assertTrue(evidence[service]["verified"])
+            allowed_hashes = dict(hashes)
+            allowed_hashes[service] = explained_hash(service)
+            containers[0]["Config"]["Labels"]["com.docker.compose.config-hash"] = (
+                allowed_hashes[service]
+            )
+            result = self.build(
+                containers, model, hashes, explained_hashes=allowed_hashes,
+                bind_evidence=evidence,
+            )
+            item = result["services"][service]
+            self.assertTrue(item["legacyBindContentVerified"])
+            self.assertEqual(
+                "EXPLAINED_NORMALIZATION", item["composeDriftClassification"]
+            )
+            self.assertNotIn("LEGACY_BIND_CONTENT_MISMATCH", item["reasons"])
+            self.assertEqual(
+                "QUALIFIED_EXPLAINED_DRIFT",
+                result["composeDriftCompatibility"],
+            )
+
+    def test_installer_hardened_executable_is_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root)
+            containers, model, _, _, service, legacy_root, current, expected = values
+            current.chmod(0o755)
+            expected.chmod(0o555)
+            evidence = legacy_bind_content_evidence(
+                "paid", containers, model, root / "release" / "bundle",
+                legacy_root=legacy_root,
+            )
+            self.assertTrue(evidence[service]["verified"])
+
+    def test_installer_hardened_directory_tree_is_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root, directory=True)
+            containers, model, _, _, service, legacy_root, current, expected = values
+            for path in (current, *current.rglob("*")):
+                path.chmod(0o755 if path.is_dir() else 0o644)
+            for path in (expected, *expected.rglob("*")):
+                path.chmod(0o555 if path.is_dir() else 0o444)
+            evidence = legacy_bind_content_evidence(
+                "paid", containers, model, root / "release" / "bundle",
+                legacy_root=legacy_root,
+            )
+            self.assertTrue(evidence[service]["verified"])
+
+    def test_owner_writable_expected_file_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root)
+            containers, model, hashes, _, service, legacy_root, _, expected = values
+            expected.chmod(0o644)
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
+
+    def test_owner_writable_expected_directory_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root, directory=True)
+            containers, model, hashes, _, service, legacy_root, _, expected = values
+            expected.chmod(0o755)
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
+
+    def test_non_hardening_permission_changes_fail_closed(self) -> None:
+        for current_mode, expected_mode in (
+            (0o600, 0o444),
+            (0o640, 0o444),
+            (0o664, 0o444),
+            (0o775, 0o555),
+        ):
+            with (
+                self.subTest(current_mode=oct(current_mode), expected_mode=oct(expected_mode)),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                values = self.bind_fixture(root)
+                containers, model, hashes, _, service, legacy_root, current, expected = values
+                current.chmod(current_mode)
+                expected.chmod(expected_mode)
+                self.assert_bind_content_mismatch(
+                    root, containers, model, hashes, service, legacy_root,
+                )
+
+    def test_executable_bit_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root)
+            containers, model, hashes, _, service, legacy_root, current, expected = values
+            current.chmod(0o755)
+            expected.chmod(0o444)
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
 
     def test_same_legacy_file_path_with_one_changed_byte_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -577,6 +692,8 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
                 expected.parent.mkdir(parents=True, exist_ok=True)
                 current.write_text(f"approved:{service}\n")
                 expected.write_text(f"approved:{service}\n")
+                current.chmod(0o644)
+                expected.chmod(0o444)
                 containers[position]["Mounts"][0]["Source"] = str(current)
                 model["services"][service]["volumes"][0]["source"] = str(expected)
                 explained[service] = explained_hash(service)

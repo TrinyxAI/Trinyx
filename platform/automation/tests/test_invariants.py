@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from invariants import (
     InvariantError,
+    _validate_installed_bundle_tree,
     calculated_release_id,
     forbid_global_compose_apply,
     validate_active_pointer,
@@ -35,6 +36,31 @@ class InvariantTests(unittest.TestCase):
 
     def test_happy_path(self) -> None:
         validate_release_directory(self.base / "releases" / self.releases[0], "paid")
+
+    def test_validate_release_rejects_owner_writable_bundle_root(self) -> None:
+        release = self.base / "releases" / self.releases[0]
+        bundle_root = release / "bundle"
+        os.chmod(bundle_root, 0o755)
+        with self.assertRaisesRegex(
+            InvariantError, "installed bundle directory mode mismatch"
+        ):
+            validate_release_directory(release, "paid")
+
+    def test_installed_bundle_tree_rejects_owner_writable_nested_directory(self) -> None:
+        bundle_root = Path(self.temp.name) / "nested-bundle"
+        nested = bundle_root / "nested"
+        nested.mkdir(parents=True)
+        member = nested / "member.txt"
+        member.write_text("immutable\n", encoding="utf-8")
+        os.chmod(member, 0o444)
+        os.chmod(nested, 0o555)
+        os.chmod(bundle_root, 0o555)
+        _validate_installed_bundle_tree(bundle_root, {"nested/member.txt"})
+        os.chmod(nested, 0o755)
+        with self.assertRaisesRegex(
+            InvariantError, "installed bundle directory mode mismatch"
+        ):
+            _validate_installed_bundle_tree(bundle_root, {"nested/member.txt"})
 
     @unittest.skipIf(os.name == "nt", "Windows runner lacks unprivileged symlink support; Linux CI executes this")
     def test_active_pointer(self) -> None:
@@ -98,7 +124,9 @@ class InvariantTests(unittest.TestCase):
         write_json(bundle_manifest_path, bundle_manifest)
         bundle_root = release / "bundle"
         os.chmod(bundle_root, 0o755)
-        (bundle_root / "unexpected-empty-directory").mkdir()
+        unexpected = bundle_root / "unexpected-empty-directory"
+        unexpected.mkdir()
+        os.chmod(unexpected, 0o555)
         os.chmod(bundle_root, 0o555)
         with self.assertRaisesRegex(InvariantError, "directory tree mismatch"):
             validate_release_directory(release, "paid")

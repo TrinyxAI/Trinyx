@@ -260,6 +260,10 @@ def _validate_installed_bundle_tree(root: Path, expected_paths: set[str]) -> Non
     files: set[str] = set()
     directories: set[str] = set()
     try:
+        require(
+            stat.S_IMODE(os.lstat(root).st_mode) == 0o555,
+            "installed bundle directory mode mismatch",
+        )
         for path in root.rglob("*"):
             relative = path.relative_to(root).as_posix()
             info = os.lstat(path)
@@ -267,6 +271,10 @@ def _validate_installed_bundle_tree(root: Path, expected_paths: set[str]) -> Non
             if stat.S_ISREG(info.st_mode):
                 files.add(relative)
             elif stat.S_ISDIR(info.st_mode):
+                require(
+                    stat.S_IMODE(info.st_mode) == 0o555,
+                    "installed bundle directory mode mismatch",
+                )
                 directories.add(relative)
             else:
                 require(False, "installed bundle contains special file")

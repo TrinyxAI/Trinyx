@@ -122,8 +122,17 @@ def _legacy_checkout_relative(source: str, legacy_root: Path) -> tuple[Path, Pat
     return legacy_root / relative.parts[0], Path(*relative.parts[1:])
 
 
-def _content_identity(path: Path, allowed_root: Path) -> tuple[str, str]:
-    """Hash a bounded file/tree without following any symlink or special file."""
+def _content_identity(
+    path: Path,
+    allowed_root: Path,
+    *,
+    normalize_owner_write: bool = False,
+) -> tuple[str, str]:
+    """Hash a bounded file/tree without following any symlink or special file.
+
+    Owner-write normalization is reserved for the legacy checkout side so the
+    installed immutable bundle remains strictly mode-authenticated.
+    """
     try:
         require(path.is_absolute() and allowed_root.is_absolute(),
                 "legacy bind content path is not absolute")
@@ -147,6 +156,8 @@ def _content_identity(path: Path, allowed_root: Path) -> tuple[str, str]:
                     "legacy bind content entry limit exceeded")
             metadata = current.lstat()
             mode = stat.S_IMODE(metadata.st_mode)
+            if normalize_owner_write:
+                mode &= ~stat.S_IWUSR
             if stat.S_ISLNK(metadata.st_mode):
                 raise InvariantError("legacy bind content contains a symlink")
             if stat.S_ISREG(metadata.st_mode):
@@ -232,7 +243,9 @@ def legacy_bind_content_evidence(
             require(relative == expected_relative,
                     "legacy bind relative path differs from canonical bundle path")
             current_kind, current_digest = _content_identity(
-                Path(observed["source"]), checkout_root
+                Path(observed["source"]),
+                checkout_root,
+                normalize_owner_write=True,
             )
             expected_kind, expected_digest = _content_identity(expected_path, bundle_root)
             require(current_kind == expected_kind, "legacy bind content type mismatch")

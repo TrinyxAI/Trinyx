@@ -124,7 +124,9 @@ class InvariantTests(unittest.TestCase):
         write_json(bundle_manifest_path, bundle_manifest)
         bundle_root = release / "bundle"
         os.chmod(bundle_root, 0o755)
-        (bundle_root / "unexpected-empty-directory").mkdir()
+        unexpected = bundle_root / "unexpected-empty-directory"
+        unexpected.mkdir()
+        os.chmod(unexpected, 0o555)
         os.chmod(bundle_root, 0o555)
         with self.assertRaisesRegex(InvariantError, "directory tree mismatch"):
             validate_release_directory(release, "paid")

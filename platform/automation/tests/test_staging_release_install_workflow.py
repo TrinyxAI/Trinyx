@@ -14,7 +14,7 @@ DISPATCHER = ROOT / "platform" / "host" / "common" / "staging-deploy.sh"
 INSTALLER = ROOT / "platform" / "install" / "install-release.py"
 SSM_TEMPLATE = ROOT / "platform" / "aws" / "staging" / "deploy-control-plane.json"
 C4 = "c41b17cdabb48f3405ebd8a612477fde76bc5818"
-W11 = "951cdf827db06660cd3889cab98cd9154e51a258"
+W11 = "ec9a71e7302a4fd7f5b60475f0951c157465f3d8"
 
 
 class StagingReleaseInstallWorkflowTests(unittest.TestCase):

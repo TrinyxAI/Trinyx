@@ -73,7 +73,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@951cdf827db06660cd3889cab98cd9154e51a258
     with:
       baseline_run_id: ${{ inputs.baseline_run_id }}
       baseline_artifact_id: ${{ inputs.baseline_artifact_id }}

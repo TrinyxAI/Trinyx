@@ -22,7 +22,7 @@ from pathlib import Path
 import re,sys
 BUILDER="114a2613e8090f034925a1bcf148f055653c3a06"
 CONTROL_PLANE_CODE="04255ddc90a3c820bed71588d49752aa9bf4a9f2"
-PRIVILEGED_WORKFLOW="56bb5b861a448cd6811986eb9f3ee1315331680c"
+PRIVILEGED_WORKFLOW="951cdf827db06660cd3889cab98cd9154e51a258"
 (candidate_wrapper,candidate,ce_wrapper,ce,platform,register_wrapper,qualify_wrapper,
  adopt_wrapper,probe_wrapper,register,qualify,adopt,probe,bridge)=(
     Path(x).read_text(encoding='utf-8') for x in sys.argv[1:]

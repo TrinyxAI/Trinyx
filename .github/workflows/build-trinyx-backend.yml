@@ -148,7 +148,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-oidc-probe-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       role_arn: ${{ inputs.role_arn }}
 
@@ -160,7 +160,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-release-register-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       run_id: ${{ inputs.run_id }}
       artifact_id: ${{ inputs.artifact_id }}
@@ -177,7 +177,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       action: normalization-plan
       baseline_release_id: ${{ inputs.baseline_release_id }}
@@ -193,7 +193,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       action: install
       baseline_release_id: ${{ inputs.baseline_release_id }}
@@ -209,7 +209,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-legacy-adopt-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       action: adopt
       baseline_release_id: ${{ inputs.baseline_release_id }}
@@ -227,7 +227,7 @@ jobs:
       attestations: write
       contents: read
       id-token: write
-    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@a2d225f2a1345636c2e362e2921e4c0bc2b7b8ae
+    uses: TrinyxAI/Trinyx/.github/workflows/staging-qualification-impl.yml@56bb5b861a448cd6811986eb9f3ee1315331680c
     with:
       baseline_run_id: ${{ inputs.baseline_run_id }}
       baseline_artifact_id: ${{ inputs.baseline_artifact_id }}

@@ -246,6 +246,11 @@ def build_desired(role: str, rendered: Path, metadata: dict[str, str]) -> tuple[
                     0o600,
                 ),
                 DesiredFile(
+                    REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/cloud-third-party-images.override.yml",
+                    f"{base}/cloud-third-party-images.override.yml",
+                    0o600,
+                ),
+                DesiredFile(
                     REPO_ROOT / "platform/bootstrap/cloud/staging/rootfs/etc/trinyx/staging/cloud/config/cloud-health-endpoints.json",
                     f"{base}/cloud-health-endpoints.json",
                     0o644,

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from legacy_normalization_plan import (
 )
 from legacy_runtime import SERVICES
 from deploy_engine import ShellAdapter, load_host_plan
-from invariants import InvariantError
+from invariants import InvariantError, environment_config_digest
 from ssm_orchestrator import validate_normalization_protocol
 
 
@@ -643,17 +644,65 @@ class RepositoryNormalizationPreflightTests(unittest.TestCase):
                 raise AssertionError("Docker Compose is required for repository normalization preflight")
             raise unittest.SkipTest("Docker Compose is unavailable")
         cls.compose_version = result.stdout.strip()
+        cls.reconciler = runpy.run_path(
+            str(ROOT / "platform" / "install" / "reconcile-host.py")
+        )
         print(f"NORMALIZATION_REAL_COMPOSE_VERSION={cls.compose_version}")
 
-    @staticmethod
-    def _config_root(role: str) -> Path:
-        return (
-            ROOT / "platform" / "bootstrap" / role / "staging" / "rootfs"
-            / "etc" / "trinyx" / "staging" / role / "config"
-        )
+    def _materialize_reconciled_config(
+        self, role: str, rendered: Path, metadata: dict[str, str], fake_root: Path,
+    ) -> tuple[Path, object]:
+        _, desired_files = self.reconciler["build_desired"](role, rendered, metadata)
+        config_prefix = f"/etc/trinyx/staging/{role}/config"
+        managed = {
+            item.target: item
+            for item in desired_files
+            if item.target == config_prefix or item.target.startswith(config_prefix + "/")
+        }
+        plan_target = f"{config_prefix}/deployment-plan.json"
+        self.assertIn(plan_target, managed)
 
-    def _plan_and_files(self, role: str) -> tuple[object, tuple[Path, ...]]:
-        config_root = self._config_root(role)
+        for item in managed.values():
+            target = fake_root / item.target.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(item.source, target)
+            target.chmod(item.mode)
+
+        config_root = fake_root / config_prefix.lstrip("/")
+        plan = load_host_plan(config_root / "deployment-plan.json", role)
+        referenced_config = {
+            item
+            for item in (*plan.compose_files, *plan.required_files)
+            if item.startswith("config/")
+        }
+        for relative in sorted(referenced_config):
+            target_name = f"{config_prefix}/{relative.removeprefix('config/')}"
+            self.assertIn(
+                target_name,
+                managed,
+                f"{role} deployment plan references unmanaged reconciler input {relative}",
+            )
+            target = fake_root / target_name.lstrip("/")
+            self.assertTrue(target.is_file() and not target.is_symlink())
+
+        if role == "cloud":
+            overlay_target = f"{config_prefix}/cloud-third-party-images.override.yml"
+            overlay = managed[overlay_target]
+            self.assertEqual(
+                (
+                    ROOT / "platform" / "bootstrap" / "cloud" / "staging" / "rootfs"
+                    / "etc" / "trinyx" / "staging" / "cloud" / "config"
+                    / "cloud-third-party-images.override.yml"
+                ).resolve(),
+                overlay.source.resolve(),
+            )
+            self.assertEqual(0o600, overlay.mode)
+
+        return config_root, plan
+
+    def _plan_and_files(
+        self, role: str, config_root: Path,
+    ) -> tuple[object, tuple[Path, ...]]:
         plan = load_host_plan(config_root / "deployment-plan.json", role)
         paths: list[Path] = []
         for item in plan.compose_files:
@@ -713,12 +762,17 @@ class RepositoryNormalizationPreflightTests(unittest.TestCase):
 
     @staticmethod
     def _synthetic_runtime(
-        role: str, model: dict, hashes: dict[str, str],
+        role: str,
+        model: dict,
+        hashes: dict[str, str],
+        configured_images: dict[str, str] | None = None,
     ) -> tuple[list[dict], list[dict]]:
         containers: list[dict] = []
         images: list[dict] = []
+        configured_images = configured_images or {}
         for index, service in enumerate(sorted(SERVICES[role]), 1):
             image = model["services"][service]["image"]
+            configured_image = configured_images.get(service, image)
             image_id = "sha256:" + f"{index + 1000:064x}"
             mounts = [
                 {
@@ -734,7 +788,7 @@ class RepositoryNormalizationPreflightTests(unittest.TestCase):
                 "Id": f"{index + 2000:064x}",
                 "Image": image_id,
                 "Config": {
-                    "Image": image,
+                    "Image": configured_image,
                     "Labels": {
                         "com.docker.compose.project": f"trinyx-{role}-staging",
                         "com.docker.compose.service": service,
@@ -763,82 +817,226 @@ class RepositoryNormalizationPreflightTests(unittest.TestCase):
         )
 
     def test_real_paid_and_cloud_normalization_preflight_contracts(self) -> None:
-        for role, expected_count in (("paid", 8), ("cloud", 20)):
-            with self.subTest(role=role):
-                plan, paths = self._plan_and_files(role)
-                environment, expected_images = self._compose_environment(role, plan, paths)
-                adapter = RepositoryComposeAdapter(paths)
-                with mock.patch.dict(os.environ, environment, clear=False):
-                    model = adapter.render_model(ROOT, ROOT, plan)
-                    source_hashes = adapter.compose_config_hashes(ROOT, ROOT, plan)
-                roundtrip_hashes = adapter.compose_model_hashes(model, plan.services)
+        third_party_inventory = json.loads(
+            (ROOT / "platform" / "release" / "third-party-images.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            temp_root = Path(temporary)
+            fake_root = temp_root / "host"
+            fake_root.mkdir()
+            rendered = temp_root / "rendered"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "platform" / "render" / "render-environment.py"),
+                    "--inventory",
+                    str(ROOT / "platform" / "environments" / "staging.env"),
+                    "--out",
+                    str(rendered),
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            metadata = self.reconciler["parse_env"](rendered / "metadata.env")
 
-                self.assertEqual(expected_count, len(plan.services))
-                self.assertEqual(set(SERVICES[role]), set(plan.services))
-                self.assertEqual(set(plan.services), set(model["services"]))
-                self.assertEqual(set(plan.services), set(source_hashes))
-                self.assertEqual(source_hashes, roundtrip_hashes)
-                for service in plan.services:
-                    image = model["services"][service].get("image")
-                    self.assertEqual(expected_images[service], image)
-                    self.assertRegex(image, DIGEST_ONLY_IMAGE_RE)
+            for role, expected_count in (("paid", 8), ("cloud", 20)):
+                with self.subTest(role=role):
+                    config_root, reconciled_plan = self._materialize_reconciled_config(
+                        role, rendered, metadata, fake_root
+                    )
+                    plan, paths = self._plan_and_files(role, config_root)
+                    self.assertEqual(reconciled_plan, plan)
+                    environment, expected_images = self._compose_environment(role, plan, paths)
+                    adapter = RepositoryComposeAdapter(paths)
+                    with mock.patch.dict(os.environ, environment, clear=False):
+                        model = adapter.render_model(ROOT, ROOT, plan)
+                        source_hashes = adapter.compose_config_hashes(ROOT, ROOT, plan)
+                    roundtrip_hashes = adapter.compose_model_hashes(model, plan.services)
 
-                if role == "paid":
+                    self.assertEqual(expected_count, len(plan.services))
+                    self.assertEqual(set(SERVICES[role]), set(plan.services))
+                    self.assertEqual(set(plan.services), set(model["services"]))
+                    self.assertEqual(set(plan.services), set(source_hashes))
+                    self.assertEqual(source_hashes, roundtrip_hashes)
+                    for service in plan.services:
+                        image = model["services"][service].get("image")
+                        self.assertEqual(expected_images[service], image)
+                        self.assertRegex(image, DIGEST_ONLY_IMAGE_RE)
+
+                    if role == "paid":
+                        self.assertEqual(
+                            environment["TRINYX_PAID_EDGE_IMAGE"],
+                            model["services"]["paid-edge"]["image"],
+                        )
+                        self.assertNotEqual(
+                            "caddy:2.11.4-alpine",
+                            model["services"]["paid-edge"]["image"],
+                        )
+
+                    role_base = config_root.parent
+                    config_digest = environment_config_digest(role_base, role)
+                    self.assertRegex(config_digest, re.compile(r"^sha256:[0-9a-f]{64}$"))
+                    if role == "cloud":
+                        overlay = config_root / "cloud-third-party-images.override.yml"
+                        original = overlay.read_bytes()
+                        overlay.write_bytes(original + b"\n# digest-contract\n")
+                        self.assertNotEqual(
+                            config_digest,
+                            environment_config_digest(role_base, role),
+                        )
+                        overlay.write_bytes(original)
+                        self.assertEqual(
+                            config_digest,
+                            environment_config_digest(role_base, role),
+                        )
+
+                    containers, image_inspections = self._synthetic_runtime(
+                        role, model, source_hashes
+                    )
+                    record = build_normalization_plan(
+                        role,
+                        "rel-v1-" + "a" * 32,
+                        containers,
+                        image_inspections,
+                        model,
+                        source_hashes,
+                        source_hashes,
+                        empty_bind_evidence(role),
+                        self.compose_version,
+                        "2026-09-05T00:00:00Z",
+                        bundle_digest="sha256:" + "b" * 64,
+                        deployment_id="dep-" + "c" * 32,
+                        environment_config_revision="config-contract",
+                        environment_config_digest_value=config_digest,
+                        control_plane_commit="e" * 40,
+                    )
+                    protocol = render_ssm_protocol(record)
+                    result = validate_normalization_protocol(
+                        protocol,
+                        role,
+                        "rel-v1-" + "a" * 32,
+                        "sha256:" + "b" * 64,
+                        "dep-" + "c" * 32,
+                        "config-contract",
+                        "e" * 40,
+                    )
+                    self.assertEqual(expected_count, result["serviceCount"])
+                    self.assertEqual(0, result["recreateCount"])
+                    self.assertEqual("review", result["compatibility"])
+                    self.assertEqual("matched", result["images"])
+                    lines = protocol.rstrip("\n").split("\n")
                     self.assertEqual(
-                        environment["TRINYX_PAID_EDGE_IMAGE"],
-                        model["services"]["paid-edge"]["image"],
+                        expected_count,
+                        sum(line.startswith("NORMALIZATION ") for line in lines),
                     )
-                    self.assertNotEqual(
-                        "caddy:2.11.4-alpine",
-                        model["services"]["paid-edge"]["image"],
+                    self.assertTrue(
+                        lines[-1].startswith("LEGACY_NORMALIZATION_PLAN_COMPLETE ")
                     )
 
-                containers, image_inspections = self._synthetic_runtime(
-                    role, model, source_hashes
-                )
-                record = build_normalization_plan(
-                    role,
-                    "rel-v1-" + "a" * 32,
-                    containers,
-                    image_inspections,
-                    model,
-                    source_hashes,
-                    source_hashes,
-                    empty_bind_evidence(role),
-                    self.compose_version,
-                    "2026-09-05T00:00:00Z",
-                    bundle_digest="sha256:" + "b" * 64,
-                    deployment_id="dep-" + "c" * 32,
-                    environment_config_revision="config-contract",
-                    environment_config_digest_value="sha256:" + "d" * 64,
-                    control_plane_commit="e" * 40,
-                )
-                protocol = render_ssm_protocol(record)
-                result = validate_normalization_protocol(
-                    protocol,
-                    role,
-                    "rel-v1-" + "a" * 32,
-                    "sha256:" + "b" * 64,
-                    "dep-" + "c" * 32,
-                    "config-contract",
-                    "e" * 40,
-                )
-                self.assertEqual(expected_count, result["serviceCount"])
-                self.assertEqual(0, result["recreateCount"])
-                self.assertEqual("review", result["compatibility"])
-                self.assertEqual("matched", result["images"])
-                lines = protocol.rstrip("\n").split("\n")
-                self.assertEqual(
-                    expected_count,
-                    sum(line.startswith("NORMALIZATION ") for line in lines),
-                )
-                self.assertTrue(lines[-1].startswith("LEGACY_NORMALIZATION_PLAN_COMPLETE "))
-                print(
-                    f"NORMALIZATION_REPOSITORY_PREFLIGHT_OK role={role} "
-                    f"services={expected_count} hashes={len(source_hashes)} "
-                    f"roundtrip=match protocol_bytes={len(protocol.encode('utf-8'))}"
-                )
+                    legacy_services = {
+                        item["service"]
+                        for item in third_party_inventory["images"]
+                        if item["role"] == role
+                    }
+                    self.assertEqual(6, len(legacy_services))
+                    legacy_configured = {
+                        service: expected_images[service].split("@", 1)[0] + ":legacy"
+                        for service in legacy_services
+                    }
+                    legacy_containers, legacy_images = self._synthetic_runtime(
+                        role,
+                        model,
+                        source_hashes,
+                        configured_images=legacy_configured,
+                    )
+                    explained_model = explained_compose_model(
+                        role,
+                        legacy_containers,
+                        model,
+                        empty_bind_evidence(role),
+                    )
+                    explained_hashes = adapter.compose_model_hashes(
+                        explained_model, plan.services
+                    )
+                    for container in legacy_containers:
+                        service = container["Config"]["Labels"][
+                            "com.docker.compose.service"
+                        ]
+                        container["Config"]["Labels"][
+                            "com.docker.compose.config-hash"
+                        ] = explained_hashes[service]
 
+                    legacy_record = build_normalization_plan(
+                        role,
+                        "rel-v1-" + "a" * 32,
+                        legacy_containers,
+                        legacy_images,
+                        model,
+                        source_hashes,
+                        explained_hashes,
+                        empty_bind_evidence(role),
+                        self.compose_version,
+                        "2026-09-05T00:00:00Z",
+                        bundle_digest="sha256:" + "b" * 64,
+                        deployment_id="dep-" + "c" * 32,
+                        environment_config_revision="config-contract",
+                        environment_config_digest_value=config_digest,
+                        control_plane_commit="e" * 40,
+                    )
+                    self.assertEqual(
+                        "QUALIFIED_EXPLAINED_DRIFT",
+                        legacy_record["composeDriftCompatibility"],
+                    )
+                    self.assertEqual(
+                        6, legacy_record["composeExplainedDriftCount"]
+                    )
+                    self.assertEqual(0, legacy_record["composeUnexplainedDriftCount"])
+                    self.assertEqual("MATCHED", legacy_record["imageCompatibility"])
+                    for service in legacy_services:
+                        item = legacy_record["services"][service]
+                        self.assertEqual(
+                            legacy_configured[service], item["currentConfiguredImage"]
+                        )
+                        self.assertTrue(item["imageContentMatches"])
+                        self.assertTrue(item["imageObjectVerified"])
+                        self.assertFalse(item["configuredImageCanonical"])
+                        self.assertTrue(item["recreateRequired"])
+                        self.assertEqual(
+                            [
+                                "IMAGE_REFERENCE_NON_CANONICAL",
+                                "COMPOSE_CONFIG_DRIFT_EXPLAINED",
+                            ],
+                            item["reasons"],
+                        )
+
+                    legacy_protocol = render_ssm_protocol(legacy_record)
+                    legacy_result = validate_normalization_protocol(
+                        legacy_protocol,
+                        role,
+                        "rel-v1-" + "a" * 32,
+                        "sha256:" + "b" * 64,
+                        "dep-" + "c" * 32,
+                        "config-contract",
+                        "e" * 40,
+                    )
+                    self.assertEqual(expected_count, legacy_result["serviceCount"])
+                    self.assertEqual(6, legacy_result["recreateCount"])
+                    self.assertEqual("review", legacy_result["compatibility"])
+                    self.assertEqual("matched", legacy_result["images"])
+                    self.assertTrue(
+                        legacy_protocol.rstrip("\n").split("\n")[-1].startswith(
+                            "LEGACY_NORMALIZATION_PLAN_COMPLETE "
+                        )
+                    )
+                    print(
+                        f"NORMALIZATION_REPOSITORY_PREFLIGHT_OK role={role} "
+                        f"services={expected_count} hashes={len(source_hashes)} "
+                        f"roundtrip=match legacy_tags={len(legacy_services)} "
+                        f"protocol_bytes={len(protocol.encode('utf-8'))} "
+                        f"legacy_protocol_bytes={len(legacy_protocol.encode('utf-8'))}"
+                    )
 
 
 if __name__ == "__main__":

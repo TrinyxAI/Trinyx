@@ -692,6 +692,8 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
                 expected.parent.mkdir(parents=True, exist_ok=True)
                 current.write_text(f"approved:{service}\n")
                 expected.write_text(f"approved:{service}\n")
+                current.chmod(0o644)
+                expected.chmod(0o444)
                 containers[position]["Mounts"][0]["Source"] = str(current)
                 model["services"][service]["volumes"][0]["source"] = str(expected)
                 explained[service] = explained_hash(service)

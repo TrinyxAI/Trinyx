@@ -117,6 +117,10 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
             expected.parent.mkdir(parents=True)
             current.write_text("approved legacy content\n")
             expected.write_text("approved legacy content\n")
+        for path in (current, *current.rglob("*")):
+            path.chmod(0o755 if path.is_dir() else 0o644)
+        for path in (expected, *expected.rglob("*")):
+            path.chmod(0o555 if path.is_dir() else 0o444)
         containers[0]["Mounts"][0]["Source"] = str(current)
         model["services"][service]["volumes"][0]["source"] = str(expected)
         evidence = legacy_bind_content_evidence(
@@ -270,6 +274,26 @@ class LegacyNormalizationPlanTests(unittest.TestCase):
                 legacy_root=legacy_root,
             )
             self.assertTrue(evidence[service]["verified"])
+
+    def test_owner_writable_expected_file_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root)
+            containers, model, hashes, _, service, legacy_root, _, expected = values
+            expected.chmod(0o644)
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
+
+    def test_owner_writable_expected_directory_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            values = self.bind_fixture(root, directory=True)
+            containers, model, hashes, _, service, legacy_root, _, expected = values
+            expected.chmod(0o755)
+            self.assert_bind_content_mismatch(
+                root, containers, model, hashes, service, legacy_root,
+            )
 
     def test_non_hardening_permission_changes_fail_closed(self) -> None:
         for current_mode, expected_mode in (

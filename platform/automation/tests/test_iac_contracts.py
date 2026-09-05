@@ -51,7 +51,7 @@ class IacContractTests(unittest.TestCase):
         template = self.load("platform/aws/staging/release-registry.json")
         bucket = template["Resources"]["ReleaseRegistryBucket"]
         properties = bucket["Properties"]
-        self.assertEqual("56bb5b861a448cd6811986eb9f3ee1315331680c", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("951cdf827db06660cd3889cab98cd9154e51a258", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         self.assertEqual("Retain", bucket["DeletionPolicy"])
         self.assertNotIn("BucketOwnershipControls", properties)
@@ -101,7 +101,7 @@ class IacContractTests(unittest.TestCase):
 
     def test_deploy_role_and_fixed_document_boundaries(self) -> None:
         template = self.load("platform/aws/staging/deploy-control-plane.json")
-        self.assertEqual("56bb5b861a448cd6811986eb9f3ee1315331680c", template["Parameters"]["PlatformWorkflowRef"]["Default"])
+        self.assertEqual("951cdf827db06660cd3889cab98cd9154e51a258", template["Parameters"]["PlatformWorkflowRef"]["Default"])
         self.assertEqual("^[0-9a-f]{40}$", template["Parameters"]["PlatformWorkflowRef"]["AllowedPattern"])
         role = json.dumps(template["Resources"]["StagingDeployRole"], sort_keys=True)
         self.assertIn("environment:staging", role)

@@ -14,7 +14,7 @@ DISPATCHER = ROOT / "platform" / "host" / "common" / "staging-deploy.sh"
 INSTALLER = ROOT / "platform" / "install" / "install-release.py"
 SSM_TEMPLATE = ROOT / "platform" / "aws" / "staging" / "deploy-control-plane.json"
 C4 = "04255ddc90a3c820bed71588d49752aa9bf4a9f2"
-W10 = "56bb5b861a448cd6811986eb9f3ee1315331680c"
+W11 = "951cdf827db06660cd3889cab98cd9154e51a258"
 
 
 class StagingReleaseInstallWorkflowTests(unittest.TestCase):
@@ -103,7 +103,7 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         self.assertIn("inputs.operation == 'staging-release-install'", block)
         self.assertIn("github.event_name == 'workflow_dispatch'", block)
         self.assertIn("github.ref == 'refs/heads/codex/platform-release-automation'", block)
-        self.assertIn(f"staging-legacy-adopt-impl.yml@{W10}", block)
+        self.assertIn(f"staging-legacy-adopt-impl.yml@{W11}", block)
         self.assertIn("action: install", block)
         with_block = block.split("\n    with:\n", 1)[1]
         self.assertEqual(
@@ -128,7 +128,7 @@ class StagingReleaseInstallWorkflowTests(unittest.TestCase):
         self.assertIn("          - install", self.wrapper)
         self.assertIn("          - normalization-plan", self.wrapper)
         self.assertIn("          - adopt", self.wrapper)
-        self.assertIn(f"staging-legacy-adopt-impl.yml@{W10}", self.wrapper)
+        self.assertIn(f"staging-legacy-adopt-impl.yml@{W11}", self.wrapper)
         self.assertNotIn("previous_cloud_release", self.wrapper)
         self.assertNotIn("previous_paid_release", self.wrapper)
 
